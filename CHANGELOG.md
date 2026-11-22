@@ -6,58 +6,48 @@
 
 ### 5.1.2
 
-Maintenance release: leaner Docker images that share layers, stricter SQL checks for non-administrators, and console, web terminal and sync fixes.
+Maintenance release: leaner Docker images that share layers, stricter non-admin SQL checks, faster API reads on large SQL instances, and console, web terminal, and sync fixes.
 
 #### Before upgrading from 5.1.1
 
-- **Non-administrator SQL is checked more strictly.** Through the API and MCP, a query or pipe definition from a caller who is not an administrator is now refused when any SQL dialect would read it as more than one statement or as a write: a `;` inside a dollar-quoted string (`$$a;b$$`), or a mutating keyword after `#` or after `--` with no space. Administrators and local `mrsm` commands are unaffected.
-- **Docker images run as UID and GID 1000.** This was already the default; images built by the release workflow no longer inherit the build host's IDs.
-- **A standalone SQL `port` must be an integer.** Values like `abc`, `true` and `5432.0` are refused. When you supply a connection URI, Meerschaum uses the port from that URI.
+- **Non-admin SQL checks are stricter.** Non-admin queries and pipe definitions over the API or MCP are now refused if *any* SQL dialect would parse them as multi-statement or mutating (such as `;` inside `$$...$$`, or a write keyword after `#` or space-less `--`). Admins and local `mrsm` commands are unaffected.
+- **Docker images always run as `1000:1000`.** Release images no longer inherit the build host's UID/GID.
+- **Standalone SQL `port` values must be integers.** Values like `abc`, `true`, or `5432.0` are refused instead of silently falling back to a default port. If you set a `uri`, Meerschaum uses the URI's port.
 
 #### Highlights & Fixes
 
-- **Smaller downloads when updating Docker images.**  
-  The `full`, `rust-full`, `slim` and `rust` images now share their common layers (the `mrsm` binary, the Python wheel, the plugin compiler), and operating-system layers stay identical between patch releases, so `docker pull` fetches only what changed.
+- **Leaner Docker images with shared layers.**  
+  `full`, `rust-full`, `slim`, and `rust` now share common layers (`mrsm`, the Python wheel, and the Rust compiler snapshot) and keep OS layers stable across patch releases, so `docker pull` downloads only what changed.
+
+  ```bash
+  docker pull bmeares/meerschaum:5.1.2-full
+  ```
 
 - **Smaller `mrsm` binary.**  
-  Release binaries and wheels are stripped of symbols and no longer build unused Arrow and Polars features. A panic backtrace keeps its message and location; stack frames show addresses instead of function names.
+  Release binaries and wheels drop unused Arrow/Polars features and strip symbol tables (~111 MB vs. ~135 MB). Panic backtraces still show the error message and source location.
 
-- **Internal tables stay unreachable through SQL comments.**  
-  The API and MCP SQL checks read a query the way each database flavor does, so a table name hidden behind `#`, `--` or a nested `/* */` comment is refused on every flavor.
+- **Faster API reads on large SQL instances.**  
+  Pipe data and CSV requests now look up a single pipe by key instead of scanning the full catalog on SQL and Valkey instances.
 
-- **Console requests to the API ignore proxies and redirects.**  
-  The Dash console's calls to its own API server no longer honor `HTTP_PROXY` or follow redirects, so a session's credentials are only ever sent to that server.
+- **Hardened SQL comment checks.**  
+  API and MCP SQL validation checks every dialect's comment syntax so internal tables hidden behind `#`, `--`, or nested `/* */` comments are blocked everywhere.
 
-- **Job logs keep streaming past the session token's lifetime.**  
-  A log stream opened in the console renews its authorization while it runs, and ends when the session's credential is rotated or revoked.
+- **Console & web terminal fixes.**  
+  - Console calls to the API ignore `HTTP_PROXY` and redirects so session credentials stay local.
+  - Job log streams renew their session authorization while open and stop immediately if credentials are rotated or revoked.
+  - The **Users & Teams** page follows the selected team in the team switcher (choose **All teams (Admin)** to manage everyone).
+  - Isolated team permissions are computed in one place across all console pages.
+  - Web terminal fixes: a refused window no longer blocks future windows, API-only panes set `TERM`, and closed sessions stop reconnecting.
 
-- **Web terminal fixes.**  
-  A refused new window no longer blocks later ones, panes on API-only hosts get `TERM`, and a closed session tells the browser to stop instead of reconnecting.
+- **Sync, job, and database fixes.**  
+  - **Remote action results:** Log streams wait up to 2 seconds for a finished job's supervisor to save its result (and clients fall back to reading the saved result), eliminating spurious `No result available.` replies on busy hosts.
+  - **Startup pauses:** Pausing a job while it is still starting keeps its supervisor active so it can still stop cleanly when the executor exits.
+  - **SQLite / GeoPackage schema reload:** Pooled connections reload table schemas after a sync adds columns, preventing newly added columns from reading back with literal quotes.
+  - **In-place syncs:** A pipe whose source is the engine's home database but whose instance is elsewhere no longer runs in-place on the source database.
+  - **Engine metrics & Oracle:** Dropped sync metrics now log a rate-limited warning instead of vanishing silently, and Oracle instances keep internal table readiness across index DDL.
 
-- **The Users page follows the acting team.**  
-  The Users & Teams page follows the selected team. Choose **All teams (Admin)** to return to global administration.
-
-- **One console permission check.**  
-  An isolated team member's permissions are computed in one place, so the result no longer depends on which console page loaded first.
-
-- **Faster API reads on large SQL instances.** Data and CSV requests look up the requested pipe's registration by key. The registration check took 3.6 ms per request with 2,000 pipes on SQLite, down from 108 ms.
-
-- **In-place syncs stay on the pipe's instance.**  
-  A pipe whose source is the engine's home database but whose instance is another database no longer runs its sync inside the source database.
-
-- **Remote actions report their result on a busy host.**  
-  An action sent to an API instance (`mrsm api main show version`, `APIConnector.do_action()`) or a job watched in the console could end with `No result available.` although the job had succeeded: its log stream read the result before the job's supervisor had saved it. The stream now waits up to two seconds for the result, and the client reads the saved result when an older server sends none.
-
-- **Pausing a job waits for its worker.** If you pause a job while it is starting, its supervisor stays active and can still stop the job when the executor exits.
-
-- **SQLite and GeoPackage reads see a column a sync just added.**  
-  After a sync added a column, the next read on another pooled connection could return it named `"column"`, quotes included, so the column looked missing. Pooled connections now reload a changed table layout before they are used.
-
-- **Dropped engine metrics are reported.**  
-  A sync metric that cannot be written within its time budget now logs a warning (at most once a minute) instead of disappearing, and Oracle instances no longer lose their internal tables' ready state after index DDL.
-
-- **For contributors.**  
-  Rust integration tests build as 45 suite binaries instead of 411, and 47 of the 51 Rust files over 1,700 lines are split into modules named for what they own. `scripts/check_architecture.py` enforces crate layering, test wiring and file paths cited by docs in CI, and `GLOSSARY.md`, `docs/adr/` and `CODING_STANDARDS.md` describe the codebase's terms, decisions and review rules.
+- **Switched to released `sqlx 0.9.1` & contributor cleanups.**  
+  Dropped the temporary `sqlx` git patch in `Cargo.toml`, consolidated Rust integration tests from 411 binaries down to 45 suites, split oversize Rust modules, and added `scripts/check_architecture.py`, `GLOSSARY.md`, `CODING_STANDARDS.md`, and `docs/adr/`.
 
 ### 5.1.1
 

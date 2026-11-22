@@ -3499,9 +3499,11 @@ Source: https://meerschaum.io/reference/pipelines/continuous/
 
 # ♾️ Continuous Mode and Streams
 
+Keep pipes syncing continuously with `--loop` (polling on an interval) or `--listen` (push-based streaming sources like MQTT, Kafka, AMQP, or webhooks).
+
 ## 🔁 `--loop`
 
-`mrsm sync pipes --loop` keeps the engine running. On a flat selection it behaves **exactly as v4's laps did**: every selected pipe syncs, then the process sleeps `--min-seconds N` *after the lap ends*, then the next lap starts. The `-c` / `-m` / `-l` / `-t` filters, `-l _negation` and `-w 1` work as before, so existing jobs need no change:
+`mrsm sync pipes --loop` runs each lap, sleeps `--min-seconds N` after the lap finishes, and repeats:
 
 ```bash
 mrsm sync pipes -c plugin:acme -m readings --loop --min-seconds 300 -w 1 -d --name acme-readings
@@ -3515,40 +3517,40 @@ mrsm sync pipes -t nightly -l _staging -s 'daily starting 02:00' -d
  ✅ Finished syncing Pipe('sql:src', 'raw', instance='sql:local'):
 ```
 
-After an error in a lap the loop waits the v4 error cooldown of `2 × (N + 1)` seconds before retrying. `--engine laps` is gone; `--loop` is the only long-running mode.
+- **Graph-aware laps:** Add `--parents` or `--children` (or run a saved Pipeline with `mrsm sync pipelines daily --loop` / `mrsm start pipeline daily`) so unchanged children are skipped automatically and every lap is recorded in [run history](/reference/pipelines/state/#run-history).
+- **Error cooldown:** After a failed lap, the loop backs off by `2 × (N + 1)` seconds before retrying.
+- **Stopping:** Stop background loops with `mrsm stop jobs <name>` or press Ctrl-C in the foreground.
 
-Add `--parents` / `--children` and every lap becomes an engine run: children only sync when a parent actually changed (a skipped child costs no query against its source). The engine records each lap in the [run history](/reference/pipelines/state/#run-history).
+!!! tip "Give root pipes their own cadence"
+    Add `schedule` to a root pipe's parameters (using the same syntax as `--schedule`, such as `every 6 hours` or `daily starting 03:00`). Under `--loop`, that root only syncs when due while other pipes keep syncing every lap; children with parents in the run always follow parent updates instead of their own schedule.
 
-A saved Pipeline loops the same way: `mrsm sync pipelines daily --loop` (what [`start pipeline daily`](/reference/pipelines/#running-a-pipeline-in-the-background) runs in the background) is a graph run of the Pipeline's members on every lap, each run named after the Pipeline, and an edit of the Pipeline takes effect within half a minute.
-
-Stop a looping job with `mrsm stop jobs` or Ctrl-C.
-
-!!! note "Cadence per root"
-
-    `--min-seconds` sets the lap cadence of the whole selection. A root node (a pipe with no parent in the selection, or any pipe in a flat selection) can have its own cadence in `parameters['schedule']`, using the same grammar as `--schedule` / `-s` (`every 6 hours`, `daily starting 03:00`, ...). With `--loop`, such a pipe only syncs when its schedule is due: the other pipes keep syncing every lap, a lap in which nothing is due waits for the next fire time, and the sleep between laps is shortened to the next fire time when that is sooner than `--min-seconds`. A schedule that does not parse is ignored with a warning. In a run with `--parents` or `--children`, a pipe that has parents in the run syncs when its parents have new data and does not follow its own schedule: the loop warns about it once when it starts, naming the pipe, and `plan pipes` lists the same warning under the plan. `--schedule` itself keeps its v4 meaning: it runs the whole action on that schedule.
+    ```yaml
+    # In a root pipe's parameters
+    schedule: "every 6 hours"
+    ```
 
 ## 📡 Streaming Sources
 
-Some sources push data continuously (MQTT, Kafka, AMQP, webhooks) instead of being fetched over a bounded window. They are a distinct kind of node.
+Push-based sources (MQTT, Kafka, AMQP, webhooks) land raw rows in their own pipe while downstream pipes read bounded windows from it like any other parent.
 
-**Ingestion stays separate from transforms.** A stream source lands raw rows in its own pipe. Downstream pipes read bounded windows from it like any other parent.
-
-Run them with `--listen`:
+Start a streaming source with `--listen`:
 
 ```bash
 mrsm sync pipes -c plugin:mqtt -m sensors --listen -d --name mqtt-sensors
 ```
 
-Without `--listen`, a stream source is never run by `sync pipes --parents`: it gets the planner action `observe`, so reading its watermark and ledger is all that happens.
+Without `--listen`, `sync pipes --parents` treats a streaming source as `observe` (checks its watermark and ledger without starting a listener).
 
-### Two ways to write a stream connector
+### Writing a stream connector
 
-- **`IS_STREAMING = True` with `subscribe(pipe, sink)`** (recommended). The engine owns the micro-batching, acknowledgement and restarts. See the [migration guide](/reference/migrating-to-v5/#plugin-authors) for the plugin side. Rust plugins use the same contract over Arrow streams.
-- **The v4 pattern**: a `sync()` that subscribes and returns immediately, while callbacks call `pipe.sync()`. Keep your existing plugin as is. Under `--listen` the engine keeps the worker that ran `sync()` alive and forwards each callback `pipe.sync()` to the native sync path, supervising it like a `subscribe` stream. Every such `pipe.sync()` counts as a **flush**: the engine writes its ledger entry before the commit and emits a `stream_flushed` event with trigger `callback`, so the stream's children are triggered exactly as for a `subscribe` stream (see below). A callback that syncs a pipe outside the selection's graph is an ordinary bare sync. (The old `--loop --min-seconds 144000000` workaround still works.)
+There are two ways to build a streaming plugin:
+
+1. **`IS_STREAMING = True` + `subscribe(pipe, sink)` (recommended):** The engine manages micro-batching, commit-then-ack, and restarts. Rust plugins use the same contract over Arrow streams.
+2. **Legacy `sync()` callbacks (v4 compatible):** Keep existing plugins that subscribe inside `sync()` and call `pipe.sync()` from callbacks. Under `--listen`, the engine keeps the worker alive, tracks each callback sync as a flush, and triggers downstream children automatically.
 
 ### Micro-batching
 
-The engine's `sink` buffers rows and flushes on whichever trigger fires first. Configure it per pipe:
+The engine buffers incoming rows and flushes as soon as **any** threshold triggers. Configure `stream` in the pipe's parameters:
 
 ```yaml
 stream:
@@ -3558,26 +3560,29 @@ stream:
   max_bytes: 8388608
 ```
 
-| Key | Default | Purpose |
+| Key | Default | Triggers a flush when… |
 |---|---|---|
-| `idle_ms` | `250` | No message for this long: a burst ended, flush now. `auto` derives it from the moving average of message gaps, bounded to `[50 ms, max_latency_ms]` |
-| `max_latency_ms` | `2000` | Age of the oldest buffered row; limits staleness, and loss for sources that cannot acknowledge |
-| `max_rows` | `5000` | Caps memory and transaction size |
-| `max_bytes` | 8 MB | Likewise |
+| `idle_ms` | `250` | No message arrives for this long (`auto` adapts between `50 ms` and `max_latency_ms`). |
+| `max_latency_ms` | `2000` | The oldest buffered row reaches this age. |
+| `max_rows` | `5000` | Buffer reaches this many rows. |
+| `max_bytes` | `8 MB` | Buffer reaches this byte size. |
 
-Each flush performs one sync, writes one combined ledger entry per affected time chunk *before* committing, and emits a `stream_flushed` event with the row count, byte count, trigger, the smallest and largest datetime of the rows it changed (`begin`, `end`) and its `inserted` / `updated` / `upserted` counts. A v4-pattern connector's flushes have trigger `callback`, `bytes` 0 (the engine never sees the message size) and also report failures (`success: false` with the sync's `message`); a failed flush never triggers children.
+### Acknowledge after commit & supervision
 
-### Acknowledge after commit
-
-The sink's contract is that `flush()` commits, and only then does the source's acknowledgement run (MQTT QoS 1 or 2 with a persistent session and manual acknowledgement, Kafka offset commits, AMQP `basic.ack`, webhooks answering after the commit). A crash therefore redelivers instead of losing rows, and redelivered messages sync with `check_existing=True` even when the stream otherwise skips it. On a graceful stop the engine flushes and acknowledges before exiting. Sources that cannot acknowledge lose at most one `max_latency_ms` window on a crash.
-
-### Supervision
-
-If the stream stops, the engine restarts it with backoff and emits `stream_restarted` with the error. Throughput and restarts appear on the stream's lane in the [Gantt view](/reference/pipelines/visualization/).
+- **At-least-once delivery:** `sink.flush()` commits to the target database *before* acknowledging the broker (MQTT QoS 1/2, Kafka offset, AMQP `basic.ack`, or webhook response). Redelivered rows sync with `check_existing=True` so duplicates are filtered out.
+- **Automatic restarts:** If a stream disconnects or errors, the engine restarts it with backoff and logs throughput and restarts in the [Gantt view](/reference/pipelines/visualization/).
 
 ### Children of a stream
 
-In continuous mode a child of a stream source runs when the source flushes, rate-limited. Flushes that arrive while a child run is pending are coalesced into one run. The limit is the child's own `min_seconds`, else `system.engine.debounce_seconds`, else the loop's `--min-seconds`. Late or backloaded data produces ledger entries for historical chunks, and the children backfill exactly those chunks.
+In continuous mode, downstream children trigger whenever their streaming parent flushes, rate-limited so rapid bursts coalesce into a single child run.
+
+Rate-limit precedence (first set wins):
+
+1. The child pipe's `min_seconds` parameter
+2. `system.engine.debounce_seconds`
+3. The loop's `--min-seconds`
+
+Late-arriving messages write historical dirty ranges to the ledger so children backfill the exact affected windows.
 
 
 ---
@@ -6302,11 +6307,24 @@ Source: https://meerschaum.io/reference/api-instance/permissions/
 
 # 🛡️ Permissions and Rate Limits
 
-An API server controls three layers under `api:permissions` (`mrsm edit config api`): enabled route groups, authentication and [scopes](/reference/api-instance/tokens/#scopes), and rate limits.
+Control who can reach your API server and what they can run under `api:permissions` (`mrsm edit config api`):
+
+1. **Route groups** — turn entire surfaces on or off (`--public`, `allowlist`, `disabled`).
+2. **Roles & scopes** — control per-user and per-token permissions ([Tokens](/reference/api-instance/tokens/#scopes)).
+3. **Rate & size limits** — throttle abusive clients and cap request payloads.
 
 ## Route groups
 
-Disabled core groups return `404` and are never proxied to plugins.
+Disabled core groups return `404` and are never proxied to plugins:
+
+```yaml
+# mrsm edit config api
+api:
+  permissions:
+    routes:
+      allowlist: ['*']        # Glob patterns to serve (omit for all)
+      disabled: ['actions']   # Always disabled (including `login`)
+```
 
 | Group | Routes |
 |---|---|
@@ -6318,72 +6336,61 @@ Disabled core groups return `404` and are never proxied to plugins.
 | `connectors` | `/connectors` |
 | `users`, `tokens`, `plugins` | `/users/*`, `/teams/*`, `/tokens/*`, `/plugins/*` |
 | `version` | `/version`, `/version/mrsm` |
-| `misc` | `/healthcheck`, `/info`, `/chaining`, `/favicon.ico` (`--debug`: `/id`) |
+| `misc` | `/healthcheck`, `/info`, `/chaining`, `/favicon.ico` |
 | `index` | `/` (redirect) |
 | `mcp` | `/mcp` ([MCP server](/reference/mcp/)) |
 | `dash` | Web console pages |
 
-`/login` stays enabled unless explicitly disabled. `/docs`, `/redoc`, `/openapi.json`, the web terminal, and plugin routes are outside core groups. All checks match the URL-decoded path (so `/%64ocs` matches `/docs`).
-
-```yaml
-api:
-  permissions:
-    routes:
-      allowlist: ['*']          # Glob patterns to serve (null/omitted: all)
-      disabled: ['actions']     # Always disabled (`login` included)
-```
+`/login` stays enabled unless explicitly disabled; `/docs`, `/redoc`, `/openapi.json`, the web terminal, and plugin routes live outside core groups.
 
 ## The public preset
 
-To expose only plugin routes and plugin pages (such as a public dashboard), set the public preset or pass `mrsm start api --public`:
+To expose **only** your plugin routes and public web pages (such as a public dashboard), start with `--public` or set `preset: public`:
 
-```yaml
-api:
-  permissions:
-    preset: public
-```
+=== "CLI"
+    ```bash
+    mrsm start api --public
+    ```
 
-This serves only `/login`, `/healthcheck`, `/version`, `@api_plugin` routes, plugin pages (plus console login when required), and their static assets. Console pages, webterm, `/actions`, `/execute`, registration, API docs, and all other core groups are turned off.
+=== "YAML (`api.yaml`)"
+    ```yaml
+    api:
+      permissions:
+        preset: public
+        routes:
+          allowlist: ['pipes', 'docs']   # Optional extras
+          disabled: ['version']
+    ```
 
-Explicit `allowlist` patterns (other than `*`) and `disabled` entries still apply on top:
-
-```yaml
-api:
-  permissions:
-    preset: public
-    routes:
-      allowlist: ['pipes', 'docs']
-      disabled: ['version']
-```
+`public` serves only `/login`, `/healthcheck`, `/version`, `@api_plugin` routes, plugin pages, and their static assets—turning off the console, web terminal, `/actions`, `/execute`, registration, and API docs.
 
 ## Roles and teams
 
-The first account on an empty instance becomes an administrator even with registration disabled. Afterward, self-registration requires `api:permissions:registration:users: true` (default `false`); new users join **Everyone** with `api:permissions:default_role` (`editor`).
+The first account created on an empty instance becomes an administrator. After that, self-registration is off by default (`api:permissions:registration:users: false`), and new users join **Everyone** with `api:permissions:default_role` (`editor`).
 
 | Role | Permissions |
 |---|---|
 | **Viewer** | Read visible pipes, Pipelines, runs, jobs, logs, plugins, and connectors list; manage own account and tokens. |
 | **Editor** | Viewer, plus register, define, edit, and sync pipes, read SQL, and start existing jobs. |
 | **Operator** | Editor, plus execute actions, use the web terminal, and create, stop, pause, or delete jobs. |
-| **Admin** | All permissions, user/team administration, and connector details (user type `admin`). |
+| **Admin** | Full access, including users, teams, and connector details (`type: admin`). |
 
-Explicit user permission lists replace the role (an empty list grants nothing). Token scopes always intersect with the owner's current permissions, so demoting a user immediately narrows existing tokens. Legacy lists keep compatibility (`pipes:write` implies registering/defining pipes; `actions:execute` implies terminal access), while new lists can grant `pipes:register`, `pipes:define_sql`, and `webterm:use` separately; see [token scopes](/reference/api-instance/tokens/#scopes).
-
-Every user belongs to **Everyone** (cannot be left, renamed, or deleted). Administrators create teams and appoint managers; a user's primary team owns their new pipes and jobs. Deleting a team moves its pipes and legacy jobs to Everyone, while registered private job history remains an owner/admin archive ([job access](../background-jobs/access.md)).
-
-Pipes default to Everyone; see [Pipe access and locks](/reference/pipes/access-and-locks/) for `access` settings and locks (locks apply everywhere, including local CLI/Python). Connector `teams: [Data, Operations]` restricts API connector use, and `pipes:define_sql` applies best-effort checks against internal and hidden tables—use separate database users for strict SQL isolation. For isolated teams with dedicated databases and sandboxes, see [Teams on One Instance](/reference/api-instance/teams/).
+- **Custom scopes:** Explicit permission lists replace the role. Token scopes always intersect with the owner's current permissions, so demoting a user immediately narrows their tokens.
+- **Teams & locks:** Every user belongs to **Everyone**. See [Pipe access and locks](/reference/pipes/access-and-locks/) for visibility and locks, and [Teams on One Instance](/reference/api-instance/teams/) for isolated databases and sandboxes.
+- **Connector isolation:** Add `teams: [Data, Operations]` to a connector to restrict API access; use least-privilege DB users when strict SQL isolation is required.
 
 ## Who may run actions
 
-Remote actions require `actions:execute` and the web terminal requires `webterm:use` (Operator and Admin). Pipe **Sync** and **Verify** only require `pipes:write` and edit access on the pipe.
+Running remote actions needs `actions:execute` and opening the web terminal needs `webterm:use` (Operator or Admin). Clicking **Sync** or **Verify** on a pipe only needs `pipes:write` and edit access on that pipe.
 
-Non-administrators can only run approved Meerschaum actions via `POST /execute`, `POST /jobs/{name}`, `POST /actions/{action}`, console **Exec**, MCP `execute_action`, and the web terminal—never shell commands (`sh`, `os`, `python`, `!command`), editors, or SQL clients. Their web terminal runs in restricted mode, validating each command against the server and closing if their role changes. `POST /jobs/{name}` ignores non-admin `cwd`, `logs`, and `target` properties, and job commands act only on visible jobs.
+Non-administrators can only run approved Meerschaum actions through `/execute`, `/jobs`, `/actions`, console **Exec**, MCP `execute_action`, and the web terminal—never raw shell commands (`sh`, `os`, `python`, `!command`), editors, or SQL clients.
 
-For isolated teams, members with plugin-write access run sandboxed team commands and team terminals (`POST /actions/{action}` and MCP `execute_action` refuse them; see [Commands of a team that runs code](teams.md#commands-of-a-team-that-runs-code)). Eligible registered teams without plugin writes can run [API-only commands](../team-executors.md#commands-under-the-callers-identity).
+- Lock all remote actions and terminals to admins with `mrsm start api --secure` (`api:permissions:actions:non_admin: false`).
+- Isolated teams with `plugins_write` run sandboxed [team commands and terminals](teams.md#commands-of-a-team-that-runs-code); eligible teams without `plugins_write` can run [API-only commands](../team-executors.md#commands-under-the-callers-identity).
 
 ### Allowed non-administrator commands
 
-Every command below is scoped to objects the caller may read or modify with matching API permissions (`show tokens` lists only their own; granted plugin actions follow the plugin's grants):
+Every command below is scoped to objects the caller can read or edit with matching API permissions:
 
 <!-- non-admin-commands:start -->
 | Action | Subactions |
@@ -6408,19 +6415,18 @@ Every command below is scoped to objects the caller may read or modify with matc
 | `restart` | `jobs`, `daemons` |
 <!-- non-admin-commands:end -->
 
-Non-administrators cannot redirect commands to another executor or run `show connectors`. Restricted API keys keep these limits even when owned by an administrator.
-
-`api:permissions:actions:non_admin: false` (`mrsm start api --secure`) restricts actions, terminals, and console mutations to administrators. Meerschaum 4's `actions:non_admin: true` maps the default role to Operator unless `default_role` is set.
+Non-administrators cannot redirect commands to another executor or run `show connectors`. Scoped API keys keep these limits even when owned by an admin.
 
 ## Permissions fail closed
 
-Failed permission, team, or credential reads return `503` instead of granting defaults (including password login, all instance backends, and local `register`/`edit tokens`). Identities cache up to 5 seconds and pipe access up to 3 seconds, invalidated immediately on mutations.
+If reading permissions, teams, or credentials fails, the server returns `503` rather than falling back to defaults. Identities cache up to 5 seconds and pipe access up to 3 seconds, and both invalidate immediately on writes.
 
 ## Rate limits
 
-Rate limits use per-client token buckets (`requests` per `seconds`, default window 60s; `max`/`window_seconds` also accepted):
+Configure per-client token buckets under `api:permissions:rate_limits` (`requests` per `seconds`, or `max` per `window_seconds`):
 
 ```yaml
+# mrsm edit config api
 api:
   permissions:
     rate_limits:
@@ -6430,13 +6436,14 @@ api:
       '*': {requests: 600, seconds: 60}
 ```
 
-Keys match route groups (plus `login`, `docs`, `mcp`, `webterm`, `other`), globs, or decoded `/prefix` paths (longest prefix wins). Throttled requests receive `429` with `Retry-After`. Client IP uses the peer address, or the first untrusted `X-Forwarded-For` behind trusted proxies (`api:server:forwarded_allow_ips`, `api:server:proxy_headers`). Invalid entries warn at startup without disabling other rules.
+Keys match route groups (`login`, `docs`, `mcp`, `webterm`, `other`), globs, or `/prefix` paths (longest prefix wins). Throttled callers receive `429` with `Retry-After`. Behind a reverse proxy, set `api:server:forwarded_allow_ips` and `api:server:proxy_headers` so limits track the real client IP.
 
 ## Request size limits
 
-Body limits apply before buffering (`Content-Length` or streaming chunked bodies return `413`):
+Oversized payloads are rejected with `413` before buffering (set any limit to `null` to disable):
 
 ```yaml
+# mrsm edit config api
 api:
   limits:
     auth_bytes: 65536           # /login, /users/register, /tokens/* (64 KiB)
@@ -6447,7 +6454,7 @@ api:
     response_seconds: 300       # Timeout waiting for host response start (504)
 ```
 
-Set a limit to `null` to disable it (invalid values abort `start api`). Responses, streams, and websockets are unlimited; engine routes (64 MiB) and plugin uploads (128 MiB) keep their own caps. The server health-checks the Python API host every 30s and restarts it after three missed 10s probes.
+Responses, SSE streams, and WebSockets are unlimited; engine routes (64 MiB) and plugin uploads (128 MiB) keep their own caps.
 
 
 ---
@@ -6458,119 +6465,144 @@ Source: https://meerschaum.io/reference/api-instance/teams/
 
 # 👥 Teams on One Instance
 
-Multiple teams can share one Meerschaum API instance—using the same web console, HTTP API, and MCP server while seeing only their own pipes, jobs, connectors, and plugins. An **isolated** team is walled off from **Everyone** and can get its own database on your PostgreSQL server.
+Multiple teams can share one Meerschaum API instance—using the same web console, HTTP API, and MCP server—while seeing only their own pipes, jobs, connectors, and plugins. An **isolated** team is walled off from **Everyone** and can get its own database on your PostgreSQL server.
 
-See [Roles and teams](/reference/api-instance/permissions/#roles-and-teams) for roles and managers, and [Team execution environments](../team-executors.md) for separate container or remote executors. Ordinary actions work on Linux, macOS, and Windows; sandboxed host team commands and terminals require Linux 6.12+ (Landlock signal scoping).
+- For roles and permissions, see [Roles and teams](/reference/api-instance/permissions/#roles-and-teams).
+- For separate container or remote executors, see [Team Execution Environments](../team-executors.md).
 
 ## Create a team
 
-Open **Users & Teams → New team** in the console or run `mrsm bootstrap teams wetlands`:
+Open **Users & Teams → New team** in the web console, or bootstrap a team from the CLI:
 
-| Setting | Effect |
+=== "CLI (interactive)"
+    ```bash
+    mrsm bootstrap teams wetlands
+    ```
+
+=== "CLI (non-interactive)"
+    ```bash
+    mrsm bootstrap teams wetlands \
+      --members ann,cal --managers ann \
+      --params '{"isolated": true, "database": "database", "base": "sql:main", "plugins": ["noaa"]}' \
+      --yes
+    ```
+
+| Setting | What it does |
 |---|---|
-| **Hide Everyone's pipes, jobs, connectors and plugins** | Sets `isolated: true`. |
-| **Storage** | Creates a **New database** or **New schema** on a PostgreSQL-family connector (`sql:main` default), or selects an **Existing instance**. |
-| **Connectors / Plugins** | Grants existing connectors and installed plugins to the team. |
-| **Members install, edit and upload plugins** | Sets `plugins_write: true`. |
+| `isolated: true` | Hides **Everyone**'s pipes, jobs, connectors, and plugins from team members. |
+| `database` | `database` (new PostgreSQL DB), `schema` (new schema), or `none` (use an existing instance). |
+| `plugins` / `connectors` | Grants existing plugins and connectors to the team. |
+| `plugins_write: true` | Lets team members install, edit, and upload plugins (and run sandboxed team commands). |
 
-Skip prompts with `--params`:
-
-```bash
-mrsm bootstrap teams wetlands \
-  --members ann,cal --managers ann \
-  --params '{"isolated": true, "database": "database", "base": "sql:main", "plugins": ["noaa"]}' \
-  --yes
-```
-
-`database` accepts `database`, `schema`, or `none`; `name` and `label` override the DB/schema name and connector label. Edit attributes later via console **Settings** or `PATCH /teams/{name}/edit`.
+Edit a team later in **Users & Teams → Settings** or via `PATCH /teams/{name}/edit`.
 
 ## Isolated teams
 
-A user is walled off when every team they belong to (besides Everyone) is isolated. Administrators and open-team members keep the standard view.
+A user is walled off whenever every team they belong to (other than **Everyone**) is isolated. Admins and open-team members keep the normal shared view.
 
-A walled-off user:
+Walled-off members:
 
-- Sees only their teams' pipes, saved Pipelines, runs, jobs, teammates, and teams (Everyone's pipes, other teams' "everyone"-shared pipes, and local jobs are hidden).
-- Can use only connectors reserved for (`teams: [wetlands]`) or granted to their teams, and only plugins granted to or installed by their teams.
-- Can register pipes with their teams' connectors, granted `plugin:<name>` sources, or plain non-connector labels (e.g., `manual:gauge`), and cannot chain instances (`instance:chain`).
-- Runs sandboxed commands and [team terminals](#commands-of-a-team-that-runs-code) when `plugins_write` is enabled, or supported [API-only commands](../team-executors.md#commands-under-the-callers-identity) on eligible teams, plus sync/verify on editable pipes.
-- Uses approved plugin MCP tools, resources, and prompts with `plugins:read` ([Plugin metadata and private handlers](../team-executors.md#plugin-metadata-and-private-handlers)).
+- See only their teams' pipes, saved Pipelines, runs, jobs, and teammates.
+- Use only connectors reserved for (`teams: [wetlands]`) or granted to their teams, and only plugins granted to or installed by their teams.
+- Run sandboxed commands and [team terminals](#commands-of-a-team-that-runs-code) when `plugins_write` is enabled, or supported [API-only commands](../team-executors.md#commands-under-the-callers-identity) without it.
+- Use approved plugin MCP tools with `plugins:read` ([Plugin metadata and private handlers](../team-executors.md#plugin-metadata-and-private-handlers)).
 
-Requests without an explicit instance default to the caller's team instance.
+Requests that omit `-i` / `instance` automatically default to the caller's team instance.
 
-!!! note "Serve multi-team APIs with `--private`"
-    Without `--private`, `/users` and `/plugins` answer anonymous calls (including legacy `Bearer None`). Run `mrsm start api --private`.
+!!! tip "Start multi-team servers with `--private`"
+    Without `--private`, `/users` and `/plugins` answer anonymous requests. Always run shared multi-team servers with:
+
+    ```bash
+    mrsm start api --private
+    ```
 
 ## A database for each team
 
-**New database** and **New schema** require a PostgreSQL-family connector (`postgresql`, `timescaledb`, `timescaledb-ha`, `postgis`, `citus`) with role/database creation privileges. Meerschaum provisions:
+Choosing **New database** or **New schema** works on any PostgreSQL-family connector (`postgresql`, `timescaledb`, `timescaledb-ha`, `postgis`, `citus`) with role and database creation privileges. Meerschaum provisions:
 
-- Owner role `mrsm_<team>` (non-superuser, generated password) and read-only role `mrsm_<team>_ro` for dashboards.
-- The isolated database (with TimescaleDB/PostGIS if present) or schema, excluding `PUBLIC` and `mrsm__main_ro` and revoking `PUBLIC` `CONNECT` on the base database.
-- A reserved `sql:<team>` connector written to owner-only `config/meerschaum.yaml` (preserving `MRSM{...}` references). Since `5.1.1`, host `MRSM_CONFIG` will not overwrite team-reserved connectors (`MRSM_PATCH` still overrides).
+1. **Roles:** Owner role `mrsm_<team>` (non-superuser) and read-only role `mrsm_<team>_ro` for dashboards.
+2. **Storage:** An isolated database (recommended) or schema, revoking `PUBLIC` and `mrsm__main_ro` access.
+3. **Connector:** A reserved `sql:<team>` connector in `config/meerschaum.yaml` (preserving `MRSM{...}` references; host `MRSM_CONFIG` won't overwrite it).
 
-A separate database provides stronger isolation than a schema (which shares catalog names). No API restart is needed; keep `api:permissions:instances:allow_multiple_instances: true`.
+No API restart is needed—just keep `api:permissions:instances:allow_multiple_instances: true`.
 
-Deleting a team keeps its database and data, re-tagging its connector as `Deleted team <name> #<id>` so future teams never inherit it. Renaming via console, `edit teams`, or `POST /teams/{name}/rename` updates reservations automatically (direct Python SDK calls do not). To intentionally claim an orphaned connector, pass `"adopt": true` (`--params '{"adopt": true}'`).
+!!! note "Renaming and deleting teams"
+    Renaming a team via the console, `mrsm edit teams`, or `POST /teams/{name}/rename` updates connector reservations automatically. Deleting a team preserves its database and re-tags the connector as `Deleted team <name> #<id>` so future teams never inherit it (pass `"adopt": true` to reclaim it deliberately).
 
 ## Plugins
 
-With `plugins_write` enabled, team members can install from the repository, scaffold templates, or upload `.py`, `.rs`, `.zip`, or `.tar.gz` archives under **Plugins → New plugin**. Uploaded plugins belong to that team.
+When `plugins_write` is enabled, team members can install from a repository, scaffold starter files, or upload `.py`, `.rs`, `.zip`, or `.tar.gz` archives under **Plugins → New plugin**. Uploaded plugins belong to that team.
 
 ## Team-scoped workers
 
-Under host placement, isolated team Python code (plugin connectors, fetches, hooks, actions, jobs) runs in per-team worker pools instead of the shared pool:
+Under host placement, isolated team Python code runs in per-team worker pools instead of the shared pool:
 
-- **Isolated configs:** Workers load an owner-only team config under `<root>/team_scopes/<team id>/` (`MRSM_CONFIG_FILE`, empty `MRSM_CONFIG_DIR`); team jobs store theirs in `jobs/<name>/.mrsm_config.json` with allowlisted `env` in `properties.json`. Only the team's connectors, default instance, `plugins:<name>` settings, and non-secret base keys are included (`stack`, `api:grafana`, and credential keys are withheld).
-- **Live reload & version guard:** Connector or password changes recycle warm workers automatically without restarting the API. Team workers and the Python API host require `meerschaum>=5.1.0`; outdated workers abort before running code, and an outdated host returns `503` for isolated/console requests.
-- **Shared API host guardrail:** Inside the shared Python API host, `get_connector()` raises `PermissionError` and `get_config()` hides other teams' connectors (a guardrail, not a process sandbox).
+- **Filtered config:** Workers load an owner-only team config containing only that team's connectors, default instance, and `plugins:<name>` settings (server secrets, `stack`, and `api:grafana` are withheld).
+- **Live reload:** Updating a team's connectors or passwords automatically recycles its warm workers—no API restart required.
 
-Configure pool limits, resource caps, and egress under `system.engine` (`mrsm edit config system`):
+Tune pool size, resource limits, and Linux egress under `system:engine` (`mrsm edit config system`):
 
-| Key | Default | Meaning |
-|---|---|---|
-| `python_team_workers` | Shared size (1–4) | Max live workers across all isolated teams. |
-| `python_worker_team_idle_seconds` | `60` | Idle worker stop timeout (`0`: never). |
-| `python_team_env_passthrough` | `[]` | Extra server env vars passed to teams (never `MRSM_CONFIG`/`MRSM_PATCH`/connector vars). |
-| `python_team_sandbox` | `auto` | Linux sandbox mode: `auto`, `require`, `require_sockets`, or `off`. |
-| `python_team_max_cpu_seconds` | unset | Hard `RLIMIT_CPU` cap (seconds, Linux). |
-| `python_team_max_memory_mb` | unset | Hard `RLIMIT_AS` cap (MiB, Linux). |
-| `python_team_max_file_mb` | unset | Hard `RLIMIT_FSIZE` single-file cap (MiB, Linux). |
-| `python_team_max_disk_mb` | unset | Aggregate disk quota (MiB) across team temp/cache/venv/work dirs. |
-| `python_team_max_processes` | unset | Hard `RLIMIT_NPROC` cap (Linux). |
-| `python_team_egress` | `open` | Linux IPv4/IPv6 egress: `open`, `deny` (seccomp), or `allow_ports` (Landlock ABI 4+ TCP + seccomp). |
-| `python_team_egress_ports` | `[]` | Allowed TCP ports for `allow_ports` (e.g., `[443, 5432]`). |
+```yaml
+system:
+  engine:
+    python_team_workers: 4
+    python_team_sandbox: auto          # auto | require | require_sockets | off
+    python_team_max_memory_mb: 2048
+    python_team_egress: allow_ports    # open | deny | allow_ports
+    python_team_egress_ports: [443, 5432]
+```
+
+??? note "All `system.engine.python_team_*` settings"
+
+    | Key | Default | Meaning |
+    |---|---|---|
+    | `python_team_workers` | Shared size (1–4) | Max live workers across all isolated teams. |
+    | `python_worker_team_idle_seconds` | `60` | Idle worker stop timeout (`0`: never). |
+    | `python_team_env_passthrough` | `[]` | Extra env vars passed to teams (never `MRSM_CONFIG`/`MRSM_PATCH`/connector vars). |
+    | `python_team_sandbox` | `auto` | Linux sandbox mode (`auto`, `require`, `require_sockets`, `off`). |
+    | `python_team_max_cpu_seconds` | unset | Hard `RLIMIT_CPU` cap (seconds, Linux). |
+    | `python_team_max_memory_mb` | unset | Hard `RLIMIT_AS` cap (MiB, Linux). |
+    | `python_team_max_file_mb` | unset | Hard `RLIMIT_FSIZE` single-file cap (MiB, Linux). |
+    | `python_team_max_disk_mb` | unset | Disk quota (MiB) across team temp/cache/venv/work dirs. |
+    | `python_team_max_processes` | unset | Hard `RLIMIT_NPROC` cap (Linux). |
+    | `python_team_egress` | `open` | Linux IPv4/IPv6 egress (`open`, `deny`, `allow_ports`). |
+    | `python_team_egress_ports` | `[]` | Allowed TCP ports for `allow_ports`. |
 
 ## Isolation and sandboxing
 
-Three layers protect the host from isolated team processes (separate executors add container/network isolation; see [Team execution environments](../team-executors.md)):
+Three layers protect the host from isolated team code (separate executors add container and network isolation):
 
 | Layer | Protects against | Platform |
 |---|---|---|
-| **Team configuration** | Accessing `sql:main`, other teams' connectors, or server secrets. | All |
-| **Environment allowlist** | Reading host env secrets (cloud keys, `MRSM_CONFIG`, `PG*`). | All |
-| **Filesystem & socket sandbox** | Reading server/other-team files, writing shared paths, signaling server processes, or reaching local Unix sockets. | Linux (Landlock + seccomp) |
+| **Team config** | Reading `sql:main`, other teams' connectors, or server secrets. | All |
+| **Env allowlist** | Inheriting host secrets (cloud keys, `MRSM_CONFIG`, `PG*`). | All |
+| **OS sandbox** | Reading server/other-team files, signaling server processes, or reaching local Unix sockets. | Linux (Landlock + seccomp) |
 
 ### The environment of a team's processes
 
-Team workers and jobs start from an empty environment and receive only standard OS, locale, TLS, proxy, and Python variables, non-secret `MRSM_*` paths redirected to team directories, and explicit `python_team_env_passthrough` names. Secret `MRSM_*` variables (`MRSM_CONFIG`, `MRSM_PATCH`, `MRSM_<TYPE>_<LABEL>`) are always stripped.
+Team workers and jobs start from a clean environment containing only standard OS/locale/TLS/Python variables, team-redirected `MRSM_*` paths, and explicit `python_team_env_passthrough` entries. Secret `MRSM_*` variables are always stripped.
 
 <details markdown="1">
 <summary>Allowlisted environment variables</summary>
 
 - **OS & network:** `PATH`, `HOME`, `USER`, `LOGNAME`, `USERNAME`, `SHELL`, `LANG`, `LANGUAGE`, `LC_*`, `TZ`, `TZDIR`, `TMPDIR`, `TEMP`, `TMP`, `XDG_*`, `TERM`, `COLORTERM`, `NO_COLOR`, `COLUMNS`, `LINES`, `SSL_CERT_*`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `HTTP(S)_PROXY`, `NO_PROXY`, `ALL_PROXY`, `LD_LIBRARY_PATH`, `DYLD_*`, `RUST_LOG`, `RUST_BACKTRACE`, and standard Windows paths.
-- **Python:** `PYTHON*` runtime flags (`PYTHONPATH`, `PYTHONHOME`, `PYTHONUNBUFFERED`, `PYTHONUTF8`, etc.), `VIRTUAL_ENV`, `CONDA_*`.
-- **Non-secret Meerschaum:** `MRSM_ROOT_DIR`, `MRSM_PLUGINS_DIR`, `MRSM_VENVS_DIR`, `MRSM_WORK_DIR`, `MRSM_HOME`, `MRSM_PYTHON`, `MRSM_BIN`, `MRSM_WORKER_*`, `MRSM_NO_*`, `MRSM_CONNECT_TIMEOUT`, job `MRSM_DAEMON_ID`/`MRSM__COMPOSE_*`, and team scope vars (`MRSM_CONFIG_DIR`, `MRSM_CONFIG_FILE`, `MRSM_TEAM_SCOPE`, `MRSM_TEAM_FINGERPRINT`, `MRSM_TEAM_SANDBOX`).
+- **Python:** `PYTHON*`, `VIRTUAL_ENV`, `CONDA_*`.
+- **Non-secret Meerschaum:** `MRSM_ROOT_DIR`, `MRSM_PLUGINS_DIR`, `MRSM_VENVS_DIR`, `MRSM_WORK_DIR`, `MRSM_HOME`, `MRSM_PYTHON`, `MRSM_BIN`, `MRSM_WORKER_*`, `MRSM_NO_*`, `MRSM_CONNECT_TIMEOUT`, `MRSM_DAEMON_ID`, `MRSM__COMPOSE_*`, and team scope vars (`MRSM_CONFIG_DIR`, `MRSM_CONFIG_FILE`, `MRSM_TEAM_SCOPE`, `MRSM_TEAM_FINGERPRINT`, `MRSM_TEAM_SANDBOX`).
 
 </details>
 
 ### The filesystem sandbox
 
-On Linux, the standalone native `mrsm` launcher applies [Landlock](https://docs.kernel.org/userspace-api/landlock.html) (plus a seccomp Unix-socket filter below ABI 9) before starting Python or a job—needing no root or container runtime and inherited by all child processes. Each team writes only to its own venv copies (`<root>/team_scopes/<id>/venvs`), temp/cache/job-work dirs, and its own SQLite/DuckDB files. Every launch verifies enforcement against `<root>/team_scopes/.sandbox_canary` (plus a socket probe under seccomp); inspect active status with `mrsm doctor`.
+On Linux, the standalone native `mrsm` binary applies [Landlock](https://docs.kernel.org/userspace-api/landlock.html) (and a seccomp Unix-socket filter below ABI 9) before starting Python or a job—requiring no root or container runtime. Each team writes only to its own venvs, temp/cache/work dirs, and local SQLite/DuckDB files.
 
-- **Kernel requirements:** Confined profiles (team commands, team terminals, API-only jobs) require Landlock ABI 6+ (Linux 6.12+) signal scoping plus either proven seccomp Unix-socket denial (x86-64/AArch64) or Landlock ABI 9+ (Linux 7.1+) native socket denial.
-- **Modes (`python_team_sandbox`):** `auto` (sandbox where supported, warn if not), `require` (require filesystem rules), `require_sockets` (require filesystem rules, ABI 6+ signal scoping, and Unix-socket denial), or `off` (disables sandbox and refuses confined profiles).
-- **Python notes:** Under seccomp, workers switch `multiprocessing` from `forkserver` to `spawn` and bind `Manager()` on loopback TCP. Connect to local databases over TCP (`127.0.0.1`), not Unix sockets.
+Check active sandbox status on your host at any time:
+
+```bash
+mrsm doctor
+```
+
+!!! note "Use TCP for local databases"
+    Because Unix sockets are denied inside the sandbox, connect to local PostgreSQL/Valkey servers over TCP (`127.0.0.1`). Confined profiles (team commands, team terminals, API-only jobs) require **Linux 6.12+** (Landlock ABI 6+) with seccomp socket denial, or **Linux 7.1+** (ABI 9+).
 
 <details markdown="1">
 <summary>Landlock allowlist, ABI milestones, and internal IPC</summary>
@@ -6584,71 +6616,67 @@ On Linux, the standalone native `mrsm` launcher applies [Landlock](https://docs.
 | Standard `/dev/*`, `/dev/shm` (no list), own `/proc/<pid>`, CPU/cgroup sysfs | device / read |
 
 - **ABIs:** 2/3/5 (`5.19`/`6.2`/`6.10`) `refer`/`truncate`/`ioctl_dev`; 6 (`6.12`) `scope_signal` & `scope_abstract_unix`; 8 (`7.0`) `all_threads`; 9 (`7.1`) native `resolve_unix`.
-- **IPC:** Workers use inherited socket pairs; Python API host uses `<root>/api/host/host-<nonce>.sock` with a per-start token removed before plugin imports; job stdin FIFOs are Landlock-scoped.
+- **IPC & Python:** Workers use inherited socket pairs and switch `multiprocessing` from `forkserver` to `spawn` under seccomp; the Python API host uses `<root>/api/host/host-<nonce>.sock` with a per-start token removed before plugin imports; team workers require `meerschaum>=5.1.0`.
 
 </details>
 
 ### Terminals without tmux
 
-Because `tmux` trusts any same-UID client on its socket, Meerschaum disables `tmux` for all web terminals **only** when an isolated team has `plugins_write` enabled **and** Unix sockets are not denied to team code:
+Because `tmux` trusts any same-UID client on its socket, Meerschaum disables `tmux` only when an isolated team has `plugins_write` enabled **and** Unix sockets are not denied:
 
-| Server state | Terminals |
+| Server state | Web terminals |
 |---|---|
 | No isolated team, or none with `plugins_write` | `tmux` enabled |
-| Isolated team with `plugins_write` + Unix sockets denied (Landlock/seccomp) | `tmux` enabled |
+| Isolated team with `plugins_write` + Unix sockets denied | `tmux` enabled |
 | Isolated team with `plugins_write` + Unix sockets **not** denied | Plain single-tab shells (run long tasks as [jobs](../background-jobs/index.md)) |
 
 ### Commands of a team that runs code
 
-Members of an isolated team with `plugins_write` enabled can run arbitrary commands (`sh`, `python`, `!command`, plugin actions) inside their team's sandbox (**team execution**) when the server runs a standalone native `mrsm` binary and all five checks hold:
+Members of an isolated team with `plugins_write: true` can run commands (`sh`, `python`, `!command`, plugin actions) and open a dedicated **team terminal** when running on the standalone native `mrsm` binary with full Linux confinement active:
 
-1. Team is isolated with `plugins_write: true`.
-2. `python_team_sandbox` is not `off`.
-3. Landlock ABI 6+ scopes signals and Unix sockets are denied (Landlock ABI 9+ or seccomp).
-4. The server user cannot open an uncovered Docker/Podman socket.
-5. The canary probe passes and the team Python interpreter runs `meerschaum>=5.1.0`.
+- `python_team_sandbox` is not `off`, the canary probe passes, and team Python runs `meerschaum>=5.1.0`.
+- Landlock ABI 6+ scopes signals, Unix sockets are denied, and the server user cannot access an uncovered Docker/Podman socket.
 
-When active, `POST /execute`, `POST /jobs/{name}`, console **Exec**, and **New job** launch sandboxed team jobs (`require_sockets` enforced), and the terminal opens on a dedicated locked-down `tmux-t-<hash>.sock`. `POST /actions/{action}` and MCP `execute_action` refuse isolated members (use `POST /execute`). Revoking `plugins_write` or losing sandbox checks refuses new commands and closes team terminals within seconds (`mrsm doctor` reports per-team status).
+When active, `POST /execute`, `POST /jobs/{name}`, console **Exec**, and **New job** launch sandboxed team jobs (`POST /actions/{action}` and MCP `execute_action` refuse isolated members—use `POST /execute`). Revoking `plugins_write` refuses new commands and closes team terminals within seconds.
 
 ### What host isolation does not stop
 
-Host isolation leaves these gaps unless configured or moved to a separate executor ([resource and host requirements](../team-executors.md#resource-and-host-requirements)):
+Host isolation leaves these gaps unless you configure caps or move to a [separate team executor](../team-executors.md#resource-and-host-requirements):
 
-- **Outbound network:** Open (including internal services and `169.254.169.254`) unless `python_team_egress` is set to `deny` or `allow_ports`.
-- **CPU, memory, disk:** Unbounded unless `python_team_max_*` limits or container cgroups are configured.
-- **Shared connectors & shared API host:** Shared connectors grant full DB access; the shared API host uses guardrails, not a sandbox.
-- **Kernel bugs & `/dev/shm` by name:** Known shared-memory names can still be opened.
+- **Outbound network:** Open (including `169.254.169.254`) unless `python_team_egress` is set to `deny` or `allow_ports`.
+- **CPU, memory, disk:** Unbounded unless `python_team_max_*` or container cgroups are set.
+- **Shared connectors & shared API host:** Shared connectors grant full DB access; the shared Python API host uses guardrails, not an OS sandbox.
 
 ## Agents and MCP
 
-Connect AI agents via **Tokens → Connect an agent** or **New agent token** (read-only). Tokens inherit their owner's isolated team view; see [MCP](/reference/mcp/).
+Connect AI agents from **Tokens → Connect an agent** or **New agent token** (read-only). Agent tokens inherit their owner's isolated team view—see [MCP](/reference/mcp/).
 
 ## Grafana
 
 Proxy console logins to Grafana with automatic per-team organizations and read-only data sources (`mrsm_<team>_ro`):
 
 ```yaml
-### `mrsm edit config api`
+# mrsm edit config api
 api:
   grafana:
     enabled: true
     root_url: https://your-api-host/grafana/
 ```
 
-Run `mrsm stack up -d`. Meerschaum stores a generated admin password in `<root>/api/.grafana_admin_password`, restricts `X-WEBAUTH-USER` to the API container's `proxy_subnet` IP, and serves Grafana under `/grafana/`.
+Apply with `mrsm stack up -d`. Grafana is served at `/grafana/`, team members become Grafana Editors, managers become Org Admins, and the Stack's **Meerschaum Main** data source uses read-only `mrsm__main_ro` ([Grafana's read-only data source](/reference/stack/#grafanas-read-only-data-source)).
 
-| Key | Default | Meaning |
-|---|---|---|
-| `url` | `http://grafana:3000` | Internal Grafana URL (override outside Stack). |
-| `admin_user` / `admin_password` | `admin` / generated | Grafana admin credentials. |
-| `root_url` | auto | Public URL of `/grafana/`. |
-| `proxy_whitelist` / `proxy_subnet` | Stack API / `10.213.71.0/29` | Trusted proxy IP(s) and dedicated bridge network. |
-| `database_url` | Connector host:port | DB `host:port` for team data sources. |
+??? note "All `api:grafana` configuration keys"
 
-Team members become Grafana Editors, managers become Org Admins, and Meerschaum admins become Grafana Admins (isolated members are removed from Main Org; orgs track by ID across renames; deleted teams keep dashboards as `Deleted team <name> #<id>` with credentials removed). The Stack's **Meerschaum Main** data source uses read-only `mrsm__main_ro`, which never reads team schemas or databases ([Grafana's read-only data source](/reference/stack/#grafanas-read-only-data-source)).
+    | Key | Default | Meaning |
+    |---|---|---|
+    | `url` | `http://grafana:3000` | Internal Grafana URL (override outside Stack). |
+    | `admin_user` / `admin_password` | `admin` / generated | Stored in `<root>/api/.grafana_admin_password`. |
+    | `root_url` | auto | Public URL of `/grafana/`. |
+    | `proxy_whitelist` / `proxy_subnet` | Stack API / `10.213.71.0/29` | Trusted proxy IP(s) and dedicated bridge network. |
+    | `database_url` | Connector host:port | DB `host:port` for team data sources. |
 
-!!! warning "Anonymous dashboards can query their org's data sources"
-    When `GF_AUTH_ANONYMOUS_ENABLED` is on, signed-out visitors can run arbitrary queries against any data source in the anonymous org. Keep custom data sources there read-only and public-only.
+!!! warning "Anonymous Grafana dashboards"
+    If `GF_AUTH_ANONYMOUS_ENABLED` is on, signed-out visitors can query any data source in the anonymous org. Keep those data sources read-only and public-only.
 
 
 ---
@@ -6657,114 +6685,27 @@ Team members become Grafana Editors, managers become Org Admins, and Meerschaum 
 
 Source: https://meerschaum.io/reference/team-executors/
 
-# Team execution environments
+# 🚀 Team Execution Environments
 
-An isolated team can run its jobs, engine work, plugins, virtual environments, and terminals inside a separate executor while the main API owns authentication, permissions, team administration, and routing. Ordinary reads stay on the main API, and Grafana queries the team's database with its own read-only role.
+Run an isolated team's jobs, plugins, virtual environments, and web terminals in its own container or remote executor while the main API keeps ownership of login, permissions, and routing.
 
-Executor placement is optional per team—unassigned teams keep host placement ([Teams on One Instance](api-instance/teams.md)). Once a separate executor is selected, an unavailable or incompatible executor fails closed and never falls back to the main host.
+Executor placement is optional per team—unassigned teams run on the API host ([Teams on One Instance](api-instance/teams.md)). Once you assign a separate executor, it fails closed and never falls back to the main host.
 
-## Execution profiles
+## Quick start (Stack container)
 
-The main API assigns a profile from the authenticated caller and records it on every launch:
-
-| Profile | Process configuration | Intended work |
-|---|---|---|
-| **Team** | Team's granted connectors, credentials, and plugin settings only. | Work authorized to run code as that team. |
-| **API-only** | Logical instance names backed by a short-lived API credential; no reusable DB credentials or shared plugin settings. | Authorized commands without team code-execution rights. |
-
-Users cannot request the **Team** profile via job properties, and promotions, manager restarts, or password rotations never upgrade a recorded **API-only** job.
-
-- **Team plugin syncs:** Submit one-shot plugin syncs via `POST /jobs/{name}` (e.g., `["sync", "pipes", "-i", "api:wetlands_writer", "-c", "plugin:collector", "-m", "stations"]`) using a team-granted, team-reserved `api:` connector. Password rotation preserves the job; changing endpoint, account, or upstream instance requires a new job.
-- **API-only source broker:** Reads route through the main API with per-call scope checks. Complete responses cap at 100k rows / 64 MiB; larger reads page from a frozen snapshot (2,048 rows / 8 MiB per page; max 8 snapshots, 512 MiB each, 2 GiB total; 30s idle / 5m lifetime). Exceeded limits or changed definitions error rather than returning partial data.
-
-### Commands under the caller's identity
-
-Through `POST /execute` or a saved API-only job:
-
-- **Filtered reads:** `show pipes`, `show graph`, and `show runs` omit selectors to return visible objects; use `watch runs --nopretty` and `show logs JOB --nopretty`.
-- **Pipelines:** Run `register pipelines NAME --params JSON` or `edit pipelines NAME --params JSON` (passing current `revision`):
-
-```json
-["edit", "pipelines", "daily-stations", "--params", "{\"revision\":1,\"description\":\"Daily station readings\"}"]
-```
-
-- **Explicit pipe copy:** Copy one registered pipe between SQL instances on the same main API (existing targets are skipped):
-
-```bash
-mrsm copy pipes sql:archive -i sql:main -c manual:posted -m readings -l None --sync-data all --yes
-```
-
-- **Direct sync/verify & Pipelines:** `POST /actions/sync` and `POST /actions/verify` support bounded integer-filtered SQLite syncs; `POST /pipelines/{name}/sync` and MCP `sync_pipeline` run explicit SQLite Pipelines (including `fetch.replace` parents feeding children on the same instance with matching integer axes).
-- **Saved sync/verify jobs:** Submit single `sync pipes` or `verify pipes` commands to `POST /jobs/{name}` with optional `--begin`, `--end`, `--schedule`/`-s`, `--jitter`, `--loop`, `--min-seconds`, or `--restart` (requires `jobs:write`, `jobs:execute`, `pipes:write`, edit access, and `actions:execute`):
-
-```json
-["verify", "pipes", "-c", "sql:main", "-m", "ticks", "-l", "None", "--schedule", "every 5 minutes"]
-```
-
-  `GET /jobs/{name}` exposes `next_fire`, `last_fire`, `firing`, and `error`; auth failures or unresolved commit evidence stop schedules.
-- **API-only terminals:** Signed-in operators (`webterm:use`, `actions:execute`, `jobs:execute`) can open an API-only web terminal on a compatible Linux host or selected Linux executor.
-
-| Backend | Supported API-only boundary |
-|---|---|
-| **SQLite / GPKG** | Registered fetch reads (with paging), scoped mutations, transactional nullable column additions, same-main atomic SQLite replacement, and direct/Pipeline sync and verify. |
-| **PostgreSQL reads** | Explicitly approved base tables on the same instance (no fetch SQL, views, or inherited tables) via `registered_source_tables` (below). |
-| **MySQL / MariaDB appends** | Bounded appends (`check_existing=false`, ≤512 rows / 4 MiB of `BIGINT` + `BLOB`, explicit signed `BIGINT` PK, declared dtypes) to unpartitioned InnoDB tables via a same-main password API connector whose DB user has `TRIGGER` privilege. |
-
-Approve a PostgreSQL base table on its connector (for example, pipe ID `42` on `sql:water`):
+1. Point `api.yaml` at a reachable callback URL (Stack defaults to `http://api:<port>`):
 
 ```yaml
-meerschaum:
-  connectors:
-    sql:
-      water:
-        registered_source_tables:
-          "42":
-            schema: public
-            table: station_samples
-```
-
-## Plugin metadata and private handlers
-
-Plugin metadata is discovered inside a confined process (no DB credentials or network) and cached per exact approved source set. The main API reads handler metadata without importing plugin code and runs admitted API/MCP handlers in private API-only processes with per-caller permission checks.
-
-Team web pages render inert HTML and a bounded subset of standard Dash/Plotly components and callbacks inside an opaque iframe (no arbitrary JS or active HTML); grant or session revocations take effect on the next visit.
-
-Confined single-file Rust plugins require an admin-selected immutable offline toolchain, vendor tree, and lockfile (multi-file native packages are unsupported). Remote executors also require a Factory signing key paired with its public pin on Main.
-
-## Choose a deployment
-
-| `attributes.execution.mode` | Administrator provides | Apply changes with |
-|---|---|---|
-| `host` (default) | Host with Linux process isolation | Host config |
-| `container` | Meerschaum Stack + Docker Engine 28+ | `mrsm stack up -d` |
-| `api` | External native executor + main-API `api:` connector | systemd, Kubernetes, etc. |
-
-`container` and `api` require an isolated team with a registered UUID. Never mount a Docker socket or the main API root into an executor.
-
-Configure policy and return-path origin in `api.yaml`:
-
-```yaml
-# Main API configuration: api.yaml
+# mrsm edit config api
 execution:
   require_team_executor: true
   callback_url: https://main.example:8989
 ```
 
-`callback_url` must be an HTTP/HTTPS origin without path, query, or embedded credentials. Stack executors default to `http://api:<port>`; external executors and host API-only jobs require an explicit reachable origin (loopback listener for host-only, never wildcard) and the standalone native `mrsm` binary.
-
-## Provision a Stack executor
-
-Stack executors require a same-release standalone native `mrsm` image (`bmeares/meerschaum:5.1.2-full` by default). Override in `stack.yaml`:
-
-```yaml
-# Stack configuration: stack.yaml
-executor:
-  image: registry.example/meerschaum-executor:5.1.2
-```
-
-Register the team with `POST /teams/wetlands/register` (or `PATCH /teams/wetlands/edit`, preserving existing `attributes` keys):
+2. Register the team with `mode: container` (or edit it in **Users & Teams → Settings**):
 
 ```json
+POST /teams/wetlands/register
 {
   "members": ["alice"],
   "managers": ["carol"],
@@ -6784,28 +6725,121 @@ Register the team with `POST /teams/wetlands/register` (or `PATCH /teams/wetland
 }
 ```
 
-Reconcile from the Stack host as UID `1000` (so file-sourced Compose secrets match the container's `1000:1000` user):
+3. Reconcile the Stack (run as UID `1000` so Compose secrets match the container user):
 
 ```bash
 mrsm stack config
 mrsm stack up -d
 ```
 
-Meerschaum creates a UUID-named service, isolated bridge network (joined only by `api` and the database), and private work (`/meerschaum`) and control (`/var/lib/meerschaum/factory`) volumes. Grant updates propagate dynamically; limit/network/image changes require `mrsm stack up -d`. Deleting a team removes its service and network while retaining both volumes.
+Meerschaum spins up a dedicated container, isolated bridge network, and private volumes (`/meerschaum` and `/var/lib/meerschaum/factory`). Grant changes apply live; image, limit, or network changes need `mrsm stack up -d`.
+
+!!! tip "Override the executor image"
+    Stack executors default to `bmeares/meerschaum:5.1.2-full` (matching your main API release). Pin a custom image in `stack.yaml`:
+
+    ```yaml
+    # mrsm edit config stack
+    executor:
+      image: registry.example/meerschaum-executor:5.1.2
+    ```
+
+## Choose a deployment
+
+| `attributes.execution.mode` | What you run | Apply changes with |
+|---|---|---|
+| `host` (default) | API host with Linux sandboxing | Host config |
+| `container` | Meerschaum Stack + Docker Engine 28+ | `mrsm stack up -d` |
+| `api` | Standalone `mrsm start executor` + `api:` connector | systemd, Kubernetes, etc. |
+
+Both `container` and `api` require an isolated team with a registered UUID. Never mount the Docker socket or the main API root into an executor.
+
+## Execution profiles
+
+The main API picks a profile from the caller's permissions and records it on every job:
+
+| Profile | Process config | Used for |
+|---|---|---|
+| **Team** | Team's granted connectors, credentials, and plugin settings only. | Teams authorized to run code (`plugins_write: true`). |
+| **API-only** | Short-lived API credential only; no DB passwords or shared plugin config. | Authorized commands without team code-execution rights. |
+
+Callers cannot request the **Team** profile manually, and later promotions or restarts never upgrade a recorded **API-only** job.
+
+### Commands under the caller's identity
+
+Through `POST /execute` or a saved API-only job, users can run:
+
+- **Reads:** `show pipes`, `show graph`, `show runs`, `watch runs --nopretty`, and `show logs JOB --nopretty`.
+- **Pipelines:** `register pipelines` and `edit pipelines` (include the current `revision`):
+
+  ```json
+  ["edit", "pipelines", "daily-stations", "--params", "{\"revision\":1,\"description\":\"Daily station readings\"}"]
+  ```
+
+- **Pipe copy:** Copy a registered pipe between SQL instances on the same API:
+
+  ```bash
+  mrsm copy pipes sql:archive -i sql:main -c manual:posted -m readings -l None --sync-data all --yes
+  ```
+
+- **Scheduled sync & verify jobs:** Submit `sync pipes` or `verify pipes` to `POST /jobs/{name}` with `--begin`, `--end`, `--schedule`/`-s`, `--jitter`, `--loop`, `--min-seconds`, or `--restart`:
+
+  ```json
+  ["verify", "pipes", "-c", "sql:main", "-m", "ticks", "-l", "None", "--schedule", "every 5 minutes"]
+  ```
+
+- **API-only terminals:** Signed-in operators (`webterm:use`, `actions:execute`, `jobs:execute`) can open an API-only web terminal on a compatible Linux host or executor.
+
+#### Supported API-only backends
+
+| Backend | Supported operations |
+|---|---|
+| **SQLite / GPKG** | Registered reads (with paging), scoped mutations, nullable column additions, atomic replacements, and direct/Pipeline sync & verify. |
+| **PostgreSQL reads** | Base tables explicitly approved via `registered_source_tables` (no fetch SQL or views). |
+| **MySQL / MariaDB** | Bounded appends to unpartitioned InnoDB tables (`check_existing=false`, explicit signed `BIGINT` PK, declared dtypes). |
+
+Approve a PostgreSQL base table on its connector (for example, pipe ID `42` on `sql:water`):
+
+```yaml
+meerschaum:
+  connectors:
+    sql:
+      water:
+        registered_source_tables:
+          "42":
+            schema: public
+            table: station_samples
+```
+
+??? note "Source broker paging limits & one-shot team plugin syncs"
+    - **Source broker:** Single-shot responses cap at 100k rows / 64 MiB. Larger reads page from a frozen snapshot (2,048 rows / 8 MiB per page; max 8 snapshots, 512 MiB each, 2 GiB total; 30s idle / 5m lifetime). Exceeded limits error instead of returning partial data.
+    - **Team plugin syncs:** Submit one-shot syncs to `POST /jobs/{name}` (e.g., `["sync", "pipes", "-i", "api:wetlands_writer", "-c", "plugin:collector", "-m", "stations"]`) using a team-reserved `api:` connector. Password rotation preserves the job; changing the endpoint or upstream instance requires a new job.
+    - **MySQL appends:** Capped at 512 rows / 4 MiB of `BIGINT` + `BLOB` via a same-main password API connector whose DB user has `TRIGGER` privilege.
+
+## Plugin metadata and private handlers
+
+Plugin metadata is discovered inside a confined process (no DB credentials or network) and cached per approved source set. The main API never imports team plugin code directly—admitted API and MCP handlers run in private API-only processes with per-caller permission checks.
+
+- **Web pages:** Team web pages render inert HTML and a safe subset of Dash/Plotly components inside an opaque iframe (no custom JS). Revocations take effect on the next visit.
+- **Rust plugins:** Confined single-file `.rs` plugins need an admin-selected offline toolchain, vendor tree, and lockfile (multi-file crates are not supported). Remote executors also require a Factory signing key pinned on Main.
 
 ## Outbound connections
 
 | `egress` | Network reach |
 |---|---|
-| `proxy` (default) | Main API, assigned Stack DB, HTTP (80) / HTTPS `CONNECT` (443) via filtering proxy, plus declared relays. |
-| `none` | Main API, assigned Stack DB, and declared relays only. |
-| `open` | Unrestricted bridge outbound access. |
+| `proxy` (default) | Main API, assigned Stack DB, HTTP (`80`) / HTTPS (`443`) via filtering proxy, and declared `relays`. |
+| `none` | Main API, assigned Stack DB, and declared `relays` only. |
+| `open` | Unrestricted outbound access. |
 
-The proxy blocks private, local, metadata, and reserved IPs. Declare up to 64 external DNS `relays` (`host` + `port`; numeric IPs and loopback are refused) and keep the original hostname with full TLS verification in your connector. Relays pin upstream IPs during `mrsm stack up -d`—re-run it after upstream DNS changes. Add external firewalls if you need to block Docker DNS forwarding.
+The filtering proxy blocks private, loopback, metadata, and reserved IPs. You can declare up to 64 DNS `relays` (`host` + `port`; numeric IPs are refused) and keep the real hostname for TLS verification.
+
+!!! note "DNS changes"
+    Relays pin upstream IPs during `mrsm stack up -d`. Re-run `mrsm stack up -d` if a partner database's IP changes.
 
 ## Independently managed executors
 
-For `mode: api`, add an admin `api:` connector in `meerschaum.yaml` (behind a TLS reverse proxy for HTTPS; no admin passwords/tokens), set `attributes.execution` to `{"mode": "api", "connector": "api:wetlands_executor"}`, and set `execution: callback_url`:
+To run an executor on another server or in Kubernetes (`mode: api`):
+
+1. Add an `api:` connector for the executor in `meerschaum.yaml` (behind TLS, with no admin credentials):
 
 ```yaml
 connectors:
@@ -6814,7 +6848,9 @@ connectors:
       uri: https://executor.wetlands.example:8989
 ```
 
-Install the team's public verifier from `<main-root>/executors/desired/team-<UUID-without-hyphens>.json`, create disjoint `0700` work and control directories, and launch the standalone native binary:
+2. Point the team at it (`"execution": {"mode": "api", "connector": "api:wetlands_executor"}`) and set `execution.callback_url` in `api.yaml`.
+
+3. Copy the team's public verifier from `<main-root>/executors/desired/team-<UUID-without-hyphens>.json` to the executor host and start `mrsm start executor`:
 
 ```bash
 sudo install -d -o mrsm-wetlands -g mrsm-wetlands -m 0700 \
@@ -6827,39 +6863,43 @@ sudo -u mrsm-wetlands env \
     --control-root /var/lib/meerschaum-wetlands-control
 ```
 
-- **systemd:** Use a dedicated user, explicit `--control-root`, and systemd resource/network caps. Meerschaum's systemd job backend requires **systemd 235+** for `UnsetEnvironment=`; regenerate existing units after upgrading.
-- **Kubernetes:** Run one non-root Pod per team with read-only rootfs, separate work/control mounts, read-only verifier mount, and NetworkPolicies (`egress`/`limits`/`runtime` apply only to Stack Compose).
+=== "systemd"
+    Run as a dedicated user with explicit `--control-root` and systemd resource/network limits. Meerschaum's systemd job backend requires **systemd 235+** (regenerate existing units after upgrading).
+
+=== "Kubernetes"
+    Run one non-root Pod per team with a read-only rootfs, separate work/control mounts, a read-only verifier mount, and NetworkPolicies (`egress`, `limits`, and `runtime` apply only to Stack Compose).
 
 ## Resource and host requirements
 
-Generated Stack executors run non-root (`1000:1000`) with dropped capabilities, `no-new-privileges`, private IPC, and read-only rootfs:
+Stack executors run as `1000:1000` with dropped capabilities, `no-new-privileges`, private IPC, and a read-only rootfs:
 
 | Limit | Default | Notes |
 |---|---|---|
-| `limits.memory_mb` | `4096` MiB | Shared by workers/builds; swap disabled (`mem == memswap`). |
+| `limits.memory_mb` | `4096` MiB | Shared by workers/builds; swap disabled. |
 | `limits.cpus` / `limits.pids` | `2.0` / `1024` | CPU quota and process/thread cap. |
-| Persistent disk | Unbounded | Enforce volume quotas and monitor outside Meerschaum. |
+| Persistent disk | Unbounded | Enforce volume quotas outside Meerschaum. |
 
-- **Docker Engine 28+** is required for isolated bridge gateway modes.
-- **Linux confinement:** Requires Landlock ABI 6+ (Linux 6.12+) signal scoping plus proven seccomp Unix-socket denial (x86-64/AArch64) or Landlock ABI 9+ (Linux 7.1+) native socket denial, verified via startup probes under the standalone native `mrsm` binary (stock Linux 6.8 runs ordinary workloads, not confined profiles). See [The filesystem sandbox](api-instance/teams.md#the-filesystem-sandbox).
-- **Custom runtime:** `attributes.execution.runtime` (e.g., `"runsc"`) selects a preconfigured OCI runtime; validate probes and workloads on it yourself.
+- **Docker Engine 28+** is required for isolated bridge gateways.
+- **Linux 6.12+** (Landlock ABI 6+) with seccomp Unix-socket denial—or **Linux 7.1+** (Landlock ABI 9+)—is required for confined profiles under the standalone native `mrsm` binary. See [The filesystem sandbox](api-instance/teams.md#the-filesystem-sandbox).
+- **Custom OCI runtime:** Set `attributes.execution.runtime` (for example `"runsc"`) to select a preconfigured runtime.
 
 ## Identity, history and current authority
 
-Execution records bind to registered owner and team UUIDs. Renaming a team preserves history; deleting a team leaves private history as an owner/admin archive, and recreating a name never inherits prior records.
+Execution history is bound to owner and team UUIDs—not display names. Renaming a team keeps its history; deleting a team archives private history for owners and admins, and recreating the same name never inherits old records.
 
-Viewing history never authorizes re-running it—every start or restart rechecks original source identity, scopes, membership, and grants.
+Every start or restart rechecks current membership, scopes, and grants. Executors hold only filtered config and short-lived leases (keep host clocks in sync).
 
-Executors hold only filtered config and short-lived credentials (control lease ~15s renewal / 90s expiry; callback creds ≤30s). Keep clocks synced; if the main API is unreachable past expiry, execution stops until the executor restarts and reauthorizes. Back up the main API root (executor registry, signing keys, job catalog), database, and team volumes together—partial restores fail closed.
+!!! warning "Back up together"
+    Back up the main API root (registry, signing keys, job catalog), instance database, and team volumes together. Partial restores fail closed.
 
 ## Migrate an existing deployment
 
-1. **Back up:** Instance DB, main root, job state, and team volumes; record team UUIDs, databases, grants, and placements.
-2. **Upgrade together:** Match main API and executor versions; verify native launcher, Landlock/seccomp probes, Docker 28+, and disk quotas.
-3. **Configure placement:** Set `attributes.execution`, limits, egress/relays (DNS + TLS), and `execution: callback_url`.
-4. **Reconcile:** Run `mrsm stack up -d` (or update systemd/Kubernetes + verifier) and regenerate scoped systemd job units.
-5. **Recreate workloads:** Moving to a container does not migrate host jobs, venvs, or terminals—recreate them through the main API.
-6. **Verify:** Test a job, plugin sync, DB connection, log stream, terminal, resource caps, and revocation before widening access.
+1. **Back up** your database, main root, job state, and team volumes.
+2. **Upgrade together:** Match main API and executor versions, and confirm Docker 28+ and Linux confinement probes pass.
+3. **Configure placement:** Set `attributes.execution` (mode, limits, egress/relays) and `execution.callback_url`.
+4. **Reconcile:** Run `mrsm stack up -d` (or update your systemd/Kubernetes executor and verifier).
+5. **Recreate workloads:** Moving a team to a container does not migrate host jobs, venvs, or terminals—recreate them through the main API.
+6. **Verify:** Test a job, plugin sync, DB connection, log stream, terminal, and revocation before widening access.
 
 
 ---
@@ -7103,133 +7143,138 @@ Source: https://meerschaum.io/reference/api-instance/web-console/
 
 # 🎛️ Web Console
 
-The Web Console is a graphical UI for your [API instance](/reference/api-instance/). Start the server with `mrsm start api` and open [http://localhost:8000](http://localhost:8000).
+The Web Console is a graphical UI for your [API instance](/reference/api-instance/). Start the server and open [http://localhost:8000](http://localhost:8000):
 
-!!! note "Included with the Python package"
-    Install the Plotly Dash console with `pip install meerschaum[dash]` (included in `meerschaum[full]` and the `full` Docker image). Standalone Rust installs serve the API, `/docs`, `/engine/*`, MCP, and web terminal without `/dash`. Pass `--no-dash` to disable it.
+```bash
+pip install 'meerschaum[dash]'
+mrsm start api
+```
+
+!!! note "Included in `[full]` and Docker"
+    The Dash console ships in `meerschaum[dash]`, `meerschaum[full]`, and the `full` Docker image. Standalone Rust installs serve the API, `/docs`, `/engine/*`, MCP, and web terminal without `/dash`. Pass `--no-dash` to disable it.
 
 ![The v5 console Overview](../../assets/screenshots/v5-overview.png){ .mrsm-screenshot }
-
----
 
 ## Navigation
 
 Every console page shares the same top bar:
 
-- **Logo:** Returns to [Overview](#overview).
-- **Core tabs:** **Pipes**, **Pipelines**, **Performance**, **Jobs**, **Connectors**, **Plugins**, and **Terminal** (omitted when disabled or unauthorized; **Connectors** and **Terminal** are admin-only under `--secure`).
-- **Pages:** Plugin `@web_page` links filtered by allowed plugins. Since `5.1.1`, multi-page groups collapse into nested sections with counts (groups with >3 pages start collapsed unless active), trim repeated prefixes, and nest sub-paths.
-- **Team switcher (`5.1.1`):** Shown to admins and multi-team members beside **Instance**. Select a team (or **Everyone**) to preview that team's instances, pipes, connectors, plugins, and jobs without escalating permissions; actions and the terminal pause until returning to **All teams**.
-- **Instance selector:** Sets the active instance across pages (persisted in the browser; override with `?instance=sql:other`).
-- **User menu:** **Users & Teams**, **Tokens**, **Settings**, **Grafana** (if enabled), and **Sign out**.
+| Control | What it does |
+|---|---|
+| **Logo** | Returns to [Overview](#overview). |
+| **Core tabs** | **Pipes**, **Pipelines**, **Performance**, **Jobs**, **Connectors**, **Plugins**, and **Terminal** (hidden when unauthorized). |
+| **Pages** | Plugin `@web_page` links filtered by allowed plugins; multi-page groups nest cleanly with page counts. |
+| **Team switcher** | Lets admins and multi-team members preview the console as a specific team (or **Everyone**) without escalating permissions. |
+| **Instance** | Switches the active instance across pages (override in the URL with `?instance=sql:other`). |
+| **User menu** | **Users & Teams**, **Tokens**, **Settings**, **Grafana**, and **Sign out**. |
 
-Plugin pages can opt into the full bar via `@web_page(..., navbar=True)`; see [Writing plugins](../plugins/writing-plugins.md#the-navigation-bar).
+Plugin pages can opt into this bar with `@web_page(..., navbar=True)`—see [Web Pages and Routes](../plugins/web-pages.md).
 
 ## Signing in
 
-On an empty instance, the login page shows **Create admin account** so the first user is an administrator. Self-registration is off by default (`api:permissions:registration:users: false`); when enabled, new users join **Everyone** with `api:permissions:default_role` (`editor`).
+On an empty instance, the login screen shows **Create admin account** so the first user is an administrator. Self-registration is off by default (`api:permissions:registration:users: false`).
 
-Sessions expire after `api:cache:session_expires_minutes` (30 days default) and return you to your page after login. Use `--no-auth` to skip login entirely, or `api:dash:callbacks_require_session: false` to keep login pages while allowing unauthenticated callbacks.
+- Sessions last 30 days by default (`api:cache:session_expires_minutes`).
+- Pass `mrsm start api --no-auth` for local, password-free testing.
 
 ## Overview
 
-`/dash` refreshes every 30s with tiles for **Pipes**, **Pipelines** (24h hourly runs; balanced layout when none exist yet in `5.1.1`), **Jobs & Next runs** (`job.health['next_run']`), **Recent runs**, and 24h **Performance**.
+`/dash` refreshes every 30 seconds with live tiles for **Pipes**, **Pipelines** (24h hourly runs), **Jobs & Next runs**, **Recent runs**, and 24h **Performance**.
 
 ## Performance
 
-`/dash/performance` compares duration, **rows affected/s**, and failures by Pipe or Pipeline, plus an **Engine** section (**Runs**, **Freshness**, **Backlog**, **Nodes**) filtered to readable pipes. See [Sync metrics](sync-metrics.md).
+`/dash/performance` charts duration, **rows affected/s**, and failures by Pipe or Pipeline, plus an **Engine** breakdown (**Runs**, **Freshness**, **Backlog**, **Nodes**). See [Sync metrics](sync-metrics.md).
 
 ## Terminal
 
-**Terminal** (`/dash/terminal`) pairs a command builder with an interactive web terminal. Viewing requires `webterm:use` (Operator/Admin); **Exec** also needs `actions:execute`.
+**Terminal** (`/dash/terminal`) pairs a command builder with an interactive web terminal (requires `webterm:use`; **Exec** also needs `actions:execute`):
 
 - **Admins** get a full `mrsm` shell.
-- **Non-admins** get a restricted `mrsm` shell validated against `POST /execute` (no shell commands, `!command`, `python`, editors, or SQL clients); see [Permissions](permissions.md#who-may-run-actions).
-- **Isolated teams** with plugin-write access get a sandboxed **team terminal** when host isolation holds ([Commands of a team that runs code](teams.md#commands-of-a-team-that-runs-code)); other isolated teams have no host terminal.
+- **Non-admins** get a restricted `mrsm` shell checked against `POST /execute`—no raw shell escapes, Python, or editors ([Who may run actions](permissions.md#who-may-run-actions)).
+- **Isolated teams** with `plugins_write` get a sandboxed team terminal on supported Linux hosts ([Commands of a team that runs code](teams.md#commands-of-a-team-that-runs-code)).
 
-!!! danger "⚠️ Open registration + Operator role exposes a server terminal"
-    Never combine `api:permissions:registration:users: true` with `api:permissions:default_role: operator` (or v4's `actions:non_admin: true`) on an exposed API. Use `--secure` or `--private`.
+!!! danger "⚠️ Never combine open registration with Operator"
+    Do not pair `api:permissions:registration:users: true` with `api:permissions:default_role: operator` on an exposed server. Use `mrsm start api --secure` or `--private`.
 
 <img src="/assets/screenshots/web-console-webterm.png" alt="Webterm">
 
-**Exec** submits into an idle terminal prompt; pipe **Manage** actions and Pipeline syncs run asynchronously via `POST /execute` and stream logs (`/logs/<job>/stream`) or engine events (`/engine/runs/<run_id>/events/stream`).
+Click **Exec** to run a command in the terminal, or trigger async **Manage** / Pipeline actions that stream live logs and engine events.
 
 <img src="/assets/screenshots/web-console-execute-action-button.png" alt="Execute actions via the webterm">
 
-Toolbar buttons refresh, toggle fullscreen, and open new `tmux` tabs (`+`). Sessions run on private tmux servers separate from `~/.tmux.conf`:
+Tabs run on a private `tmux` server separate from `~/.tmux.conf`:
 
 ```yaml
+# mrsm edit config api
 api:
   webterm:
     tmux:
       enabled: true
       session_suffix: _mrsm
-      config: ~/.config/meerschaum-tmux.conf  # Optional override
+      config: ~/.config/meerschaum-tmux.conf  # Optional
 ```
 
-On hosts with [isolated teams](teams.md#isolated-teams), tmux stays enabled whenever Unix sockets are denied to team code; otherwise terminals fall back to single-tab shells ([Terminals without tmux](teams.md#terminals-without-tmux)).
-
-## Connectors
-
-**Connectors** (`/dash/connectors`) lists visible connectors, types, and sources (**Config**, **Default**, **Environment**, **Plugin**). Passwords, tokens, and URI secrets are always masked as `••••••`. Admins can **Inspect** settings and click **Test connection** (using `connect_timeout` / `MRSM_CONNECT_TIMEOUT`). Connectors with `teams: [ops]` appear only to those teams.
+!!! note "Terminals without tmux"
+    If an isolated team has `plugins_write` on a host where Unix sockets are not denied, terminals fall back to single-tab shells ([Terminals without tmux](teams.md#terminals-without-tmux)).
 
 ## Pipes
 
-**Pipes** (`/dash/pipes`) shows readable [pipes](/reference/pipes/) with shareable URL filters and **All / Mine / My teams** scopes.
+**Pipes** (`/dash/pipes`) lists readable [pipes](/reference/pipes/) with shareable URL filters and **All / Mine / My teams** scopes.
 
 <img src="/assets/screenshots/web-console-pipes.png" alt="The Pipes page">
 
 | Column | Shows |
 |---|---|
-| **Pipe** | Keys and lock icon when [locked](#pipe-access-and-locks). |
+| **Pipe** | Connector, metric, location, and lock badge when [locked](#pipe-access-and-locks). |
 | **Rows** | Exact count (SQLite, DuckDB, <100k rows) or fast DB estimate (`~1.2M`). |
-| **Sync time** | Latest UTC datetime or integer timestamp. |
+| **Sync time** | Latest UTC datetime or integer watermark. |
 | **Status** | Last sync outcome across CLI, jobs, Pipelines, API, and Python. |
-| **Team / Tags / Jobs** | Team & visibility badge, [tags](/reference/pipes/tags/), and matching [jobs](/reference/background-jobs/). |
+| **Team / Tags / Jobs** | Visibility badge, [tags](/reference/pipes/tags/), and matching [jobs](/reference/background-jobs/). |
 
-### Pipe details & New pipe
-
-Click a pipe for `/dash/pipes/<connector>/<metric>[/<location>]`, offering **Sync**, **Verify**, **Edit**, and **Manage** (**Copy**, **Access…**, **Locks…**, **Clear**, **Drop**, **Delete**) across six tabs: **Overview**, **Data** (CSV export + JSON row sync), **Parameters**, **Definition** (with resolved SQL), **Lineage**, and **Runs**.
+Click any pipe to inspect **Overview**, **Data** (CSV export + JSON sync), **Parameters**, **Definition**, **Lineage**, and **Runs**, or trigger **Sync**, **Verify**, **Edit**, and **Manage**.
 
 <img src="/assets/screenshots/web-console-pipe.png" alt="A pipe's Overview">
 
-**New pipe** (`/dash/pipes/new`) mirrors `mrsm bootstrap pipes` with a 10-row SQL **Preview** (or YAML/JSON parameters) and requires `api:permissions:registration:pipes` + `pipes:register` (`pipes:define_sql` for SQL).
-
-!!! warning "SQL Preview uses the connector's credentials"
-    Non-admin SQL checks are best-effort. Revoke `pipes:define_sql`, restrict connectors with `teams:`, and use least-privilege DB users when strict isolation is required.
+Click **New pipe** (`/dash/pipes/new`) to bootstrap a pipe with a 10-row SQL **Preview** (requires `pipes:register` and `pipes:define_sql`).
 
 ### Pipe access and locks
 
-Owners, team managers, and admins manage visibility (**Its team**, **Private**, **Everyone**), edit mode (**Anyone who can see it** or **Owner and team managers**), and locks (**Edit parameters**, **Sync**, **Clear rows**, **Drop or rebuild**, **Delete**). Locks apply everywhere—console, API, CLI, Python, and jobs—even for admins. See [Teams and access](/reference/actions/teams-and-access/).
+From a pipe's **Manage** menu, owners, team managers, and admins can set:
 
-## Pipelines & Plugins
+- **Access…:** Visibility (**Its team**, **Private**, **Everyone**) and edit mode (**Anyone who can see it** vs. **Owner and team managers**).
+- **Locks…:** Block **Edit parameters**, **Sync**, **Clear rows**, **Drop or rebuild**, or **Delete** everywhere—including CLI, Python, jobs, and admins.
 
-- **Pipelines (`/dash/pipelines`):** Lists saved Pipelines with **Canvas** and **Runs** views ([Visualization](/reference/pipelines/visualization/#running-a-pipeline-in-the-console)). Unreadable members appear as **Hidden pipe**; running or clearing requires edit access to all members.
-- **Plugins (`/dash/plugins`):** **Installed** and **Repository** (`?tab=repository`) tabs with source viewer. Admins (and plugin-writing team members) can create/upload via **New plugin**, **Edit** source with conflict detection, **Publish** to API repositories, and **Install / Update / Uninstall** plugins as tracked runs.
+See [Teams, Access and Locks](/reference/actions/teams-and-access/).
+
+## Connectors, Pipelines & Plugins
+
+- **Connectors (`/dash/connectors`):** Lists visible connectors with passwords masked (`••••••`). Admins can inspect settings and click **Test connection**.
+- **Pipelines (`/dash/pipelines`):** Visual DAG **Canvas** and **Runs** timeline ([Visualization](/reference/pipelines/visualization/#running-a-pipeline-in-the-console)).
+- **Plugins (`/dash/plugins`):** Browse **Installed** and **Repository** plugins, inspect source, edit/upload via **New plugin**, publish, and install/uninstall as tracked runs.
 
 <img src="/assets/screenshots/web-console-plugins.png" alt="Plugins page">
 
 ## Jobs
 
-**Jobs** (`/dash/jobs`) groups visible [background jobs](/reference/background-jobs/) by state (**Running**, **Paused**, **Stopped**) and refreshes every 15s; **Runs** (`/dash/runs`) lists console-triggered runs.
+**Jobs** (`/dash/jobs`) groups visible [background jobs](/reference/background-jobs/) by state and refreshes every 15 seconds (**Runs** at `/dash/runs` tracks console-triggered runs):
 
 | Status | Meaning |
 |---|---|
-| **Running** | Running normally. |
+| **Running** | Healthy and running. |
 | **Stalled** | No lap completed for 3× its interval (or 1h for `--listen`). |
 | **Failing** | Consecutive failed laps while running. |
-| **Paused / Stopped / Failed** | Paused, stopped cleanly, or exited with failure. |
+| **Paused / Stopped / Failed** | Paused, stopped cleanly, or exited with an error. |
 
-Each row's **⋮** menu offers **Start**, **Pause**, **Stop**, **Restart**, **Delete**, **View logs**, and **Download logs** (`jobs:*`, `logs:read`). **New job** creates one-off, scheduled (`-s`), or looping (`--loop`) jobs (`jobs:write` + `actions:execute`).
+Use a row's **⋮** menu to **Start**, **Pause**, **Stop**, **Restart**, **Delete**, **View logs**, or **Download logs**, or click **New job** to create one-off, scheduled (`-s`), or looping (`--loop`) jobs.
 
 ## Users, Teams & Tokens
 
-- **Users & Teams (`/dash/users`, `/dash/teams`):** Admins manage users, roles/custom permissions, password resets (signing the user out), and teams; team managers manage their teams' members.
-- **Tokens (`/dash/tokens`):** Create, edit, invalidate, or delete API [tokens](/reference/api-instance/tokens/). Secrets show once, and token scopes always intersect with the owner's current permissions.
+- **Users & Teams (`/dash/users`, `/dash/teams`):** Manage users, roles, password resets, and teams (follows the active team in the top bar; pick **All teams (Admin)** for global admin).
+- **Tokens (`/dash/tokens`):** Create, edit, invalidate, or delete API [tokens](/reference/api-instance/tokens/) and generate ready-to-paste MCP client snippets.
 
-| | Viewer | Editor | Operator | Team manager | Admin |
+| Capability | Viewer | Editor | Operator | Team manager | Admin |
 |---|---|---|---|---|---|
-| Core pages (Pipes, Pipelines, Jobs, Plugins, Connectors) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Browse Pipes, Pipelines, Jobs, Plugins, Connectors | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Terminal & Exec | | | ✓ | (by role) | ✓ |
 | Register, edit, and sync pipes | | ✓ | ✓ | ✓ | ✓ |
 | Access… & Locks… | own | own | own | team's | all |
@@ -7239,17 +7284,18 @@ Each row's **⋮** menu offers **Start**, **Pause**, **Stop**, **Restart**, **De
 
 ## Dash MCP server
 
-Plotly Dash can expose the console's component tree at `/dash/_mcp` to help AI agents build [web page plugins](../plugins/types-of-plugins.md). Separate from Meerschaum's `/mcp` server and disabled by default:
+Plotly Dash can expose the console's component tree at `/dash/_mcp` to help AI agents build [web page plugins](../plugins/web-pages.md). It is separate from Meerschaum's `/mcp` server and disabled by default:
 
 ```yaml
+# mrsm edit config api
 api:
   dash:
     mcp:
       enabled: true   # requires dash>=4.3.0
 ```
 
-!!! danger "Do not enable on a public instance"
-    `/dash/_mcp` runs outside FastAPI scope checks (requiring only a session or any bearer token unless `callbacks_require_session: false`). Meerschaum limits it to layout introspection (`dash://layout`, `dash://components`, `get_dash_component`) and opts callbacks out unless decorated with `@dash_app.callback(..., mcp_enabled=True)`. Use [`/mcp`](../mcp/index.md) for data access.
+!!! danger "Development only—do not enable on a public instance"
+    `/dash/_mcp` runs outside FastAPI scope checks and is limited to layout introspection unless callbacks explicitly opt in with `mcp_enabled=True`. Use [`/mcp`](../mcp/index.md) for data access.
 
 
 ---
@@ -13867,58 +13913,48 @@ Source: https://meerschaum.io/changelog/v5/
 
 ## 5.1.2
 
-Maintenance release: leaner Docker images that share layers, stricter SQL checks for non-administrators, and console, web terminal and sync fixes.
+Maintenance release: leaner Docker images that share layers, stricter non-admin SQL checks, faster API reads on large SQL instances, and console, web terminal, and sync fixes.
 
 ### Before upgrading from 5.1.1
 
-- **Non-administrator SQL is checked more strictly.** Through the API and MCP, a query or pipe definition from a caller who is not an administrator is now refused when any SQL dialect would read it as more than one statement or as a write: a `;` inside a dollar-quoted string (`$$a;b$$`), or a mutating keyword after `#` or after `--` with no space. Administrators and local `mrsm` commands are unaffected.
-- **Docker images run as UID and GID 1000.** This was already the default; images built by the release workflow no longer inherit the build host's IDs.
-- **A standalone SQL `port` must be an integer.** Values like `abc`, `true` and `5432.0` are refused. When you supply a connection URI, Meerschaum uses the port from that URI.
+- **Non-admin SQL checks are stricter.** Non-admin queries and pipe definitions over the API or MCP are now refused if *any* SQL dialect would parse them as multi-statement or mutating (such as `;` inside `$$...$$`, or a write keyword after `#` or space-less `--`). Admins and local `mrsm` commands are unaffected.
+- **Docker images always run as `1000:1000`.** Release images no longer inherit the build host's UID/GID.
+- **Standalone SQL `port` values must be integers.** Values like `abc`, `true`, or `5432.0` are refused instead of silently falling back to a default port. If you set a `uri`, Meerschaum uses the URI's port.
 
 ### Highlights & Fixes
 
-- **Smaller downloads when updating Docker images.**  
-  The `full`, `rust-full`, `slim` and `rust` images now share their common layers (the `mrsm` binary, the Python wheel, the plugin compiler), and operating-system layers stay identical between patch releases, so `docker pull` fetches only what changed.
+- **Leaner Docker images with shared layers.**  
+  `full`, `rust-full`, `slim`, and `rust` now share common layers (`mrsm`, the Python wheel, and the Rust compiler snapshot) and keep OS layers stable across patch releases, so `docker pull` downloads only what changed.
+
+  ```bash
+  docker pull bmeares/meerschaum:5.1.2-full
+  ```
 
 - **Smaller `mrsm` binary.**  
-  Release binaries and wheels are stripped of symbols and no longer build unused Arrow and Polars features. A panic backtrace keeps its message and location; stack frames show addresses instead of function names.
+  Release binaries and wheels drop unused Arrow/Polars features and strip symbol tables (~111 MB vs. ~135 MB). Panic backtraces still show the error message and source location.
 
-- **Internal tables stay unreachable through SQL comments.**  
-  The API and MCP SQL checks read a query the way each database flavor does, so a table name hidden behind `#`, `--` or a nested `/* */` comment is refused on every flavor.
+- **Faster API reads on large SQL instances.**  
+  Pipe data and CSV requests now look up a single pipe by key instead of scanning the full catalog on SQL and Valkey instances.
 
-- **Console requests to the API ignore proxies and redirects.**  
-  The Dash console's calls to its own API server no longer honor `HTTP_PROXY` or follow redirects, so a session's credentials are only ever sent to that server.
+- **Hardened SQL comment checks.**  
+  API and MCP SQL validation checks every dialect's comment syntax so internal tables hidden behind `#`, `--`, or nested `/* */` comments are blocked everywhere.
 
-- **Job logs keep streaming past the session token's lifetime.**  
-  A log stream opened in the console renews its authorization while it runs, and ends when the session's credential is rotated or revoked.
+- **Console & web terminal fixes.**  
+  - Console calls to the API ignore `HTTP_PROXY` and redirects so session credentials stay local.
+  - Job log streams renew their session authorization while open and stop immediately if credentials are rotated or revoked.
+  - The **Users & Teams** page follows the selected team in the team switcher (choose **All teams (Admin)** to manage everyone).
+  - Isolated team permissions are computed in one place across all console pages.
+  - Web terminal fixes: a refused window no longer blocks future windows, API-only panes set `TERM`, and closed sessions stop reconnecting.
 
-- **Web terminal fixes.**  
-  A refused new window no longer blocks later ones, panes on API-only hosts get `TERM`, and a closed session tells the browser to stop instead of reconnecting.
+- **Sync, job, and database fixes.**  
+  - **Remote action results:** Log streams wait up to 2 seconds for a finished job's supervisor to save its result (and clients fall back to reading the saved result), eliminating spurious `No result available.` replies on busy hosts.
+  - **Startup pauses:** Pausing a job while it is still starting keeps its supervisor active so it can still stop cleanly when the executor exits.
+  - **SQLite / GeoPackage schema reload:** Pooled connections reload table schemas after a sync adds columns, preventing newly added columns from reading back with literal quotes.
+  - **In-place syncs:** A pipe whose source is the engine's home database but whose instance is elsewhere no longer runs in-place on the source database.
+  - **Engine metrics & Oracle:** Dropped sync metrics now log a rate-limited warning instead of vanishing silently, and Oracle instances keep internal table readiness across index DDL.
 
-- **The Users page follows the acting team.**  
-  The Users & Teams page follows the selected team. Choose **All teams (Admin)** to return to global administration.
-
-- **One console permission check.**  
-  An isolated team member's permissions are computed in one place, so the result no longer depends on which console page loaded first.
-
-- **Faster API reads on large SQL instances.** Data and CSV requests look up the requested pipe's registration by key. The registration check took 3.6 ms per request with 2,000 pipes on SQLite, down from 108 ms.
-
-- **In-place syncs stay on the pipe's instance.**  
-  A pipe whose source is the engine's home database but whose instance is another database no longer runs its sync inside the source database.
-
-- **Remote actions report their result on a busy host.**  
-  An action sent to an API instance (`mrsm api main show version`, `APIConnector.do_action()`) or a job watched in the console could end with `No result available.` although the job had succeeded: its log stream read the result before the job's supervisor had saved it. The stream now waits up to two seconds for the result, and the client reads the saved result when an older server sends none.
-
-- **Pausing a job waits for its worker.** If you pause a job while it is starting, its supervisor stays active and can still stop the job when the executor exits.
-
-- **SQLite and GeoPackage reads see a column a sync just added.**  
-  After a sync added a column, the next read on another pooled connection could return it named `"column"`, quotes included, so the column looked missing. Pooled connections now reload a changed table layout before they are used.
-
-- **Dropped engine metrics are reported.**  
-  A sync metric that cannot be written within its time budget now logs a warning (at most once a minute) instead of disappearing, and Oracle instances no longer lose their internal tables' ready state after index DDL.
-
-- **For contributors.**  
-  Rust integration tests build as 45 suite binaries instead of 411, and 47 of the 51 Rust files over 1,700 lines are split into modules named for what they own. `scripts/check_architecture.py` enforces crate layering, test wiring and file paths cited by docs in CI, and `GLOSSARY.md`, `docs/adr/` and `CODING_STANDARDS.md` describe the codebase's terms, decisions and review rules.
+- **Switched to released `sqlx 0.9.1` & contributor cleanups.**  
+  Dropped the temporary `sqlx` git patch in `Cargo.toml`, consolidated Rust integration tests from 411 binaries down to 45 suites, split oversize Rust modules, and added `scripts/check_architecture.py`, `GLOSSARY.md`, `CODING_STANDARDS.md`, and `docs/adr/`.
 
 ## 5.1.1
 

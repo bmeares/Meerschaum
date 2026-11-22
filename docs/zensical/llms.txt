@@ -27,7 +27,7 @@
 - [🕸️ Pipelines](https://meerschaum.io/reference/pipelines/): > New in v5. The Syncing Engine tracks pipe dependencies, computes the exact window each node needs, runs independent branches in parallel, and records every run.
 - [🎼 Compose Definitions](https://meerschaum.io/reference/pipelines/compose/): Declare what runs in pipelines:. Use jobs: to decide when it runs.
 - [🗃️ Engine State](https://meerschaum.io/reference/pipelines/state/): The Syncing Engine creates no local database files. All state lives on your instance as internal mrsm tables—in mrsminternal on PostgreSQL and MSSQL (suffixed for non-default schemas so instances shar
-- [♾️ Continuous Mode](https://meerschaum.io/reference/pipelines/continuous/): mrsm sync pipes --loop keeps the engine running. On a flat selection it behaves exactly as v4's laps did: every selected pipe syncs, then the process sleeps --min-seconds N after the lap ends, then th
+- [♾️ Continuous Mode](https://meerschaum.io/reference/pipelines/continuous/): Keep pipes syncing continuously with --loop (polling on an interval) or --listen (push-based streaming sources like MQTT, Kafka, AMQP, or webhooks).
 - [📊 Visualization](https://meerschaum.io/reference/pipelines/visualization/): One typed event stream drives the terminal live view, Gantt timelines, web console, Python callbacks, and HTTP SSE:
 - [🔌 Connectors](https://meerschaum.io/reference/connectors/): Meerschaum coordinates everything via connectors. Use cases for Connectors include fetching and inserting data when syncing pipes.
 - [🗂️ SQL Connectors](https://meerschaum.io/reference/connectors/sql-connectors/): Meerschaum's first-class connector is the SQLConnector. Several built-in sql connectors are defined by default:
@@ -38,12 +38,12 @@
 - [Upgrades and backups](https://meerschaum.io/reference/stack/upgrades/): Pulling newer images (mrsm stack pull or mrsm upgrade mrsm) updates your containers, not the database extensions or PostgreSQL format inside your volume. Use these four guided commands to maintain you
 - [🌐 API Instance](https://meerschaum.io/reference/api-instance/): The Meerschaum API instance (and Web Console) lets you manage pipes, jobs, and connectors over the Internet. Start the API server with the stack or via start api; see Deployment below for ways to run
 - [Security and Tokens](https://meerschaum.io/reference/api-instance/tokens/): Meerschaum tokens are long-lived API keys that grant programmatic access to a Meerschaum instance. They are a secure way to authenticate for services like IoT devices or CI/CD pipelines without using
-- [Permissions and Rate Limits](https://meerschaum.io/reference/api-instance/permissions/): An API server controls three layers under api:permissions (mrsm edit config api): enabled route groups, authentication and scopes, and rate limits.
-- [Teams on One Instance](https://meerschaum.io/reference/api-instance/teams/): Multiple teams can share one Meerschaum API instance—using the same web console, HTTP API, and MCP server while seeing only their own pipes, jobs, connectors, and plugins. An isolated team is walled o
-- [Team Execution Environments](https://meerschaum.io/reference/team-executors/): An isolated team can run its jobs, engine work, plugins, virtual environments, and terminals inside a separate executor while the main API owns authentication, permissions, team administration, and ro
+- [Permissions and Rate Limits](https://meerschaum.io/reference/api-instance/permissions/): Control who can reach your API server and what they can run under api:permissions (mrsm edit config api):
+- [Teams on One Instance](https://meerschaum.io/reference/api-instance/teams/): Multiple teams can share one Meerschaum API instance—using the same web console, HTTP API, and MCP server—while seeing only their own pipes, jobs, connectors, and plugins. An isolated team is walled o
+- [Team Execution Environments](https://meerschaum.io/reference/team-executors/): Run an isolated team's jobs, plugins, virtual environments, and web terminals in its own container or remote executor while the main API keeps ownership of login, permissions, and routing.
 - [Pipelines, Access and Actions over HTTP](https://meerschaum.io/reference/api-instance/routes/): Besides the existing pipe, user, token, plugin and job routes, an API server has routes for saved Pipelines, their runs, teams and pipe access and the console's background actions. Existing route bodi
 - [NGINX](https://meerschaum.io/reference/api-instance/nginx/): Hosting Meerschaum behind NGINX is a great way set up TLS/SSL with Let's Encrypt (certbot), especially when several sites share port 443. (The API server can also serve HTTPS by itself: see TLS / SSL
-- [Web Console](https://meerschaum.io/reference/api-instance/web-console/): The Web Console is a graphical UI for your API instance. Start the server with mrsm start api and open http://localhost:8000.
+- [Web Console](https://meerschaum.io/reference/api-instance/web-console/): The Web Console is a graphical UI for your API instance. Start the server and open http://localhost:8000:
 - [Sync Metrics](https://meerschaum.io/reference/api-instance/sync-metrics/): Find slow or failing syncs, and see how much data each Pipe or Pipeline changes.
 - [🤖 MCP Server](https://meerschaum.io/reference/mcp/): Meerschaum ships a Model Context Protocol server, so an AI agent can discover your pipes, read their data, and run actions without you writing any glue code.
 - [Tool Reference](https://meerschaum.io/reference/mcp/tools/): Every tool, resource, and prompt the MCP server exposes, generated
@@ -94,7 +94,7 @@
 
 ## Changelog
 - [Changelog](https://meerschaum.io/changelog/): Meerschaum 5 brings a Rust core, dependency-aware Pipelines, and a new web console.
-- [v5](https://meerschaum.io/changelog/v5/): Maintenance release: leaner Docker images that share layers, stricter SQL checks for non-administrators, and console, web terminal and sync fixes.
+- [v5](https://meerschaum.io/changelog/v5/): Maintenance release: leaner Docker images that share layers, stricter non-admin SQL checks, faster API reads on large SQL instances, and console, web terminal, and sync fixes.
 - [v4](https://meerschaum.io/changelog/v4/): Historical release notes for the 4.x series.
 - [v3](https://meerschaum.io/changelog/v3/): Historical release notes for the 3.x series.
 - [v2](https://meerschaum.io/changelog/v2/): Historical release notes for the 2.x series.

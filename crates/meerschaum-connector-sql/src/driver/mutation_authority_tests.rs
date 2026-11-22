@@ -193,14 +193,28 @@ async fn native_rollback_failure_is_reported_without_relabeling_it_as_authorizat
         .exec("INSERT INTO guarded_rows VALUES (1)")
         .await
         .unwrap();
-    // Deliberately end this fixture-owned native transaction behind SQLx's transaction
-    // object. Its later explicit rollback must fail, providing a real database failure
-    // rather than a mocked completion callback or a production fault-injection flag.
-    transaction.exec("ROLLBACK").await.unwrap();
+    // sqlx-sqlite 0.9.1 treats top-level ROLLBACK as a no-op once SQLite is already out of
+    // a transaction (`!in_transaction()`). Open a nested SQLx savepoint and release it behind
+    // SQLx's back while the outer transaction remains active so SQLx's explicit rollback runs
+    // `ROLLBACK TO SAVEPOINT` against a missing savepoint and returns a real database failure.
+    {
+        use sqlx::Acquire;
+        let TxInner::Sqlite(tx) = &mut transaction.inner else {
+            panic!("expected SQLite transaction");
+        };
+        let nested = tx.begin().await.unwrap();
+        // Leave SQLx's transaction depth at 2 without running the nested guard's Drop rollback.
+        std::mem::forget(nested);
+    }
+    transaction
+        .exec("RELEASE SAVEPOINT _sqlx_savepoint_1")
+        .await
+        .unwrap();
     authority.allowed.store(false, Ordering::SeqCst);
     let error = transaction.commit().await.unwrap_err();
+    let message = error.to_string().to_ascii_lowercase();
     assert!(
-        error.to_string().to_ascii_lowercase().contains("rollback"),
+        message.contains("savepoint") && !message.contains("revoked"),
         "{error}"
     );
     assert_eq!(authority.rolled_back.load(Ordering::SeqCst), 0);

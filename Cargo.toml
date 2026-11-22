@@ -100,32 +100,13 @@ arrow = { version = "60", default-features = false, features = ["ipc"] }
 # Only the Polars features a code path needs (17b, sizes in crates/meerschaum-py/PERF.md): the
 # kernel uses eager frames, IPC (its Arrow bridge), string and temporal kernels and time zones.
 polars = { version = "0.55", default-features = false, features = ["dtype-full", "ipc", "strings", "temporal", "timezones"] }
-sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "postgres", "mysql", "sqlite", "chrono", "uuid", "json", "rust_decimal"] }
+sqlx = { version = "0.9.1", default-features = false, features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "postgres", "mysql", "sqlite", "chrono", "uuid", "json", "rust_decimal"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream", "system-proxy"] }
 clap = { version = "4", features = ["derive", "env", "string"] }
 # `extension-module` is a feature of meerschaum-py (maturin turns it on), so `cargo test` links libpython.
 pyo3 = { version = "0.30", features = ["abi3-py311"] }
 # The webterm PTY bridge (`meerschaum-server`): a PTY on Unix, ConPTY on Windows.
 portable-pty = "0.9"
-
-# sqlx 0.9.0 (2026-05-21) dropped `TCP_NODELAY` (upstream issue #4335, fixed by #4336 on main, not yet
-# released): every statement's `Close` + `Ping` pair then waits on Nagle / delayed ACK (~40 ms), so a
-# non-persistent statement keeps its pooled connection busy and the next acquire opens a new one
-# (MySQL: 152 connections vs 42 for the instance sync tests, `Too many connections`; PostgreSQL ~+10%).
-# Pinned to the fix commit, whose crates are still version 0.9.0. Delete this section once sqlx 0.9.1
-# (or later) is on crates.io and `cargo update -p sqlx` resolves to it.
-# Last checked 2026-10-19 (wave 18): crates.io's newest `sqlx` / `sqlx-core` is still 0.9.0 and upstream has no
-# `v0.9.1` tag (`git ls-remote --tags https://github.com/launchbadge/sqlx`), so the pin stays. 5.0.0 does not wait for 0.9.1
-# (user decision 2026-10-19): the PyPI wheels, Docker images and release binaries use this pin; crates.io builds
-# use plain 0.9.0 with the persistent-statement mitigation; a 5.0.x release drops the pin once 0.9.1 ships.
-[patch.crates-io]
-sqlx = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
-sqlx-core = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
-sqlx-macros = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
-sqlx-macros-core = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
-sqlx-mysql = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
-sqlx-postgres = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
-sqlx-sqlite = { git = "https://github.com/launchbadge/sqlx", rev = "6e57d05490859f31aa364ca69fcb379f3a2995e6" }
 
 # Release profile, shared by the PyPI wheels (wheels.yaml), the Docker images and
 # `scripts/rust/build_py.sh --release`. Measured for the `mrsm` binary on the same tree (40-core

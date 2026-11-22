@@ -1,8 +1,10 @@
 # ♾️ Continuous Mode and Streams
 
+Keep pipes syncing continuously with `--loop` (polling on an interval) or `--listen` (push-based streaming sources like MQTT, Kafka, AMQP, or webhooks).
+
 ## 🔁 `--loop`
 
-`mrsm sync pipes --loop` keeps the engine running. On a flat selection it behaves **exactly as v4's laps did**: every selected pipe syncs, then the process sleeps `--min-seconds N` *after the lap ends*, then the next lap starts. The `-c` / `-m` / `-l` / `-t` filters, `-l _negation` and `-w 1` work as before, so existing jobs need no change:
+`mrsm sync pipes --loop` runs each lap, sleeps `--min-seconds N` after the lap finishes, and repeats:
 
 ```bash
 mrsm sync pipes -c plugin:acme -m readings --loop --min-seconds 300 -w 1 -d --name acme-readings
@@ -16,40 +18,40 @@ mrsm sync pipes -t nightly -l _staging -s 'daily starting 02:00' -d
  ✅ Finished syncing Pipe('sql:src', 'raw', instance='sql:local'):
 ```
 
-After an error in a lap the loop waits the v4 error cooldown of `2 × (N + 1)` seconds before retrying. `--engine laps` is gone; `--loop` is the only long-running mode.
+- **Graph-aware laps:** Add `--parents` or `--children` (or run a saved Pipeline with `mrsm sync pipelines daily --loop` / `mrsm start pipeline daily`) so unchanged children are skipped automatically and every lap is recorded in [run history](/reference/pipelines/state/#run-history).
+- **Error cooldown:** After a failed lap, the loop backs off by `2 × (N + 1)` seconds before retrying.
+- **Stopping:** Stop background loops with `mrsm stop jobs <name>` or press Ctrl-C in the foreground.
 
-Add `--parents` / `--children` and every lap becomes an engine run: children only sync when a parent actually changed (a skipped child costs no query against its source). The engine records each lap in the [run history](/reference/pipelines/state/#run-history).
+!!! tip "Give root pipes their own cadence"
+    Add `schedule` to a root pipe's parameters (using the same syntax as `--schedule`, such as `every 6 hours` or `daily starting 03:00`). Under `--loop`, that root only syncs when due while other pipes keep syncing every lap; children with parents in the run always follow parent updates instead of their own schedule.
 
-A saved Pipeline loops the same way: `mrsm sync pipelines daily --loop` (what [`start pipeline daily`](/reference/pipelines/#running-a-pipeline-in-the-background) runs in the background) is a graph run of the Pipeline's members on every lap, each run named after the Pipeline, and an edit of the Pipeline takes effect within half a minute.
-
-Stop a looping job with `mrsm stop jobs` or Ctrl-C.
-
-!!! note "Cadence per root"
-
-    `--min-seconds` sets the lap cadence of the whole selection. A root node (a pipe with no parent in the selection, or any pipe in a flat selection) can have its own cadence in `parameters['schedule']`, using the same grammar as `--schedule` / `-s` (`every 6 hours`, `daily starting 03:00`, ...). With `--loop`, such a pipe only syncs when its schedule is due: the other pipes keep syncing every lap, a lap in which nothing is due waits for the next fire time, and the sleep between laps is shortened to the next fire time when that is sooner than `--min-seconds`. A schedule that does not parse is ignored with a warning. In a run with `--parents` or `--children`, a pipe that has parents in the run syncs when its parents have new data and does not follow its own schedule: the loop warns about it once when it starts, naming the pipe, and `plan pipes` lists the same warning under the plan. `--schedule` itself keeps its v4 meaning: it runs the whole action on that schedule.
+    ```yaml
+    # In a root pipe's parameters
+    schedule: "every 6 hours"
+    ```
 
 ## 📡 Streaming Sources
 
-Some sources push data continuously (MQTT, Kafka, AMQP, webhooks) instead of being fetched over a bounded window. They are a distinct kind of node.
+Push-based sources (MQTT, Kafka, AMQP, webhooks) land raw rows in their own pipe while downstream pipes read bounded windows from it like any other parent.
 
-**Ingestion stays separate from transforms.** A stream source lands raw rows in its own pipe. Downstream pipes read bounded windows from it like any other parent.
-
-Run them with `--listen`:
+Start a streaming source with `--listen`:
 
 ```bash
 mrsm sync pipes -c plugin:mqtt -m sensors --listen -d --name mqtt-sensors
 ```
 
-Without `--listen`, a stream source is never run by `sync pipes --parents`: it gets the planner action `observe`, so reading its watermark and ledger is all that happens.
+Without `--listen`, `sync pipes --parents` treats a streaming source as `observe` (checks its watermark and ledger without starting a listener).
 
-### Two ways to write a stream connector
+### Writing a stream connector
 
-- **`IS_STREAMING = True` with `subscribe(pipe, sink)`** (recommended). The engine owns the micro-batching, acknowledgement and restarts. See the [migration guide](/reference/migrating-to-v5/#plugin-authors) for the plugin side. Rust plugins use the same contract over Arrow streams.
-- **The v4 pattern**: a `sync()` that subscribes and returns immediately, while callbacks call `pipe.sync()`. Keep your existing plugin as is. Under `--listen` the engine keeps the worker that ran `sync()` alive and forwards each callback `pipe.sync()` to the native sync path, supervising it like a `subscribe` stream. Every such `pipe.sync()` counts as a **flush**: the engine writes its ledger entry before the commit and emits a `stream_flushed` event with trigger `callback`, so the stream's children are triggered exactly as for a `subscribe` stream (see below). A callback that syncs a pipe outside the selection's graph is an ordinary bare sync. (The old `--loop --min-seconds 144000000` workaround still works.)
+There are two ways to build a streaming plugin:
+
+1. **`IS_STREAMING = True` + `subscribe(pipe, sink)` (recommended):** The engine manages micro-batching, commit-then-ack, and restarts. Rust plugins use the same contract over Arrow streams.
+2. **Legacy `sync()` callbacks (v4 compatible):** Keep existing plugins that subscribe inside `sync()` and call `pipe.sync()` from callbacks. Under `--listen`, the engine keeps the worker alive, tracks each callback sync as a flush, and triggers downstream children automatically.
 
 ### Micro-batching
 
-The engine's `sink` buffers rows and flushes on whichever trigger fires first. Configure it per pipe:
+The engine buffers incoming rows and flushes as soon as **any** threshold triggers. Configure `stream` in the pipe's parameters:
 
 ```yaml
 stream:
@@ -59,23 +61,26 @@ stream:
   max_bytes: 8388608
 ```
 
-| Key | Default | Purpose |
+| Key | Default | Triggers a flush when… |
 |---|---|---|
-| `idle_ms` | `250` | No message for this long: a burst ended, flush now. `auto` derives it from the moving average of message gaps, bounded to `[50 ms, max_latency_ms]` |
-| `max_latency_ms` | `2000` | Age of the oldest buffered row; limits staleness, and loss for sources that cannot acknowledge |
-| `max_rows` | `5000` | Caps memory and transaction size |
-| `max_bytes` | 8 MB | Likewise |
+| `idle_ms` | `250` | No message arrives for this long (`auto` adapts between `50 ms` and `max_latency_ms`). |
+| `max_latency_ms` | `2000` | The oldest buffered row reaches this age. |
+| `max_rows` | `5000` | Buffer reaches this many rows. |
+| `max_bytes` | `8 MB` | Buffer reaches this byte size. |
 
-Each flush performs one sync, writes one combined ledger entry per affected time chunk *before* committing, and emits a `stream_flushed` event with the row count, byte count, trigger, the smallest and largest datetime of the rows it changed (`begin`, `end`) and its `inserted` / `updated` / `upserted` counts. A v4-pattern connector's flushes have trigger `callback`, `bytes` 0 (the engine never sees the message size) and also report failures (`success: false` with the sync's `message`); a failed flush never triggers children.
+### Acknowledge after commit & supervision
 
-### Acknowledge after commit
-
-The sink's contract is that `flush()` commits, and only then does the source's acknowledgement run (MQTT QoS 1 or 2 with a persistent session and manual acknowledgement, Kafka offset commits, AMQP `basic.ack`, webhooks answering after the commit). A crash therefore redelivers instead of losing rows, and redelivered messages sync with `check_existing=True` even when the stream otherwise skips it. On a graceful stop the engine flushes and acknowledges before exiting. Sources that cannot acknowledge lose at most one `max_latency_ms` window on a crash.
-
-### Supervision
-
-If the stream stops, the engine restarts it with backoff and emits `stream_restarted` with the error. Throughput and restarts appear on the stream's lane in the [Gantt view](/reference/pipelines/visualization/).
+- **At-least-once delivery:** `sink.flush()` commits to the target database *before* acknowledging the broker (MQTT QoS 1/2, Kafka offset, AMQP `basic.ack`, or webhook response). Redelivered rows sync with `check_existing=True` so duplicates are filtered out.
+- **Automatic restarts:** If a stream disconnects or errors, the engine restarts it with backoff and logs throughput and restarts in the [Gantt view](/reference/pipelines/visualization/).
 
 ### Children of a stream
 
-In continuous mode a child of a stream source runs when the source flushes, rate-limited. Flushes that arrive while a child run is pending are coalesced into one run. The limit is the child's own `min_seconds`, else `system.engine.debounce_seconds`, else the loop's `--min-seconds`. Late or backloaded data produces ledger entries for historical chunks, and the children backfill exactly those chunks.
+In continuous mode, downstream children trigger whenever their streaming parent flushes, rate-limited so rapid bursts coalesce into a single child run.
+
+Rate-limit precedence (first set wins):
+
+1. The child pipe's `min_seconds` parameter
+2. `system.engine.debounce_seconds`
+3. The loop's `--min-seconds`
+
+Late-arriving messages write historical dirty ranges to the ledger so children backfill the exact affected windows.

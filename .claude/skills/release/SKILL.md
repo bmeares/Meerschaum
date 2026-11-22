@@ -216,8 +216,7 @@ The sdist built by CI is the one to upload (`maturin sdist --out <dir>` or `pyth
 locally give the same file; a local `python -m build` wheel is `linux_x86_64` and PyPI rejects it, so never
 upload anything from `scripts/build.sh`'s `dist/`). The sdist excludes `crates/meerschaum-py/tests/**`
 and has no `rust-toolchain.toml` (the manifests carry `rust-version = "1.95"`: read it from `Cargo.toml`, it moves with the toolchain). Building from it needs a
-Rust toolchain and network access to crates.io **and to GitHub**: the root `Cargo.toml` `[patch.crates-io]`
-points sqlx at a git revision. A pre-release `pip install` of a wheel never compiles anything.
+Rust toolchain and network access to crates.io. A pre-release `pip install` of a wheel never compiles anything.
 
 ## 5.4 PyPI **[needs explicit user authorization]**
 
@@ -261,9 +260,8 @@ level can go in any order except where a dev-dependency says otherwise, below), 
 cargo publish -p meerschaum-core --locked      # then the next one, ...
 ```
 
-Consequences to state before publishing: (1) crates.io ignores the root `[patch.crates-io]`, so the
-published SQL connector crates build against plain sqlx 0.9.x (not the pinned git revision) until sqlx 0.9.1
-ships: `scripts/rust/ci.sh publish-dry-run` is the check that this compiles. (2) Publishing cannot be undone:
+Consequences to state before publishing: (1) `scripts/rust/ci.sh publish-dry-run` checks that all published
+crates compile from their packaged tarballs against crates.io. (2) Publishing cannot be undone:
 a version can only be yanked (`cargo yank --version 5.0.0-rc.1 <crate>`), never reused, so a fix is `rc.2`
 for all crates (lockstep `=` pins). (3) `cargo install meerschaum --version 5.0.0-rc.1 --locked` builds the
 `mrsm` binary from the front crate. (4) CI never runs `cargo publish`.
