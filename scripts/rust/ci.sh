@@ -47,7 +47,8 @@
 #   guardrails   scripts/check_architecture.py, then scripts/parity/check_fixture_hygiene.sh over the tracked
 #                text files listed (one per line) in MRSM_CI_HYGIENE_FILES, or every tracked file without it.
 #   frontcrate   Compile the `meerschaum` front crate with `--no-default-features`, with each of
-#                `sql cli valkey api engine server plugin` alone (`cli` builds the `mrsm` binary), and
+#                `sql cli valkey api engine server plugin` alone (`cli` builds the `mrsm` binary), the SQL
+#                connector without its optional drivers (`-p meerschaum-connector-sql --no-default-features`), and
 #                `cargo test -p meerschaum --features full` (the `meerschaum` features are otherwise only built together by the workspace).
 #   package      cargo package --workspace --no-verify (the crates.io tarballs: manifests, `include` lists,
 #                lockstep versions) then scripts/rust/check_packages.py (size < 10 MB, no tests/fixtures/
@@ -426,6 +427,8 @@ step_frontcrate() {
     log "cargo check -p meerschaum --no-default-features --all-targets --features $feature"
     cargo check -p meerschaum --no-default-features --all-targets --features "$feature"
   done
+  log "cargo check -p meerschaum-connector-sql --no-default-features"
+  cargo check -p meerschaum-connector-sql --no-default-features
   log "cargo test -p meerschaum --features full"
   cargo test -p meerschaum --features full
 }

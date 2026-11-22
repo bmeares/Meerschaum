@@ -117,6 +117,7 @@ pub(crate) fn map_sqlx(spec: &ConnectionSpec, e: sqlx::Error, elapsed: Duration)
 }
 
 /// Map a native-driver (text) error raised while establishing the first connection.
+#[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
 pub(crate) fn map_text(spec: &ConnectionSpec, e: SqlError, elapsed: Duration) -> SqlError {
     let SqlError::Database(text) = &e else {
         return e;
