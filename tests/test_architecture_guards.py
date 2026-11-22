@@ -489,3 +489,37 @@ def test_cargo_invariants_resolve_ring_activation_not_the_lockfile(tmp_path, mon
     monkeypatch.setenv('PATH', str(tmp_path / 'empty'))
     assert guards.check_cargo_invariants(tmp_path) == []
     assert any('could not resolve' in v for v in guards.check_cargo_invariants(tmp_path, require_cargo=True))
+
+
+# ---------------------------------------------------------------------------
+# Rule 11: module paths
+# ---------------------------------------------------------------------------
+
+
+def test_module_paths_catch_path_attributes_outside_the_allowlist(tmp_path, monkeypatch):
+    _crate(tmp_path, 'meerschaum-core')
+    _write(tmp_path, 'crates/meerschaum-core/src/lib.rs',
+           '// #[path = "elsewhere.rs"] in a comment is fine\n'
+           '/* #[path = "also_fine.rs"]\nmod hidden; */\n'
+           'mod sandbox;\n')
+    _write(tmp_path, 'crates/meerschaum-core/src/sandbox.rs',
+           '#[cfg(target_os = "linux")]\n#[path = "sandbox/linux.rs"]\nmod imp;\n')
+    _write(tmp_path, 'crates/meerschaum-core/src/sandbox/linux.rs', 'pub fn f() {}\n')
+    monkeypatch.setattr(guards, 'MODULE_PATH_ATTRIBUTES',
+                        {'crates/meerschaum-core/src/sandbox.rs::imp': 'platform selection'})
+    assert guards.check_module_paths(tmp_path) == []
+
+    _write(tmp_path, 'crates/meerschaum-core/src/supervisor.rs',
+           'use std::io;\n\n#[cfg(test)]\n#[path = "supervisor_owner.rs"]\npub(crate) mod owner;\n')
+    assert guards.check_module_paths(tmp_path) == [
+        '[module-paths] crates/meerschaum-core/src/supervisor.rs:4: `#[path]` on `mod owner`: move the file '
+        'to where `mod owner;` resolves without it, or list `crates/meerschaum-core/src/supervisor.rs::owner` '
+        'with its reason in MODULE_PATH_ATTRIBUTES'
+    ]
+
+    (tmp_path / 'crates/meerschaum-core/src/supervisor.rs').unlink()
+    (tmp_path / 'crates/meerschaum-core/src/sandbox.rs').write_text('mod imp;\n', encoding='utf-8')
+    assert guards.check_module_paths(tmp_path) == [
+        '[module-paths] crates/meerschaum-core/src/sandbox.rs::imp: listed in MODULE_PATH_ATTRIBUTES '
+        'but gone; drop the entry'
+    ]

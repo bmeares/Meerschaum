@@ -21,7 +21,6 @@ use serde_json::Value as Json;
 
 use crate::error::ApiError;
 
-#[path = "pipe_special_input.rs"]
 mod special_input;
 
 pub(crate) fn special_input_hints(encoded: Option<&str>) -> Result<Map, ApiError> {

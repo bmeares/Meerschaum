@@ -6,11 +6,9 @@
 use std::io;
 
 use serde::{Deserialize, Serialize};
-#[path = "metadata_result.rs"]
 mod metadata_result;
 pub use metadata_result::MetadataResult;
 pub(super) use metadata_result::record as record_metadata_result;
-#[path = "supervisor_terminal_lock.rs"]
 mod terminal_lock;
 pub use terminal_lock::cancel_unlaunched_terminal;
 

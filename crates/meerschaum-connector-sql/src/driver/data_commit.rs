@@ -10,7 +10,6 @@ use meerschaum_connector::mutation::{
 use std::sync::Arc;
 
 #[cfg(all(test, unix))]
-#[path = "data_commit_tests.rs"]
 mod tests;
 
 /// Process-local native writer/file/schema evidence. Only repo-owned target adapters

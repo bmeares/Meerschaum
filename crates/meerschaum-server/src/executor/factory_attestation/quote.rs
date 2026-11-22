@@ -276,5 +276,4 @@ impl Pending {
 }
 
 #[cfg(test)]
-#[path = "factory_quote_tests.rs"]
 mod tests;

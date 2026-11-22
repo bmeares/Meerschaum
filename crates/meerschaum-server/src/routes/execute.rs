@@ -32,7 +32,6 @@ use crate::error::{ApiError, ApiResult};
 use crate::routes::pipes::parse_json_body;
 use crate::state::AppState;
 
-#[path = "execute_capabilities.rs"]
 mod capabilities;
 
 /// Register `POST /execute` (part of the `actions` route group).

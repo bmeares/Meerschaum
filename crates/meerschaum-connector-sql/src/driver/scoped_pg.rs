@@ -568,5 +568,4 @@ const CONTROLLED_DESTINATION: &str = "SELECT c.oid::bigint AS oid, CASE \
  LEFT JOIN pg_catalog.pg_am a ON a.oid=c.relam WHERE n.nspname=$1 AND c.relname=$2";
 
 #[cfg(test)]
-#[path = "scoped_pg_tests.rs"]
 mod tests;

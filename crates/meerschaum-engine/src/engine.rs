@@ -26,7 +26,6 @@ use meerschaum_core::{Map, Pipe, Value};
 use meerschaum_kernel::enforce::PipeInput;
 use tokio::sync::broadcast;
 
-#[path = "accepted_bare.rs"]
 mod accepted_bare;
 mod config;
 mod options;

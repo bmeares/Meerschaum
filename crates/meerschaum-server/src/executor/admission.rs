@@ -4,7 +4,6 @@
 //! requires the host's complete API-only confinement and broker before credential delivery.
 
 #[cfg(test)]
-#[path = "admission_registration_tests.rs"]
 mod registration_tests;
 
 use uuid::Uuid;

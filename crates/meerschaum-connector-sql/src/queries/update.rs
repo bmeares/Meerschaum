@@ -11,7 +11,6 @@ use crate::ident::sql_item_name_opt;
 use crate::queries::templates::update_queries;
 use meerschaum_core::pyfmt::{dedent_strip, py_format, py_isupper};
 
-#[path = "windowed_update.rs"]
 mod windowed_update;
 pub(crate) use windowed_update::{GuardedUpdate, compile_guarded_update};
 

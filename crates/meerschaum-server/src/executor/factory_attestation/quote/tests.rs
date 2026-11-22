@@ -1,4 +1,3 @@
-// Append as a private child of factory_quote after native receipt APIs are registered.
 // These exercise real Ed25519 transport verification; actual Factory/receipt provenance
 // is proved separately by the native Metadata process fixture, not fabricated here.
 use super::*;

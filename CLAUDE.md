@@ -81,7 +81,7 @@ toolchain.
 | `cargo build -p meerschaum --bin mrsm` | the debug standalone `mrsm` at `target/debug/mrsm` (what `cargo install meerschaum` builds; `tests/console` runs it). `cargo build -p meerschaum-cli` builds only `target/debug/mrsm-cli` for that crate's integration tests |
 | `scripts/rust/build_py.sh [--debug \| --profile ci]` | builds the extension with maturin into `meerschaum/_core/_native.abi3.so` (release by default, ~10 min; `--profile ci` takes 2 to 4 min and is what to use for everyday Python test runs). Needs `maturin` and Python >= 3.11 (`PYTHON=...`; keep it stable between runs or Polars rebuilds) |
 | `scripts/mrsm.sh <args>` | `python -m meerschaum` against `./test_root` + `./tests/plugins` |
-| `scripts/rust/ci.sh <step>` | reproduces each CI job; its header lists the steps. Before pushing: `ci.sh guardrails fmt clippy doc` (`guardrails` runs `scripts/check_architecture.py` and the hygiene scan; `fmt` also runs `scripts/check_packaging.py`) |
+| `scripts/rust/ci.sh <step>` | reproduces each CI job; its header lists the steps. Before pushing: `ci.sh guardrails fmt clippy doc` (`guardrails` runs `scripts/check_architecture.py` and the hygiene scan; `fmt` also runs `scripts/check_packaging.py`), plus `MRSM_PACKAGE_ALLOW_DIRTY=1 ci.sh package` after adding or moving files under `crates/` |
 | `cargo test -p <crate> --test <suite> -- <module>::` | one module of a crate's integration suite (`ls crates/<crate>/tests` lists the suites) |
 | `scripts/rust/ci.sh parity` | regenerates every `crates/*/tests/fixtures/gen_*.py` with v4.1.4 and fails on any diff |
 | `python scripts/check_packaging.py --write` | regenerates `requirements/<extra>.txt` and `crates/meerschaum-cli/src/extras.rs` |

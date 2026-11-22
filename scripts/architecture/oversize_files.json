@@ -3,7 +3,7 @@
  "crates/meerschaum-cli/src/action_docs.rs": 2068,
  "crates/meerschaum-connector-sql/src/instance/inplace/mod.rs": 2073,
  "crates/meerschaum-core/src/yaml/scanner.rs": 1743,
- "crates/meerschaum-plugin/src/single_file_runtime.rs": 2434,
+ "crates/meerschaum-plugin/src/single_file/runtime.rs": 2434,
  "meerschaum/_internal/docs/index.py": 1009,
  "meerschaum/api/dash/_plugins/_lifecycle.py": 1100,
  "meerschaum/api/dash/callbacks/dashboard.py": 1416,

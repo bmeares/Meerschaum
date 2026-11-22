@@ -10,7 +10,6 @@ use syn::{
     spanned::Spanned,
 };
 
-#[path = "single_file_markers.rs"]
 mod markers;
 use markers::{
     bool_option, host_scopes_option, plugin_argument, prompt_entry, reject_misplaced_marker,
@@ -977,7 +976,7 @@ strip = "debuginfo"
         ("user.rs", user_source),
         (
             "runtime.rs",
-            include_str!("single_file_runtime.rs").to_owned(),
+            include_str!("single_file/runtime.rs").to_owned(),
         ),
         ("rows_abi.rs", include_str!("rows_abi.rs").to_owned()),
         (
@@ -1005,9 +1004,7 @@ strip = "debuginfo"
 /// The embedded runtime, compiled into this crate for its unit tests.
 #[cfg(test)]
 #[allow(dead_code, unused_imports)]
-#[path = "single_file_runtime.rs"]
 mod runtime;
 
 #[cfg(test)]
-#[path = "single_file_tests.rs"]
 mod tests_suite;

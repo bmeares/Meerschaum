@@ -33,6 +33,8 @@ Stdlib-only and about a second. The rules:
     only lose entries or lower numbers.
 10. cargo-invariants: release profiles, slim dependency features, workspace lints, and no `ring`
     built into any target (resolved with `cargo tree` when cargo is available).
+11. module-paths: the file tree is the module tree: no `#[path]` attribute in `crates/*/src` except
+    the platform selections and shared test files listed with their reasons.
 """
 
 from __future__ import annotations
@@ -1284,6 +1286,51 @@ def check_cargo_invariants(
 
 
 # ---------------------------------------------------------------------------
+# Rule 11: the file tree is the module tree
+# ---------------------------------------------------------------------------
+
+#: Every `#[path]` attribute in `crates/*/src`, keyed `<file>::<module>`, and why the module cannot
+#: sit where `mod <module>;` resolves without one.
+MODULE_PATH_ATTRIBUTES: dict[str, str] = {
+    'crates/meerschaum-core/src/team_scope/sandbox.rs::imp':
+        'platform selection: Linux compiles the Landlock implementation, other systems an inline stub',
+    'crates/meerschaum-web/src/lib.rs::test_memory':
+        "test-only: shares the server's in-memory test instance (crates/meerschaum-server/tests/common/memory.rs)",
+}
+_PATH_ATTR_START = re.compile(r'#\[\s*path\s*=')
+_NEXT_MOD = re.compile(r'\bmod\s+(\w+)')
+
+
+def check_module_paths(root: Path = ROOT) -> list[str]:
+    """Rule 11: no `#[path]` in `crates/*/src` outside MODULE_PATH_ATTRIBUTES."""
+    violations: list[str] = []
+    found: set[str] = set()
+    for crate in _crate_dirs(root):
+        for path in sorted((crate / 'src').rglob('*.rs')):
+            text = path.read_text(encoding='utf-8')
+            if '#[' not in text or 'path' not in text:
+                continue
+            code = _strip_rust_comments(text)
+            rel = _rel(root, path)
+            for match in _PATH_ATTR_START.finditer(code):
+                module = _NEXT_MOD.search(code, match.end())
+                name = module.group(1) if module else '?'
+                key = f'{rel}::{name}'
+                found.add(key)
+                if key in MODULE_PATH_ATTRIBUTES:
+                    continue
+                line = code.count('\n', 0, match.start()) + 1
+                violations.append(
+                    f'[module-paths] {rel}:{line}: `#[path]` on `mod {name}`: move the file to where '
+                    f'`mod {name};` resolves without it, or list `{key}` with its reason in MODULE_PATH_ATTRIBUTES'
+                )
+    if (root / 'crates').is_dir():
+        for key in sorted(set(MODULE_PATH_ATTRIBUTES) - found):
+            violations.append(f'[module-paths] {key}: listed in MODULE_PATH_ATTRIBUTES but gone; drop the entry')
+    return violations
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
@@ -1298,6 +1345,7 @@ CHECKS: tuple[tuple[str, Callable[..., list[str]]], ...] = (
     ('heavy-imports', check_heavy_imports),
     ('ratchets', check_ratchets),
     ('cargo-invariants', check_cargo_invariants),
+    ('module-paths', check_module_paths),
 )
 _USES_AST = {'local-server-http', 'dash-import-cycles', 'heavy-imports', 'ratchets'}
 

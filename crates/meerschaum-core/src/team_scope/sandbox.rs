@@ -83,9 +83,7 @@ use super::{
 };
 use crate::config::Config;
 
-#[path = "sandbox/limits.rs"]
 pub mod limits;
-#[path = "runtime.rs"]
 pub mod runtime;
 
 pub use limits::{EgressProbe, HostEgress, LimitsReport, ResourceLimits};
@@ -350,6 +348,7 @@ pub fn job_work_dir_from_env() -> Option<PathBuf> {
     work.is_dir().then_some(work)
 }
 
+// Platform selection: `imp` is the Landlock implementation on Linux and an inline stub elsewhere.
 #[cfg(target_os = "linux")]
 #[path = "sandbox/linux.rs"]
 mod imp;
@@ -406,5 +405,4 @@ mod imp {
 }
 
 #[cfg(test)]
-#[path = "sandbox/tests.rs"]
 mod tests;

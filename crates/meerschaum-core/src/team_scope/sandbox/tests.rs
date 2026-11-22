@@ -3,11 +3,8 @@
 
 use super::*;
 
-#[path = "tests/filesystem.rs"]
 mod filesystem;
-#[path = "tests/rules.rs"]
 mod rules;
-#[path = "tests/sockets.rs"]
 mod sockets;
 
 fn files(dir: &Path) -> ScopeFiles {

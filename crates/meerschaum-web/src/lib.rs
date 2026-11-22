@@ -28,7 +28,8 @@ pub mod sessions;
 mod stream;
 pub mod webterm;
 
-/// The server's in-memory test instance, for this crate's unit tests.
+/// The server's in-memory test instance, for this crate's unit tests: shared from the server's
+/// test suite rather than copied, and test-only, so the published crate never compiles it.
 #[cfg(test)]
 #[path = "../../meerschaum-server/tests/common/memory.rs"]
 mod test_memory;

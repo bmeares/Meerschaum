@@ -7,7 +7,6 @@ mod schema;
 pub mod snapshot;
 mod to_sql;
 mod upsert;
-#[path = "sync/window_guard.rs"]
 mod window_guard;
 use upsert::last_row_per_key;
 

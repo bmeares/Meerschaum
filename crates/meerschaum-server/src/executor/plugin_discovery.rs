@@ -12,7 +12,6 @@ use crate::access::Access;
 use crate::auth::Principal;
 use crate::error::ApiError;
 
-#[path = "plugin_host_discovery.rs"]
 mod host;
 
 /// Private canonical operation. Public job properties never deserialize this descriptor.

@@ -20,13 +20,9 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-#[path = "sync/chunks.rs"]
 mod chunks;
-#[path = "sync/cpi.rs"]
 mod cpi;
-#[path = "sync/source_replace.rs"]
 mod source_replace;
-#[path = "sync/strategy.rs"]
 mod strategy;
 
 use chunks::{
