@@ -10,12 +10,9 @@ use meerschaum_connector::mutation::{DataWindow, RowPredicate};
 use std::sync::Arc;
 
 #[cfg(all(test, unix))]
-#[path = "window_guard_tests.rs"]
 mod tests;
 
-#[path = "schema_create.rs"]
 mod create;
-#[path = "schema_add.rs"]
 mod schema_add;
 pub(super) use schema_add::AddColumns;
 

@@ -1,4 +1,4 @@
-//! Per-root job startup admission (wave 18, design decision D23): a gate every job passes before
+//! Per-root job startup admission (design decision D23): a gate every job passes before
 //! its worker starts, so that starting many jobs at once (`compose up`, `restart jobs`, a reboot
 //! bringing every systemd unit up together) does not make them all boot, import plugins and run
 //! their first lap on top of each other.

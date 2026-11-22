@@ -11,7 +11,7 @@ from typing import Optional, Tuple, Any
 
 import meerschaum as mrsm
 from meerschaum.api import CHECK_UPDATE
-from meerschaum.api.dash.sessions import is_session_authenticated, get_username_from_session
+from meerschaum.api.dash.sessions import get_username_from_session
 from meerschaum.api.dash.components import alert_from_success_tuple, console_div, build_icon
 from meerschaum.utils.typing import WebState
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
@@ -132,8 +132,8 @@ def get_webterm(state: WebState, fullscreen_button: bool = True) -> Tuple[Any, A
 
     session_id = state['session-store.data'].get('session-id', None)
     username = get_username_from_session(session_id)
-    from meerschaum.api.dash.access import get_viewer
-    viewer = get_viewer(session_id=(str(session_id) if session_id else None))
+    from meerschaum.api.dash.access import resolve_viewer
+    viewer = resolve_viewer(session_id=(str(session_id) if session_id else None))
     if not (viewer.no_auth or (viewer.signed_in and viewer.can('webterm:use'))):
         msg = f"User '{username}' is not authorized to access the webterm."
         return (

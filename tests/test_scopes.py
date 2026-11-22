@@ -9,7 +9,7 @@ Test how the Python API host and web console grant and check scopes (no API serv
 - The web console's token forms grant all scopes with a literal `*`.
 
 The `edit` / `register` actions and the `/jobs/{name}/stop` route are native in Meerschaum 5
-(`crates/meerschaum-cli/src/native/{tokens,users}.rs`, `crates/meerschaum-server/tests/routes.rs`).
+(`crates/meerschaum-cli/src/native/{tokens,users}.rs`, `crates/meerschaum-server/tests/routes_access_suite/routes.rs`).
 """
 
 import json
@@ -88,10 +88,10 @@ def test_dash_token_form_grants_all_scopes_with_a_star():
         "t.Token = FakeToken\n"
         "t.build_tokens_register_output_modal = lambda token: ['modal']\n"
         "t.get_user_from_session = lambda session_id: SimpleNamespace(username='scope-admin')\n"
-        "access.get_viewer = lambda *a, **kw: access.make_viewer('scope-admin', admin=True)\n"
+        "access.resolve_viewer = lambda *a, **kw: access.make_viewer('scope-admin', admin=True)\n"
         "t.register_token_click(1, 'all', ['pipes:read'], True, None, {'session-id': 'signed-in'})\n"
         "t.register_token_click(1, 'some', ['pipes:read'], False, None, {'session-id': 'signed-in'})\n"
-        "access.get_viewer = lambda *a, **kw: access.ANONYMOUS\n"
+        "access.resolve_viewer = lambda *a, **kw: access.ANONYMOUS\n"
         "try:\n"
         "    t.register_token_click(1, 'anonymous', ['pipes:read'], True, None, {})\n"
         "except PreventUpdate:\n"

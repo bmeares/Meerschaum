@@ -437,7 +437,7 @@ impl JobsMonitor {
         ));
         let (tx, now) = (self.tx.clone(), self.refresh_now.clone());
         std::thread::spawn(move || {
-            // A restricted terminal asks the server, as for a typed `stop jobs <name>` (5.1).
+            // A restricted terminal asks the server, as for a typed `stop jobs <name>`.
             let word = match command {
                 JobCommand::Start => "start",
                 JobCommand::Stop => "stop",

@@ -242,6 +242,8 @@ impl<P: Plugin> Export<P> {
     ) -> CallResult {
         // SAFETY: the extension caller supplies a readable table and live callback context.
         match unsafe { crate::callbacks::enter(host) } {
+            // SAFETY: the input/output contract is this function's own, forwarded unchanged;
+            // `_scope` keeps the host table installed for the whole call.
             Ok(_scope) => unsafe { Self::invoke(bytes, input, output) },
             Err(e) => boundary(|| Err(e)),
         }

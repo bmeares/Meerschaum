@@ -102,6 +102,6 @@ def parse_uri(uri: str) -> Dict[str, Any]:
     """
     ### The Rust grammar is SQLAlchemy 2.0's (golden-tested) and its message is SQLAlchemy's:
     ### a malformed URI raises `ValueError` rather than `sqlalchemy.exc.ArgumentError`
-    ### (see PARITY.md, Wave 13 H6).
+    ### (see PARITY.md, H6).
     from meerschaum import _core
     return _core.parse_sql_uri(uri)

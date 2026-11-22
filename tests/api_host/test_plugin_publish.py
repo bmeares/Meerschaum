@@ -1,0 +1,134 @@
+"""Publish packages current source without importing it; non-admin calls are refused."""
+
+from tests.api_host._helpers import extract_json, run_python
+from tests.api_host.test_plugin_authoring import _run, plugins_dir  # noqa: F401
+
+
+def test_publish_archive_uses_current_sources_and_cli_filters(plugins_dir):
+    root, plugins = plugins_dir
+    package = plugins / 'rc30_package'
+    package.mkdir()
+    (package / '__init__.py').write_text(
+        '"""Package description."""\n__version__ = "2.3.4"\nraise RuntimeError("must not import")\n')
+    (package / 'helper.py').write_text('VALUE = 30\n')
+    (package / '__pycache__').mkdir()
+    (package / '__pycache__' / 'helper.pyc').write_bytes(b'not source')
+    (package / '.private').write_text('not for upload')
+    (plugins / 'rc30_single.py').write_text('"""Single file."""\n__version__ = "1.0"\nVALUE = 1\n')
+    out = extract_json(run_python(root, plugins, '''
+import io, json, pathlib, tarfile
+from meerschaum import _core
+out = {}
+for name in ('rc30_single', 'rc30_package'):
+    package = _core.plugin_archive(name)
+    with tarfile.open(fileobj=io.BytesIO(package.pop('archive')), mode='r:gz') as archive:
+        package['files'] = {member.name: archive.extractfile(member).read().decode()
+                            for member in archive if member.isfile()}
+    out[name] = package
+ok, msg, created = _core.bootstrap_plugin('rc30_native', 'Rust', True, ['fetch'])
+assert ok, msg
+package = _core.plugin_archive('rc30_native')
+with tarfile.open(fileobj=io.BytesIO(package.pop('archive')), mode='r:gz') as archive:
+    package['files'] = sorted(archive.getnames())
+out['native'] = package
+print('JSON:' + json.dumps(out))
+'''))
+    assert out['rc30_single']['version'] == '1.0'
+    assert out['rc30_single']['description'] == 'Single file.'
+    assert list(out['rc30_single']['files']) == ['rc30_single.py']
+    assert out['rc30_package']['version'] == '2.3.4'
+    assert out['rc30_package']['description'] == 'Package description.'
+    assert sorted(out['rc30_package']['files']) == ['rc30_package/__init__.py', 'rc30_package/helper.py']
+    assert out['rc30_package']['files']['rc30_package/helper.py'] == 'VALUE = 30\n'
+    assert out['native']['files'] == ['rc30_native/Cargo.toml', 'rc30_native/plugin.toml',
+                                      'rc30_native/src/lib.rs']
+
+
+def test_publish_refuses_non_admins_and_unconfigured_repositories(plugins_dir):
+    root, plugins = plugins_dir
+    (plugins / 'rc30_access.py').write_text('VALUE = 30\n')
+    out = extract_json(_run(root, plugins, '''
+import json, uuid
+from meerschaum.api.dash import plugin_publish as publish
+from meerschaum.api.dash._plugins._policy import rights_for_session
+admin = sign_in('rc30-admin', user_type='admin')
+viewer = sign_in('rc30-viewer', role='viewer')
+context = {'name': 'rc30_access', 'nonce': str(uuid.uuid4())}
+def as_(session):
+    return rights_for_session(session), session.get('session-id')
+print('JSON:' + json.dumps({
+    'anonymous': publish.publish(context, 'api:mrsm', *as_({})),
+    'viewer': publish.publish(context, 'api:mrsm', *as_(viewer)),
+    'login': publish.login_repository(context, 'api:mrsm', *as_(viewer), 'password',
+                                      'someone', 'secret', '', '', '')[:2],
+    'unknown': publish.publish(context, 'api:notconfigured', *as_(admin)),
+    'traversal': publish.publish({'name': '../rc30_access'}, 'api:mrsm', *as_(admin)),
+    'repositories': publish.repositories(rights_for_session(viewer)),
+}))
+'''))
+    for key in ('anonymous', 'viewer', 'login'):
+        assert out[key] == [False, 'Only administrators and team plugin managers can publish installed plugins.']
+    assert out['unknown'] == [False, 'Select a configured API repository.']
+    assert out['traversal'] == [False, 'This plugin is not installed.']
+    assert out['repositories'] == []
+
+
+def test_publish_storage_preserves_other_settings_and_reports_write_failures(plugins_dir):
+    root, plugins = plugins_dir
+    out = extract_json(run_python(root, plugins, '''
+import copy, json, os
+from unittest.mock import patch
+import meerschaum as mrsm
+from meerschaum.config import get_config
+from meerschaum.config._read_config import read_config
+from meerschaum.config._edit import write_config
+from meerschaum.api.dash import plugin_publish as publishing
+config = read_config(keys=['meerschaum'], write_missing=False, substitute=False)
+api = config['meerschaum']['connectors']['api']
+api['rc30save'] = {'host': '127.0.0.1', 'port': 18400, 'protocol': 'http',
+                   'username': 'old', 'password': 'old-test-password', 'verify': False}
+api['rc30other'] = {'host': '127.0.0.1', 'port': 18401, 'password': 'other-test-password'}
+assert write_config(config)
+get_config('meerschaum', 'connectors', 'api').update(copy.deepcopy(api))
+conn = mrsm.get_connector('api:rc30save', refresh=True)
+before = copy.deepcopy(config)
+publishing._save_credentials('api:rc30save', conn, {'api_key': 'fixture-key'})
+after = read_config(keys=['meerschaum'], write_missing=False, substitute=False)
+saved = after['meerschaum']['connectors']['api']['rc30save']
+assert saved['api_key'] == 'fixture-key' and saved['password'] is None
+assert saved['verify'] is False and saved['port'] == 18400
+before['meerschaum']['connectors']['api'].pop('rc30save')
+without_selected = copy.deepcopy(after)
+without_selected['meerschaum']['connectors']['api'].pop('rc30save')
+assert without_selected == before
+assert mrsm.get_connector('api:rc30save').login_scheme == 'api_key'
+with patch('meerschaum.config._edit.write_config', return_value=False):
+    try:
+        publishing._save_credentials('api:rc30save', conn, {'api_key': 'not-saved'})
+        raise AssertionError('A failed write must be reported')
+    except publishing.PublishError:
+        pass
+assert read_config(keys=['meerschaum'], write_missing=False, substitute=False) == after
+assert mrsm.get_connector('api:rc30save').api_key == 'fixture-key'
+os.environ['MRSM_API_RC30SAVE'] = 'http://environment:controlled@127.0.0.1:18400'
+try:
+    publishing._save_credentials('api:rc30save', conn, {'api_key': 'not-saved'})
+    raise AssertionError('Environment credentials would override the saved key')
+except publishing.PublishError as error:
+    assert 'environment settings' in str(error)
+assert read_config(keys=['meerschaum'], write_missing=False, substitute=False) == after
+browser = {'session': 'session-a', 'repositories': {'api:rc30save': {
+    'url': conn.url, 'credentials': {'api_key': 'temporary-key'}}}}
+assert publishing.browser_credentials(browser, ('session-a', 'api:rc30save'), conn.url)
+assert publishing.browser_credentials(browser, ('session-b', 'api:rc30save'), conn.url) is None
+assert publishing.browser_credentials(browser, ('session-a', 'api:rc30save'), 'http://127.0.0.1:18402') is None
+print('JSON:' + json.dumps({'preserved': True}))
+'''))
+    assert out == {'preserved': True}
+    fresh = extract_json(run_python(root, plugins, '''
+import json, meerschaum as mrsm
+conn = mrsm.get_connector('api:rc30save')
+print('JSON:' + json.dumps({'saved': conn.api_key == 'fixture-key',
+                          'scheme': conn.login_scheme}))
+'''))
+    assert fresh == {'saved': True, 'scheme': 'api_key'}

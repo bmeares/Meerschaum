@@ -37,21 +37,15 @@ def filter_options(options=None, value=None, kind='Pipe'):
     return choices
 
 
-def fresh_viewer(session: Any):
-    from meerschaum.api.dash.users import viewer
-    who = viewer(session)
-    if not who['active'] or not who['viewer'].can('pipes:read'):
-        raise PermissionError('Performance is not available to your account.')
-    return who['viewer']
-
-
 def metrics(instance_keys: Optional[str], session: Any, window='24h', pipe=None, pipeline=None,
             with_options=True):
     """Build trusted visibility ceilings on the host, before native aggregation."""
     import meerschaum as mrsm
     from meerschaum.api.dash import access, engine
     from meerschaum.api.dash.connector_listing import connector_team_allows
-    who = fresh_viewer(session)
+    who = access.resolve_viewer(session, fresh=True)
+    if not who.can_read_pipes:
+        raise PermissionError('Performance is not available to your account.')
     instance = engine.get_instance(instance_keys, strict=True)
     if not connector_team_allows(str(instance), who):
         raise PermissionError('This instance is not available to your account.')

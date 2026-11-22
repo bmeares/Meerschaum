@@ -6,6 +6,7 @@
 
 use indexmap::IndexMap;
 use meerschaum_connector::{ConnectorResult, PipeId, PipeKeysEntry, PipesKeys, PipesKeysQuery};
+use meerschaum_core::static_config::{negation_prefix, separate_negation_values};
 use meerschaum_core::value::apply_patch_maps;
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 use meerschaum_kernel::value::Value as KValue;
@@ -14,7 +15,6 @@ use crate::driver::SqlParam;
 use crate::driver::params::{placeholder, placeholders};
 use crate::flavor::Flavor;
 use crate::queries::table::get_table_exists_query;
-use crate::where_clause::negation_prefix;
 
 use super::{SqlConnector, be, frame_docs, kv_int, kv_str};
 
@@ -35,20 +35,6 @@ pub(crate) fn bump_metadata_epoch(res: SuccessTuple) -> SuccessTuple {
         METADATA_WRITES.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     }
     res
-}
-
-/// `separate_negation_values(vals)`.
-pub fn separate_negation_values(values: &[String]) -> (Vec<String>, Vec<String>) {
-    let prefix = negation_prefix();
-    let mut inc = Vec::new();
-    let mut exc = Vec::new();
-    for v in values {
-        match v.strip_prefix(prefix) {
-            Some(rest) => exc.push(rest.to_string()),
-            None => inc.push(v.clone()),
-        }
-    }
-    (inc, exc)
 }
 
 /// Parse the stored `parameters` (JSONB on PostgreSQL, JSON text elsewhere).
@@ -160,6 +146,9 @@ impl SqlConnector {
 
     /// `register_pipe(pipe)`: insert the pipe's keys and parameters into `mrsm_pipes`.
     pub async fn register_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         if let Some(refused) = self.protected_refusal(pipe, "register") {
             return refused;
         }
@@ -194,6 +183,7 @@ impl SqlConnector {
 
     /// `get_pipe_id(pipe)`: the pipe's `pipe_id`, or `None` (always `None` for temporary pipes).
     pub async fn get_pipe_id(&self, pipe: &Pipe) -> ConnectorResult<Option<i64>> {
+        self.ensure_schema().await?;
         if pipe.temporary {
             return Ok(None);
         }
@@ -240,6 +230,7 @@ impl SqlConnector {
     /// it, two round trips; the id comes back with the row.) A temporary pipe, and a database
     /// without the instance tables, have no row.
     pub async fn get_pipe_attributes(&self, pipe: &Pipe) -> ConnectorResult<Map> {
+        self.ensure_schema().await?;
         if pipe.temporary
             || (!crate::driver::mysql_authority::active()
                 && !self.tables_ready()
@@ -311,6 +302,9 @@ impl SqlConnector {
 
     /// `edit_pipe(pipe, patch)`: persist the pipe's in-memory parameters.
     pub async fn edit_pipe(&self, pipe: &Pipe, patch: bool) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         if let Some(refused) = self.protected_refusal(pipe, "edit") {
             return refused;
         }
@@ -368,6 +362,7 @@ impl SqlConnector {
         expected: &Map,
         parameters: &Map,
     ) -> ConnectorResult<bool> {
+        self.ensure_schema().await?;
         let Some(old_name) = source.location_key() else {
             return Ok(false);
         };
@@ -546,8 +541,11 @@ impl SqlConnector {
     }
 
     /// `delete_pipe(pipe)`: delete the pipe's registration (the table is dropped by
-    /// `Pipe.delete()` beforehand).
+    /// `Pipe.delete()` beforehand) and forget its Syncing Engine state on success.
     pub async fn delete_pipe(&self, pipe: &Pipe) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         if let Some(refused) = self.protected_refusal(pipe, "delete") {
             return refused;
         }
@@ -567,10 +565,18 @@ impl SqlConnector {
             "DELETE FROM {table} WHERE {table}.pipe_id = {}",
             placeholder(self.flavor, 1)
         );
-        bump_metadata_epoch(match self.exec_params(&query, &[SqlParam::Int(id)]).await {
+        let res = bump_metadata_epoch(match self.exec_params(&query, &[SqlParam::Int(id)]).await {
             Some(_) => SuccessTuple::ok("Success"),
             None => SuccessTuple::fail(format!("Failed to delete registration for {pipe}.")),
-        })
+        });
+        let provider = self.instance_provider();
+        meerschaum_connector::pipe_ops::forget_engine_state_after(
+            self,
+            Some(provider.as_ref()),
+            pipe,
+            res,
+        )
+        .await
     }
 
     /// `fetch_pipes_keys(connector_keys, metric_keys, location_keys, tags, params)`: a mapping
@@ -580,6 +586,7 @@ impl SqlConnector {
     /// `mrsm` pipes are left out unless `connector_keys` names `mrsm`
     /// ([`meerschaum_connector::hides_internal_pipes`]).
     pub async fn fetch_pipes_keys(&self, query: &PipesKeysQuery) -> ConnectorResult<PipesKeys> {
+        self.ensure_schema().await?;
         let f = self.flavor;
         let table = self.instance_table_name("mrsm_pipes");
         let schema = self.instance_schema();
@@ -674,15 +681,22 @@ impl SqlConnector {
                 if vals.is_empty() {
                     continue;
                 }
-                let none = next(&mut binds, SqlParam::Text("None".into()));
+                // An inclusive list without the NULL sentinel already excludes NULL.
+                // Leave the column bare so the registry's key index can serve the filter.
+                let column = if matches!(*col, "connector_keys" | "metric_key")
+                    && op == "IN"
+                    && !vals.iter().any(|value| value == "None")
+                {
+                    format!("{table}.{col}")
+                } else {
+                    let none = next(&mut binds, SqlParam::Text("None".into()));
+                    format!("coalesce({table}.{col}, {none})")
+                };
                 let ps: Vec<String> = vals
                     .into_iter()
                     .map(|v| next(&mut binds, SqlParam::Text(v)))
                     .collect();
-                wheres.push(format!(
-                    "coalesce({table}.{col}, {none}) {op} ({})",
-                    ps.join(", ")
-                ));
+                wheres.push(format!("{column} {op} ({})", ps.join(", ")));
             }
         }
         // Meerschaum's internal pipes (saved Pipelines' registry pipes, ...) stay out of

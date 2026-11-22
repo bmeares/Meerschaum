@@ -185,7 +185,7 @@ def _untimed(message):
     ### The labels of the throwaway instances end in a random suffix.
     message = re.sub(r'\b(w13h|w15l_source)_[0-9a-f]{6,8}\b', r'\1_X', message)
     ### A SQLite source hands v4 its datetimes as text, so v4's chunk label carries the stored
-    ### microseconds; the native flow labels the parsed datetimes (PARITY.md, wave 15 L).
+    ### microseconds; the native flow labels the parsed datetimes (PARITY.md, sync paths).
     return re.sub(r'(\d\d:\d\d:\d\d)\.000000', r'\1', message)
 
 
@@ -822,7 +822,7 @@ print('LEAN_OK')
 
 
 ###########################################################################################
-### Wave 15 (task L): `Pipe.sync()` with no data runs the pipe's source natively.
+### `Pipe.sync()` with no data runs the pipe's source natively.
 ###########################################################################################
 
 def _source_pipe(instance, connector_keys, metric, **params):
@@ -1267,7 +1267,7 @@ def test_a_worker_killed_while_idle_is_replaced(instance, native_calls):
 
 
 ###########################################################################################
-### Wave 15 (L) follow-up: exact `numeric` read-back and the live config in a native sync.
+### Exact `numeric` read-back and the live config in a native sync.
 ###########################################################################################
 
 def _numeric_instance(flavor, tmp_path):

@@ -3,21 +3,14 @@
 # vim:fenc=utf-8
 
 """
-The console's Pipes pages (rc15 Q3, Q4, Q27, B5): the table's rows, filters, search, sort, pages
+The console's Pipes pages: the table's rows, filters, search, sort, pages
 and slow columns; a pipe's page (routes, tabs, actions only for sessions that may run them,
 confirmations, Copy); New pipe (flavor-correct preview limits, the datetime guess, parameters,
 registration rules). In process, on the sandbox's SQLite instance; no server.
 """
 
-import json
 
-from tests.api_host._helpers import AS_VIEWER, run_python, sandbox  # noqa: F401
-
-
-def _json(result) -> dict:
-    assert result.returncode == 0, result.stderr[-6000:]
-    line = [l for l in result.stdout.splitlines() if l.startswith('JSON:')][-1]
-    return json.loads(line[len('JSON:'):])
+from tests.api_host._helpers import AS_VIEWER, run_python, extract_json
 
 
 SEED = '''
@@ -36,13 +29,13 @@ def make(ck, mk, lk=None, **params):
 def test_routes_build_each_pipes_page_with_its_keys(sandbox):
     """`/dash/pipes`, `/dash/pipes/new` and a pipe's page (each encoded key round-trips)."""
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, AS_VIEWER + '''
+    out = extract_json(run_python(root, plugins, AS_VIEWER + '''
 import json
 from urllib.parse import urlsplit
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.pages import pipes as pages
-from meerschaum.api.dash import engine, pipes_access
+from meerschaum.api.dash import access, engine
 
 def ids(layout):
     return {getattr(node, 'id', None) for node in pages._walk(layout)}
@@ -97,7 +90,7 @@ print('JSON:' + json.dumps(out))
 
 def test_table_rows_filters_search_sort_pages_and_slow_columns(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 from meerschaum.api.dash import pipes_table as pt
 import pandas as pd
 make('tbl', 'alpha', columns={'datetime': 'ts'}, tags=['prod', 'gvl'])
@@ -193,7 +186,7 @@ print('JSON:' + json.dumps(out))
 
 def test_jobs_index_matches_sync_jobs_and_pipeline_schedules(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 from meerschaum.api.dash import pipes_table as pt
 import meerschaum.jobs as jobs_module
 from meerschaum.core.Pipeline._saved import save_pipeline
@@ -255,7 +248,7 @@ print('JSON:' + json.dumps(out))
 
 def test_pipe_tabs_edit_mode_and_actions(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, extra_env={
+    out = extract_json(run_python(root, plugins, extra_env={
         'MRSM_SQL_ELSEWHERE': f"sqlite:///{root / 'elsewhere.db'}",
     }, code=SEED + '''
 import pandas as pd
@@ -345,10 +338,9 @@ print('JSON:' + json.dumps(out, default=str))
 
 def test_new_pipe_preview_limits_guess_and_registration(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 import pandas as pd
-from meerschaum.api.dash import new_pipe as np_
-from meerschaum.api.dash import pipes_access
+from meerschaum.api.dash import access, new_pipe as np_
 src = make('np', 'source', columns={'datetime': 'ts', 'id': 'station'})
 assert src.sync(pd.DataFrame({
     'ts': pd.date_range('2026-01-01', periods=30, freq='h'), 'station': [i % 3 for i in range(30)],
@@ -386,9 +378,7 @@ import meerschaum.config as config
 original = config.get_config
 config.get_config = lambda *keys, **kwargs: (False if keys == ('api', 'permissions', 'registration', 'pipes')
                                              else original(*keys, **kwargs))
-pipes_access.get_config = config.get_config
-import meerschaum.api.dash.pipes_access as access_module
-out['refused'] = access_module.can_register({'session-id': 'x'})
+out['refused'] = access.resolve_viewer({'session-id': 'x'}).can_register_pipes()
 print('JSON:' + json.dumps(out, default=str))
 '''))
     assert out['preview'] == ['', 10, ['ts', 'station', 'value']]
@@ -421,7 +411,7 @@ print('JSON:' + json.dumps(out, default=str))
 
 def test_callbacks_refuse_sessions_that_may_not_act_and_need_the_metric_typed(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, AS_VIEWER + SEED + '''
+    out = extract_json(run_python(root, plugins, AS_VIEWER + SEED + '''
 from unittest import mock
 from dash._callback_context import context_value
 from dash._utils import AttributeDict
@@ -429,7 +419,7 @@ from dash.exceptions import PreventUpdate
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.callbacks import pipes as callbacks
-from meerschaum.api.dash import pipe_detail, pipes_access
+from meerschaum.api.dash import access, pipe_detail
 pipe = make('cb', 'metric')
 meta = pipe_detail.meta_of(pipe)
 ref = pipe_detail.pipe_ref(pipe)
@@ -491,7 +481,7 @@ out['deep_link'] = callbacks.update_location_on_pipes_filter_change([], [], [], 
 out['scope_link'] = callbacks.update_location_on_pipes_filter_change([], [], [], [], 'any', None, 'mine', '', {'instance': 'x', 'global': 'x'})
 ### Preview runs the query with the connector's credentials: only for those who may register pipes.
 previewed = []
-with mock.patch.object(pipes_access, 'can_register', return_value=(False, 'Registering is off here.')), \
+with mock.patch.object(access.Viewer, 'can_register_pipes', return_value=(False, 'Registering is off here.')), \
         mock.patch('meerschaum.api.dash.new_pipe.preview_query', lambda *args, **kwargs: previewed.append(args) or (None, '')):
     trigger('new-pipe-preview.n_clicks')
     refused = callbacks.preview_new_pipe(1, 'sql:apihosttest', 'SELECT 1', str(instance), None, {'session-id': 'x'})
@@ -523,25 +513,26 @@ def test_secure_mode_leaves_actions_and_registration_to_administrators(sandbox):
     only administrators run actions, edit or register pipes in the console; everyone signed in reads.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import os, json
 os.environ['MRSM_API_HOST_CONFIG'] = json.dumps({'mrsm_instance': 'sql:apihosttest', 'actions_non_admin': False})
 import meerschaum as mrsm
 from meerschaum.api import get_api_connector
 from meerschaum.core import User
-from meerschaum.api.dash import sessions, pipes_access
+from meerschaum.api.dash import access, sessions
 conn = get_api_connector()
 assert conn.register_user(User('secadmin', 'correct-horse-9', instance=conn, type='admin'))[0]
 assert conn.register_user(User('secuser', 'correct-horse-9', instance=conn))[0]
 sessions.set_session('00000000-0000-4000-8000-0000000b5a01', {'username': 'secadmin'})
 sessions.set_session('00000000-0000-4000-8000-0000000b5a02', {'username': 'secuser'})
-admin = {'session-id': '00000000-0000-4000-8000-0000000b5a01'}
-user = {'session-id': '00000000-0000-4000-8000-0000000b5a02'}
+admin = access.resolve_viewer({'session-id': '00000000-0000-4000-8000-0000000b5a01'})
+user = access.resolve_viewer({'session-id': '00000000-0000-4000-8000-0000000b5a02'})
+anon = access.resolve_viewer({})
 print('JSON:' + json.dumps({
-    'act': [pipes_access.can_act(admin), pipes_access.can_act(user)],
-    'register': [pipes_access.can_register(admin)[0], pipes_access.can_register(user)[0]],
-    'write': [pipes_access.can_write_pipes(admin)[0], pipes_access.can_write_pipes(user)[0]],
-    'read': [pipes_access.can_read(admin), pipes_access.can_read(user), pipes_access.can_read({})],
+    'act': [admin.can_act, user.can_act],
+    'register': [admin.can_register_pipes()[0], user.can_register_pipes()[0]],
+    'write': [admin.can_write_pipes()[0], user.can_write_pipes()[0]],
+    'read': [admin.can_read_pipes, user.can_read_pipes, anon.can_read_pipes],
 }))
 '''))
     assert out['act'] == [True, False]
@@ -558,7 +549,7 @@ def test_a_pipe_whose_instance_cannot_be_read_is_not_called_unregistered(sandbox
     returns to the table only once the pipe is read as gone.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, extra_env={
+    out = extract_json(run_python(root, plugins, extra_env={
         'MRSM_SQL_W7DOWN': 'postgresql://w7user:W7-down-s3cret@127.0.0.1:1/w7',
     }, code=AS_VIEWER + SEED + '''
 from unittest import mock
@@ -569,7 +560,7 @@ from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.callbacks import pipes as callbacks
 from meerschaum.api.dash.pages import pipes as pages
-from meerschaum.api.dash import pipe_detail, pipes_access
+from meerschaum.api.dash import access, pipe_detail
 
 def trigger(prop_id, value=1):
     context_value.set(AttributeDict(**{'triggered_inputs': [{'prop_id': prop_id, 'value': value}]}))
@@ -601,9 +592,7 @@ as_viewer('down-editor', admin=False, role='editor')
 trigger('pipe-detail-tabs.active_tab', 'overview')
 results['down_editor'] = callbacks.render_pipe_detail_tab('overview', False, 0, pipe_detail.meta_of(down), session)['registered']
 as_viewer()
-with mock.patch.object(pipes_access, 'can_read', return_value=True), \\
-        mock.patch.object(pipes_access, 'can_act', return_value=True), \\
-        mock.patch.object(pipes_access, 'can_register', return_value=(True, '')):
+with mock.patch.object(access.Viewer, 'can_register_pipes', return_value=(True, '')):
     for name, pipe in (('registered', registered), ('missing', missing), ('down', down)):
         trigger('pipe-detail-tabs.active_tab', 'overview')
         result = callbacks.render_pipe_detail_tab('overview', False, 0, pipe_detail.meta_of(pipe), session)
@@ -651,7 +640,7 @@ def test_connector_lists_leave_out_the_hosts_own_variables(sandbox):
     own environment variables read as connectors (`api:host`, `api:host_config`, the proxy token).
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, extra_env={
+    out = extract_json(run_python(root, plugins, extra_env={
         'MRSM_API_HOST_PROXY_TOKEN': 'w7-proxy-token-s3cret',
     }, code=SEED + '''
 from meerschaum.api.dash import build_dash_app
@@ -683,14 +672,14 @@ print('JSON:' + json.dumps({
 
 def test_the_search_is_in_the_url_and_only_key_filters_reload_the_rows(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, AS_VIEWER + SEED + '''
+    out = extract_json(run_python(root, plugins, AS_VIEWER + SEED + '''
 from dash._callback_context import context_value
 from dash._utils import AttributeDict
 from dash.exceptions import PreventUpdate
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.callbacks import pipes as callbacks
-from meerschaum.api.dash import pipes_table as pt, pipes_access
+from meerschaum.api.dash import pipes_table as pt
 from meerschaum.api.dash.pages import pipes as pages
 make('srch', 'store_1', tags=['retail'])
 make('srch', 'store_2', tags=['retail'])
@@ -745,7 +734,7 @@ print('JSON:' + json.dumps(out))
 def test_switches_say_what_they_show(sandbox):
     """The read-only Parameters and Definition tabs name their switches in plain words."""
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SEED + '''
+    out = extract_json(run_python(root, plugins, SEED + '''
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash import pipe_detail
@@ -768,7 +757,7 @@ def test_the_table_is_escaped_html_and_its_statistics_follow_each_render(sandbox
     sorted header says so (`aria-sort`); each render asks for the statistics the page still needs.
     """
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, AS_VIEWER + SEED + '''
+    out = extract_json(run_python(root, plugins, AS_VIEWER + SEED + '''
 from html.parser import HTMLParser
 from unittest import mock
 from dash._callback_context import context_value
@@ -777,7 +766,7 @@ from dash.exceptions import PreventUpdate
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
 from meerschaum.api.dash.callbacks import pipes as callbacks
-from meerschaum.api.dash import pipes_table as pt, pipes_access
+from meerschaum.api.dash import pipes_table as pt
 make('html', "o'brien <b>&{x}", 'loc/with slash', tags=['t"1', '{t2}', 'two\\nlines'])
 make('html', 'plain')
 rows = pt.list_rows(instance, connector_keys=['html'])

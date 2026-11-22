@@ -1,9 +1,9 @@
-//! The stack's Grafana reads the main database through a read-only role (5.1).
+//! The stack's Grafana reads the main database through a read-only role.
 //!
 //! The stack provisions a data source named "Meerschaum Main" in Grafana's main organization
 //! (`stack:grafana:datasource`, written to Grafana's provisioning directory). Up to 5.0 it
 //! connected with `sql:main`'s credentials: the database's owner, a superuser in the stack's own
-//! database. Since 5.1, whenever `mrsm stack` writes the stack's files:
+//! database. Whenever `mrsm stack` writes the stack's files:
 //!
 //! - **The data source.** A "Meerschaum Main" whose `user` is `sql:main`'s user (whether the
 //!   config holds the `MRSM{...}` references of the default or the literal values), or has no
@@ -43,7 +43,7 @@ pub const PASSWORD_VARIABLE: &str = "MRSM_READONLY_PASSWORD";
 /// The [`SERVICE`] command when its passwords are in the environment.
 const ENV_COMMAND: &str = "printf '%s\\n' \"$MRSM_READONLY_SQL\" | psql -X -v ro_password=\"$MRSM_READONLY_PASSWORD\" -f -";
 
-/// The [`SERVICE`] command when its two passwords are in files (5.1, [`super::stack_secrets`]):
+/// The [`SERVICE`] command when its two passwords are in files ([`super::stack_secrets`]):
 /// the owner's at `owner_path`, the role's at `password_path`. Neither is in the container's
 /// configuration (`docker inspect`), and a file that cannot be read stops the setup (and so
 /// Grafana) before `psql` runs.
@@ -58,14 +58,8 @@ pub fn file_command(owner_path: &str, password_path: &str) -> String {
 /// The provisioned data source's name.
 pub const MAIN_DATASOURCE: &str = meerschaum_core::config::grafana_readonly::MAIN_DATASOURCE_NAME;
 
+use meerschaum_core::config::grafana_readonly::trimmed_text;
 pub use meerschaum_core::config::grafana_readonly::{MainSource, switch_main_datasource};
-
-fn text(value: Option<&Value>) -> String {
-    match value {
-        None | Some(Value::Null) => String::new(),
-        Some(v) => v.py_str().trim().to_string(),
-    }
-}
 
 /// The schemas `stack:grafana:readonly_schemas` asks the role to read too (a list or a
 /// comma-separated string), and those refused: the schema of a connector reserved for teams
@@ -89,7 +83,7 @@ pub fn readonly_schemas(stack_grafana: &Map, sql_connectors: &Map) -> (Vec<Strin
         .values()
         .filter_map(|attrs| attrs.as_map())
         .filter(|attrs| attrs.get("teams").is_some_and(|t| !t.is_null()))
-        .map(|attrs| text(attrs.get("schema")))
+        .map(|attrs| trimmed_text(attrs.get("schema")))
         .filter(|s| !s.is_empty())
         .collect();
     let mut granted = Vec::new();
@@ -318,11 +312,11 @@ pub fn anonymous_warning(datasource: &Value, source: &MainSource) -> Option<Stri
     }
     if let Some(Value::List(sources)) = datasource.get("datasources") {
         for source in sources {
-            let name = text(source.get("name"));
+            let name = trimmed_text(source.get("name"));
             if name == MAIN_DATASOURCE {
                 continue;
             }
-            let user = text(source.get("user"));
+            let user = trimmed_text(source.get("user"));
             listed.push(if user.is_empty() {
                 format!("'{name}'")
             } else {

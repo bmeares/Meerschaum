@@ -1,5 +1,5 @@
 //! The actions that used to fall through to the Python worker's `core_action`
-//! (`meerschaum/actions/*.py`), wave 15 group A, and the dispatch that routes them:
+//! (`meerschaum/actions/*.py`), and the dispatch that routes them:
 //!
 //! - [`run`]: the entry point `dispatch::run_action` calls for any function name [`handles`]
 //!   accepts: `login`, `os`, `sql`, `stack`, `api`, `bootstrap`, the connector, token, cache and

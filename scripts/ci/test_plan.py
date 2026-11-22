@@ -98,7 +98,7 @@ def main() -> int:
     result.update(
         wheel_artifact='wheels-ubuntu-latest' if args.profile == 'release' else 'pytest-wheel',
         binary_artifact=f'mrsm-{convert(version)}-x86_64-unknown-linux-gnu' if args.profile == 'release' else 'pytest-binary',
-        binary_profile='release' if args.profile == 'release' else 'debug',
+        binary_profile='release' if args.profile == 'release' else 'ci',
     )
     lines = [f'{name}={json.dumps(value, separators=(",", ":")) if not isinstance(value, str) else value}'
              for name, value in result.items()]

@@ -845,7 +845,7 @@ pub fn get_project_name(config: &Map, msgs: &mut Messages) -> Result<Value, Comp
             "Could not determine the project name. Is `project_name` set?",
         ));
     };
-    // rc6: custom files identify independent projects in a shared directory. Conventional
+    // Custom files identify independent projects in a shared directory. Conventional
     // filenames retain directory identity, including dots in the directory's name.
     let filename = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
     let name = if DEFAULT_COMPOSE_FILE_CANDIDATES.contains(&filename) {

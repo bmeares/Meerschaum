@@ -7,7 +7,7 @@ use crate::schedule::EwmaDurations;
 use crate::state::{MemoryState, MemoryStateData};
 use crate::{Begin, Depth, GraphOptions, Pipeline, Selection};
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[derive(Debug)]
 struct ScriptedAuthority {

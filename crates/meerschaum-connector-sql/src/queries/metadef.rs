@@ -222,7 +222,7 @@ pub(crate) fn get_pipe_metadef_for_execution(
     metadef_impl(flavor, args, true, false)
 }
 
-/// The query a sync runs ([`get_pipe_metadef_for_execution`] plus the rc15 corrections, which
+/// The query a sync runs ([`get_pipe_metadef_for_execution`] plus the sync corrections, which
 /// `SQLConnector.get_pipe_metadef()` does not show): SQLite / GeoPackage compare the datetime
 /// column in its canonical text form ([`sqlite_canonical_datetime`]), and `params` on the
 /// pipe's declared text / index columns match null-like strings as text.
@@ -519,8 +519,7 @@ fn metadef_impl(
     }
 
     if let Some(params) = args.params {
-        // In a sync, the pipe's declared text / index columns match null-like strings as text
-        // (rc15 Q18).
+        // In a sync, the pipe's declared text / index columns match null-like strings as text.
         let params_where = if sync {
             let explicit = crate::pipe::str_map(&pipe.dtypes());
             let index: Vec<String> = crate::pipe::str_map(&pipe.columns())

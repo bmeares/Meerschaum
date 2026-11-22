@@ -24,7 +24,7 @@ pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
     // `/users/register` and `/users/edit` reach `DELETE /users/{username}`.
     app.route("/users/me", get(read_current_user).delete(delete_static))
         .route("/users", get(get_users))
-        // rc15 access model (the v5 shape): every user's permissions and teams, one user's.
+        // The access model (the v5 shape): every user's permissions and teams, one user's.
         .route(
             "/users/permissions",
             get(list_permissions).delete(delete_static),
@@ -47,7 +47,7 @@ pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
 
 /// One user's row of `GET /users/permissions` (`None` when the user does not exist): type, role,
 /// effective permissions, teams, primary team, and the email address when `caller` may see it
-/// (AC13: their own, administrators, the managers of a team the user is in).
+/// (their own, administrators, the managers of a team the user is in).
 async fn user_row(
     state: &AppState,
     caller: &crate::access::Access,
@@ -431,7 +431,7 @@ fn keep_reserved(stored: &Map, mut given: Map) -> Result<Map, &'static str> {
 
 /// `POST /users/register`.
 ///
-/// - **First run** (rc15): while the user store has no users, anyone may register (also under
+/// - **First run**: while the user store has no users, anyone may register (also under
 ///   `--private`, whatever `api:permissions:registration:users` says) and the first account is
 ///   an administrator. Registrations are serialized so two visitors cannot both be first.
 /// - **Administrators** register users whatever the registration setting, and may set their
@@ -598,7 +598,7 @@ async fn edit_user(ctx: Ctx, body: Body) -> ApiResult {
     };
     let is_admin = crate::access::rules::is_admin_type(user_type.as_deref());
     if is_admin && let Some(t) = form_get(&form, "type") {
-        // The instance keeps an administrator (rc15).
+        // The instance keeps an administrator.
         if !meerschaum_core::access::is_admin_type(Some(t))
             && last_admin(&conn, &user.username).await?
         {
@@ -614,7 +614,7 @@ async fn edit_user(ctx: Ctx, body: Body) -> ApiResult {
     }
     if !is_admin && curr_user.is_some_and(|u| u.username == user.username) {
         // A user edits its own account, never its own rights: the stored `scopes`, `role`, ...
-        // stay (rc15).
+        // stay.
         if user.attributes.is_some() {
             let stored = conn
                 .get_user_attributes(&user)
@@ -685,7 +685,7 @@ async fn delete_named(ctx: Ctx, username: String) -> ApiResult {
     if crate::access::rules::is_admin_type(user_type.as_deref())
         || curr_user.is_some_and(|u| u.username == username)
     {
-        // The instance keeps an administrator (rc15).
+        // The instance keeps an administrator.
         if last_admin(&conn, &username).await? {
             return Ok(tuple(
                 false,

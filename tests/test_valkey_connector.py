@@ -2,7 +2,7 @@
 # vim:fenc=utf-8
 
 """
-Wave 16 (task S): `meerschaum.connectors.valkey.ValkeyConnector` is a façade over the Rust client
+`meerschaum.connectors.valkey.ValkeyConnector` is a façade over the Rust client
 (`meerschaum._core.ValkeyConnector`).
 
 The key helpers and URIs are compared with the released 4.1.4 (`.venv-ref`; it needs no `valkey`

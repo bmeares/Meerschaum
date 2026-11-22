@@ -9,18 +9,12 @@ and `parameters['children']`, keeping the shapes the Syncing Engine reads.
 
 import json
 
-from tests.api_host._helpers import AS_VIEWER, run_python, sandbox  # noqa: F401
-
-
-def _json(result) -> dict:
-    assert result.returncode == 0, result.stderr[-4000:]
-    line = [l for l in result.stdout.splitlines() if l.startswith('JSON:')][-1]
-    return json.loads(line[len('JSON:'):])
+from tests.api_host._helpers import AS_VIEWER, run_python, extract_json
 
 
 def test_add_and_remove_parents_and_children(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 import meerschaum as mrsm
 from meerschaum.api import get_api_connector
@@ -112,7 +106,7 @@ print('JSON:' + json.dumps(out))
 
 def test_relations_callback_adds_and_refuses_anonymous_sessions(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, AS_VIEWER + '''
+    out = extract_json(run_python(root, plugins, AS_VIEWER + '''
 import json
 import meerschaum as mrsm
 from dash.exceptions import PreventUpdate

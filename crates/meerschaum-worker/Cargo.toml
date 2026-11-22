@@ -39,3 +39,6 @@ rustix = { version = "1", features = ["std"] }
 [dev-dependencies]
 meerschaum-connector-sql = { workspace = true }
 tempfile = "3"
+
+[lints]
+workspace = true

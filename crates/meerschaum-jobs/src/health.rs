@@ -882,7 +882,7 @@ mod tests {
 
     #[test]
     fn a_listening_job_is_stalled_after_an_hour_without_a_sync() {
-        // Q26: `--listen` jobs are stalled after an hour (not three of them).
+        // `--listen` jobs are stalled after an hour (not three of them).
         let mut r = record(Some(LISTEN_INTERVAL_SECONDS));
         r.stall_seconds = Some(LISTEN_STALL_SECONDS);
         r.last_lap = Some(at(0));

@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Synthetic wave-7 console test plugin (Python): a page-contract page (design §8.3) embedding a
+Synthetic console test plugin (Python): a page-contract page (design §8.3) embedding a
 Plotly figure, an HTMX fragment route, and API-plugin routes that read the console session.
 
 Inert unless `MRSM_W7_CONSOLE=1` (so the default test suites that load `tests/plugins` do not

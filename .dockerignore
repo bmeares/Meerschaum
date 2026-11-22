@@ -14,3 +14,12 @@ meerschaum/_core/_native*.so
 meerschaum/_core/_native*.pyd
 meerschaum/_core/_core*.so
 meerschaum/_core/_core*.pyd
+# Never sent to a builder: host-specific release settings, agent notes, caches and byte code.
+.env
+.env.*
+.claude/
+.agents/
+.cache/
+.mypy_cache/
+.pytest_cache/
+**/__pycache__

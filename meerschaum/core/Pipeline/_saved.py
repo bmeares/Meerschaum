@@ -140,7 +140,7 @@ def _write(definition, instance=None, create=False, registration_parameters=None
     for lease in _leases.get().values():
         lease.check()
     pipe = registration(definition['name'], instance or definition['registry'])
-    ### A saved Pipeline's `access` and `locks` (rc15, AC7) stay with its registry pipe.
+    ### A saved Pipeline's `access` and `locks` stay with its registry pipe.
     kept = {}
     if not create:
         current = pipe.get_parameters(apply_symlinks=False, refresh=True) or {}

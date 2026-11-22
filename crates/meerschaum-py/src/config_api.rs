@@ -1,6 +1,6 @@
 //! The config registry at the Python boundary: `get_config`, `read_config`, `write_config`,
 //! `search_and_substitute_config`, `get_keyfile_path`, the plugin config helpers, the config file
-//! backups and the environment layers, all running on `meerschaum_core::config` (wave 15, task O).
+//! backups and the environment layers, all running on `meerschaum_core::config`.
 //!
 //! **Who owns what.** `meerschaum_core::config::ConfigState` owns every rule: file selection,
 //! YAML/JSON reading and writing (lossless: dates, `bytes`, big integers, tuples, sets and typed
@@ -963,7 +963,7 @@ pub fn get_config<'py>(
         })
         .collect::<PyResult<_>>()?;
     let host = host(py)?;
-    // rc15 (Q54): a root created before rc15 keeps pandas DataFrames: `dataframe: pandas` is added
+    // A root created before 5.0.0rc15 keeps pandas DataFrames: `dataframe: pandas` is added
     // to its `meerschaum.yaml` once per process, before the first key of the directory is read.
     if host.allow_writes {
         crate::dataframe_api::pin_root_for_python(py, &host.config_dir, &dict);

@@ -2,9 +2,11 @@
 //! DAG of a selection (`mrsm show graph`) is drawn by the CLI (`meerschaum-cli`'s
 //! `format::graph`): the engine keeps the data ([`crate::selection::Subgraph`]), the CLI owns
 //! the styling. The live `ratatui` view and the console's Plotly timeline render from the same
-//! [`RunRecord`] and event stream in later waves.
+//! [`RunRecord`] and event stream.
 
 use std::fmt::Write as _;
+
+use meerschaum_core::pyfmt::thousands;
 
 use crate::node::PipeRef;
 use crate::runs::{NodeStatus, RunRecord};
@@ -19,18 +21,6 @@ pub fn fmt_duration(seconds: f64) -> String {
     } else {
         format!("{}h{:02}m", s / 3600, (s % 3600) / 60)
     }
-}
-
-fn thousands(n: u64) -> String {
-    let digits = n.to_string();
-    let mut out = String::new();
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
 }
 
 /// A node's planned bar in seconds from the run start: `(start, end)`, when the node was

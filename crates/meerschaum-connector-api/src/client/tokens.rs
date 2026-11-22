@@ -183,7 +183,7 @@ impl APIConnector {
 
     /// `get_token_scopes(token_id)`.
     ///
-    /// FIX (intentional v4 change, PARITY W17T-004): v4 reads `model.scopes` and then
+    /// FIX (intentional v4 change, see PARITY.md, `get_token_scopes`): v4 reads `model.scopes` and then
     /// `getattr(<that list>, 'scopes', [])` (`_tokens.py:105`), so it returned `[]` for an
     /// existing token (a scoped token looked scopeless). v5 returns the model's scopes; a missing
     /// token still raises as in v4.

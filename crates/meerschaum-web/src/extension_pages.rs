@@ -156,9 +156,11 @@ async fn browser_source(
         )
     })?;
     let id = cookie(headers).ok_or_else(ApiError::invalid_credentials)?;
-    let mut api = api_headers(state, &data).await.map_err(|status| {
-        ApiError::new(status.as_u16(), "The page session's source is unavailable.")
-    })?;
+    let mut api = api_headers_for(&state.server, &data, CONSOLE_BEARER_SECONDS)
+        .await
+        .map_err(|status| {
+            ApiError::new(status.as_u16(), "The page session's source is unavailable.")
+        })?;
     // Main's typed request resolver must bind the same verified console session. Preserve
     // only its original cookie beside Main's freshly bound API header; never adopt a
     // browser-supplied Authorization header. Neither header enters the child Invocation.

@@ -119,7 +119,13 @@ impl Plan {
     }
     /// Check the final generated query as well as the raw and resolved source definitions.
     pub fn check_sql(&self, query: &str) -> Result<(), String> {
-        check_sql(query, &self.hidden)
+        sql_guard::check_sql(
+            query,
+            &sql_guard::SqlPolicy::SourceBrokerQuery {
+                hidden: &self.hidden,
+            },
+        )
+        .map_err(sql_guard::SqlError::into_message)
     }
 }
 
@@ -375,7 +381,13 @@ fn resolve(
         for definition in sql_guard::definitions(pipe.raw_parameters()) {
             // Before expansion the SQL/table guard runs on the original content. Function
             // validation follows expansion, so `{{Pipe(...)}}` is not treated as a SQL call.
-            sql_guard::check_definition(&definition, source_hidden).map_err(forbidden)?;
+            sql_guard::check_sql(
+                &definition,
+                &sql_guard::SqlPolicy::PipeDefinition {
+                    hidden: source_hidden,
+                },
+            )
+            .map_err(|e| forbidden(e.into_message()))?;
         }
     }
     let mut resolved = root.clone();
@@ -398,7 +410,13 @@ fn resolve(
         ));
     }
     for definition in sql_guard::definitions(&parameters) {
-        check_sql(&definition, source_hidden).map_err(forbidden)?;
+        sql_guard::check_sql(
+            &definition,
+            &sql_guard::SqlPolicy::SourceBrokerQuery {
+                hidden: source_hidden,
+            },
+        )
+        .map_err(|e| forbidden(e.into_message()))?;
     }
     if sql_guard::definitions(&parameters).is_empty() {
         return Err(bad("The registered SQL source has no definition."));
@@ -410,107 +428,6 @@ fn resolve(
         resolved,
         snapshot.entries.into_iter().map(|(pipe, _)| pipe).collect(),
     ))
-}
-
-fn check_sql(query: &str, hidden: &HiddenTables) -> Result<(), String> {
-    crate::mcp::security::is_read_only_query(query)?;
-    sql_guard::check_definition(query, hidden)?;
-    let tokens = sql_guard::tokens(query);
-    // Database file/network readers and user-defined functions can escape table-name guards.
-    // This broker deliberately accepts only a small set of ordinary pure SQL functions.
-    const PURE: &[&str] = &[
-        "abs",
-        "avg",
-        "cast",
-        "ceil",
-        "ceiling",
-        "char_length",
-        "coalesce",
-        "concat",
-        "concat_ws",
-        "convert",
-        "count",
-        "date",
-        "datetime",
-        "dense_rank",
-        "extract",
-        "floor",
-        "ifnull",
-        "julianday",
-        "lag",
-        "lead",
-        "length",
-        "lower",
-        "ltrim",
-        "max",
-        "min",
-        "nullif",
-        "rank",
-        "replace",
-        "round",
-        "row_number",
-        "rtrim",
-        "strftime",
-        "substr",
-        "substring",
-        "sum",
-        "time",
-        "trim",
-        "unixepoch",
-        "upper",
-        "in",
-        "exists",
-        "as",
-        "over",
-        "filter",
-        "when",
-        "not",
-        "by",
-        "values",
-        "from",
-        "where",
-        "select",
-        "with",
-        "and",
-        "or",
-        "top",
-        "char",
-        "varchar",
-        "nvarchar",
-        "nchar",
-        "decimal",
-        "numeric",
-        "number",
-        "varbinary",
-        "binary",
-        "timestamp",
-        "timestamptz",
-        "timetz",
-        "datetime2",
-        "datetimeoffset",
-    ];
-    for (index, token) in tokens.iter().enumerate() {
-        if let sql_guard::Token::Ident { name, .. } = token {
-            let name = name.to_ascii_lowercase();
-            if matches!(tokens.get(index + 1), Some(sql_guard::Token::Punct('(')))
-                && (!PURE.contains(&name.as_str())
-                    || matches!(
-                        index.checked_sub(1).and_then(|i| tokens.get(i)),
-                        Some(sql_guard::Token::Punct('.'))
-                    ))
-            {
-                return Err(
-                    "The source broker does not allow this SQL function or table function.".into(),
-                );
-            }
-            if matches!(name.as_str(), "from" | "join")
-                && matches!(tokens.get(index + 1), Some(sql_guard::Token::Str(_)))
-            {
-                return Err("The source broker does not read file paths as SQL tables.".into());
-            }
-        }
-    }
-    Ok(())
 }
 
 fn owner(caller: &Access) -> Result<String, ApiError> {
@@ -1491,37 +1408,4 @@ async fn fetch(
     }
     original.source(&ctx, &request, false).await?;
     Ok(crate::json::raw_json(axum::http::StatusCode::OK, text))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn source_sql_never_reaches_internal_tables_or_external_functions() {
-        let hidden = HiddenTables::new(["sibling_private"]);
-        for query in [
-            "SELECT * FROM mrsm_users",
-            "SELECT * FROM sibling_private",
-            "SELECT readfile('/secret')",
-            "SELECT * FROM read_csv('/secret')",
-            "SELECT * FROM '/secret.csv'",
-            "SELECT dangerous_user_function()",
-            "SELECT public.count(*) FROM safe",
-        ] {
-            assert!(check_sql(query, &hidden).is_err(), "{query}");
-        }
-        check_sql(
-            "SELECT count(*), max(id) FROM safe WHERE id IN (1, 2)",
-            &hidden,
-        )
-        .unwrap();
-        check_sql(
-            "WITH definition AS (SELECT id, created FROM safe) SELECT * FROM definition \
-             WHERE created >= CAST('2026-01-02 00:00:00+00:00' AS TIMESTAMPTZ(9)) \
-             AND created < CAST('2026-01-04 00:00:00+00:00' AS TIMESTAMPTZ(9)) \
-             AND id IN ('2', '3')",
-            &hidden,
-        )
-        .unwrap();
-    }
 }

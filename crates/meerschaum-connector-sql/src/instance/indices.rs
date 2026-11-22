@@ -222,7 +222,7 @@ impl SqlConnector {
         &self,
         pipe: &Pipe,
     ) -> ConnectorResult<IndexMap<String, Vec<String>>> {
-        let sp = self.sql_pipe(pipe)?;
+        let sp = self.bind_pipe(pipe).await?;
         self.create_index_queries(&sp, None).await
     }
 
@@ -245,7 +245,7 @@ impl SqlConnector {
             space_partition: false,
             id_distinct_count: None,
             chunk_interval: None,
-            // rc15 S3: NULL-safe upsert keys as v4's constraint on PostgreSQL 15+.
+            // NULL-safe upsert keys as v4's constraint on PostgreSQL 15+.
             nulls_not_distinct: crate::queries::index::null_safe_unique_index(self.flavor, sp)
                 && self.supports_nulls_not_distinct().await,
         };
@@ -339,7 +339,7 @@ impl SqlConnector {
         &self,
         pipe: &Pipe,
     ) -> ConnectorResult<IndexMap<String, Vec<String>>> {
-        let sp = self.sql_pipe(pipe)?;
+        let sp = self.bind_pipe(pipe).await?;
         let schema = self.get_pipe_schema(&sp);
         let exists = self.table_exists(&sp.target, schema.as_deref()).await;
         if !exists {
@@ -392,7 +392,7 @@ impl SqlConnector {
         columns: Option<&[String]>,
         indices: Option<&[String]>,
     ) -> bool {
-        let Ok(sp) = self.sql_pipe(pipe) else {
+        let Ok(sp) = self.bind_pipe(pipe).await else {
             return false;
         };
         self.create_indices_sp(&sp, columns, indices, None).await
@@ -446,9 +446,10 @@ impl SqlConnector {
         columns: Option<&[String]>,
         indices: Option<&[String]>,
     ) -> bool {
-        let Ok(sp) = self.sql_pipe(pipe) else {
+        let Ok(sp) = self.bind_pipe(pipe).await else {
             return false;
         };
+        let pipe: &Pipe = &sp;
         if sp.indices().is_empty() {
             tracing::warn!("No indices to drop for {pipe}.");
             return false;
@@ -482,9 +483,13 @@ impl SqlConnector {
         pipe: &Pipe,
         columns: Option<&[String]>,
     ) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         if let Some(refused) = self.protected_refusal(pipe, "create indices for") {
             return refused;
         }
+        let pipe = &self.prepare_pipe(pipe).await;
         if self.create_indices(pipe, columns, None).await {
             SuccessTuple::ok("Success")
         } else {
@@ -494,6 +499,9 @@ impl SqlConnector {
 
     /// `drop_pipe_indices(pipe, columns)`.
     pub async fn drop_pipe_indices(&self, pipe: &Pipe, columns: Option<&[String]>) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         if let Some(refused) = self.protected_refusal(pipe, "drop indices for") {
             return refused;
         }
@@ -503,6 +511,7 @@ impl SqlConnector {
         {
             return refused;
         }
+        let pipe = &self.prepare_pipe(pipe).await;
         if self.drop_indices(pipe, columns, None).await {
             SuccessTuple::ok("Success")
         } else {

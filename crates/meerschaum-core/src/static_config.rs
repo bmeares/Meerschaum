@@ -473,3 +473,44 @@ pub fn static_config() -> &'static StaticConfig {
         StaticConfig::from_toml(STATIC_TOML, os_cpu_count()).expect("embedded static.toml is valid")
     })
 }
+
+/// `STATIC_CONFIG['system']['fetch_pipes_keys']['negation_prefix']` (`_`): the prefix that
+/// negates a key or tag filter.
+pub fn negation_prefix() -> &'static str {
+    &static_config().system.fetch_pipes_keys.negation_prefix
+}
+
+/// `meerschaum.utils.misc.separate_negation_values(values)`: `(included, excluded)`, with the
+/// [`negation_prefix`] stripped from the excluded values.
+pub fn separate_negation_values(values: &[String]) -> (Vec<String>, Vec<String>) {
+    let prefix = negation_prefix();
+    let mut inc = Vec::new();
+    let mut exc = Vec::new();
+    for v in values {
+        match v.strip_prefix(prefix) {
+            Some(rest) => exc.push(rest.to_string()),
+            None => inc.push(v.clone()),
+        }
+    }
+    (inc, exc)
+}
+
+#[cfg(test)]
+mod negation_tests {
+    use super::*;
+
+    #[test]
+    fn separate_negation_values_strips_the_prefix() {
+        let values: Vec<String> = ["a", "_b", "__c", ""]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            separate_negation_values(&values),
+            (
+                vec!["a".to_string(), String::new()],
+                vec!["b".to_string(), "_c".to_string()]
+            )
+        );
+    }
+}

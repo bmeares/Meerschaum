@@ -10,7 +10,7 @@ but its callbacks would answer only signed-in users.
 
 import json
 
-from tests.api_host._helpers import run_python, write_plugin, sandbox  # noqa: F401
+from tests.api_host._helpers import run_python, write_plugin
 
 PRIVATE_ONLY = '''
 from meerschaum.plugins import dash_plugin, web_page

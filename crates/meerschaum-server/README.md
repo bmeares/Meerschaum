@@ -72,7 +72,7 @@ inherits the server's job context, `MRSM_NONINTERACTIVE` included (`webterm::job
 The MCP registry is v4's (`mcp/registry.json`, generated) with v5's additions (`mcp::v5`: the
 Pipelines, runs, jobs and connectors tools, `sync_pipe`'s `parents` / `children`, bounds typed as
 strings or integers, the primer); `docs/zensical/reference/mcp/tools.md` is rendered from it
-(`mcp::docs::render_tool_reference`, checked by `tests/mcp_docs.rs`).
+(`mcp::docs::render_tool_reference`, checked by `tests/mcp_suite/mcp_docs.rs`).
 
 Native (Rust) plugins' routes are mounted by `native::native_router` (credentials, declared
 scopes, Starlette-style path parameters with converters, shadowing refusal including the

@@ -54,10 +54,22 @@ def drop(
     self._clear_cache_key('_exists_timestamp', debug=debug)
 
     if isinstance(result, tuple) and result and result[0]:
-        from meerschaum.core.Pipeline._engine import forget_engine_state
-        forget_engine_state(self, 'drop_pipe')
+        _forget_engine_state(self, 'drop_pipe')
 
     return result
+
+
+def _forget_engine_state(pipe: Any, operation: str) -> None:
+    """
+    After a successful drop, delete or full clear, forget the pipe's Syncing Engine state,
+    unless its instance connector already did: the Rust `sql:` and `valkey:` instances forget it
+    in their own `drop_pipe`, `delete_pipe` and full `clear_pipe`. Other instances (`api:`,
+    plugin and native-plugin instance connectors) leave it to the façade.
+    """
+    if getattr(pipe.instance_connector, 'type', None) in ('sql', 'valkey'):
+        return
+    from meerschaum.core.Pipeline._engine import forget_engine_state
+    forget_engine_state(pipe, operation)
 
 
 def drop_indices(

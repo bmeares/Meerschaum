@@ -17,24 +17,6 @@ use crate::traits::{
 
 use super::APIConnector;
 
-/// After a successful drop, delete or full clear, forget the pipe's Syncing Engine state
-/// (ledger, cursors, definition hash; `pipe_ops::forget_engine_state`). The rows are keyed on
-/// this client's `pipe_ref` (`api:<label>|...`), which the server cannot derive, so the client
-/// clears them over `/engine/pipes/*`. Best effort: `res` is returned unchanged.
-async fn forget_engine_state_after(
-    conn: &APIConnector,
-    pipe: &Pipe,
-    res: SuccessTuple,
-) -> SuccessTuple {
-    if res.success && !(pipe.connector_keys() == "mrsm" && pipe.metric_key() == "pipeline") {
-        let forgotten = crate::pipe_ops::forget_engine_state(conn, pipe).await;
-        if !forgotten.success {
-            tracing::warn!("{}", forgotten.message);
-        }
-    }
-    res
-}
-
 #[async_trait]
 impl Connector for APIConnector {
     fn native_api_target(&self) -> Option<meerschaum_connector::api_target::NativeApiTarget> {
@@ -252,7 +234,7 @@ impl InstanceConnector for APIConnector {
 
     async fn delete_pipe(&self, pipe: &Pipe) -> SuccessTuple {
         let res = APIConnector::delete_pipe(self, pipe).await;
-        forget_engine_state_after(self, pipe, res).await
+        crate::pipe_ops::forget_engine_state_after(self, None, pipe, res).await
     }
 
     async fn fetch_pipes_keys(&self, query: &PipesKeysQuery) -> ConnectorResult<PipesKeys> {
@@ -269,7 +251,7 @@ impl InstanceConnector for APIConnector {
 
     async fn drop_pipe(&self, pipe: &Pipe) -> SuccessTuple {
         let res = APIConnector::drop_pipe(self, pipe).await;
-        forget_engine_state_after(self, pipe, res).await
+        crate::pipe_ops::forget_engine_state_after(self, None, pipe, res).await
     }
 
     async fn sync_pipe(&self, pipe: &Pipe, df: Frame, opts: &SyncOptions) -> SuccessTuple {
@@ -291,7 +273,7 @@ impl InstanceConnector for APIConnector {
         if !crate::pipe_ops::is_full_clear(query) {
             return res;
         }
-        forget_engine_state_after(self, pipe, res).await
+        crate::pipe_ops::forget_engine_state_after(self, None, pipe, res).await
     }
 
     async fn get_pipe_data(
@@ -489,7 +471,7 @@ impl InstanceConnector for APIConnector {
             .and_then(|v| v.as_map().cloned()))
     }
 
-    // The access model (rc15) lives on the server: teams, users' permissions and emails, a
+    // The access model lives on the server: teams, users' permissions and emails, a
     // pipe's access and locks travel over the routes it enforces (`client/access.rs`).
 
     async fn set_user_attributes(&self, user: &User, attributes: &Map) -> SuccessTuple {
@@ -515,7 +497,7 @@ impl InstanceConnector for APIConnector {
         }
     }
 
-    /// The address as the server shows it to this caller (AC13: other users' addresses only
+    /// The address as the server shows it to this caller (other users' addresses only
     /// to administrators and the managers of a team they are in).
     async fn get_user_email(&self, user: &User) -> ConnectorResult<Option<String>> {
         Ok(self

@@ -12,7 +12,7 @@ import pathlib
 import pytest
 
 from tests.console.conftest import Server, Tab
-from tests.console.test_rc28_performance_connectors import SCROLL_TO_BOTTOM
+from tests.console.test_performance_refresh_and_connectors import SCROLL_TO_BOTTOM
 
 pytestmark = pytest.mark.console
 

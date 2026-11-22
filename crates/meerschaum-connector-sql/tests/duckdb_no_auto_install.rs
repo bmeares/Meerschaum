@@ -7,6 +7,7 @@ use meerschaum_connector_sql::driver::{SqlDriver, SqlValue};
 use meerschaum_connector_sql::uri::ConnectionSpec;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[allow(unsafe_code)] // sets the process environment once, below
 async fn no_auto_install_turns_off_the_extension_installer() {
     if std::env::var("MRSM_DUCKDB_LIB").is_err() {
         eprintln!("Skipping the DuckDB extension test: set MRSM_DUCKDB_LIB.");

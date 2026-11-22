@@ -19,7 +19,6 @@ pub const PRIVATE_PATH: &str = "/run/secrets/mrsm-factory-attestation.json";
 pub const PUBLIC_DIRECTORY: &str = "/etc/meerschaum/executor-factory-pins";
 pub const MAX_KEY_FILE: usize = 16 * 1024;
 
-#[path = "factory_quote.rs"]
 pub mod quote;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

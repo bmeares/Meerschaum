@@ -224,7 +224,7 @@ pub(super) fn disk_fact(_path: &Path) -> Option<DiskFact> {
     None
 }
 
-/// 5.1: isolated teams' filesystem sandbox: the mode, the level and what this system enforces
+/// Isolated teams' filesystem sandbox: the mode, the level and what this system enforces
 /// (Landlock ABI and features), and the sockets of concern a "filesystem only" sandbox does not
 /// stop.
 pub(super) fn team_sandbox_checks(config: &Config) -> Vec<Check> {
@@ -279,11 +279,11 @@ pub(super) fn team_sandbox_checks(config: &Config) -> Vec<Check> {
              `system.engine.python_team_sandbox` to `auto` or `require`.",
         ));
     }
-    // 5.1: whether Unix sockets are denied to team code (Landlock from Linux 7.1, else the
+    // Whether Unix sockets are denied to team code (Landlock from Linux 7.1, else the
     // seccomp filter: a probe process applies the sandbox as a team process would), and what
     // that means for web terminals.
     let denied = if isolated {
-        let (denied, words) = crate::team_sandbox::team_sockets(mode, &root);
+        let (denied, words) = crate::team::sandbox::team_sockets(mode, &root);
         if denied {
             out.push(Check::pass("teams", "unix sockets", words));
         } else {
@@ -299,7 +299,7 @@ pub(super) fn team_sandbox_checks(config: &Config) -> Vec<Check> {
                 },
             ));
         }
-        let (refused, words) = crate::team_sandbox::terminals_words(&root, denied);
+        let (refused, words) = crate::team::sandbox::terminals_words(&root, denied);
         if refused {
             out.push(Check::warn(
                 "teams",
@@ -320,10 +320,10 @@ pub(super) fn team_sandbox_checks(config: &Config) -> Vec<Check> {
         out.push(Check::warn(
             "teams",
             "sandbox level",
-            crate::team_sandbox::filesystem_only_warning(
+            crate::team::sandbox::filesystem_only_warning(
                 support.abi(),
                 reason.as_deref(),
-                &crate::team_sandbox::sockets_of_concern(),
+                &crate::team::sandbox::sockets_of_concern(),
             ),
             "Let the server install seccomp filters, run it on Linux 7.1 or newer, run it in a \
              container or as a service without a session bus, or set \
@@ -332,7 +332,7 @@ pub(super) fn team_sandbox_checks(config: &Config) -> Vec<Check> {
     } else if isolated
         && !enforced
         && !denied
-        && let Some(socket) = crate::team_sandbox::container_socket_reachable()
+        && let Some(socket) = crate::team::sandbox::container_socket_reachable()
     {
         out.push(Check::warn(
             "teams",
@@ -355,10 +355,10 @@ pub(super) fn team_sandbox_checks(config: &Config) -> Vec<Check> {
             "unrestricted (default; set system.engine.python_team_max_* or python_team_egress to cap host-team processes)",
         ));
     }
-    // 5.1: per team that runs code, whether its members' commands may run here.
-    for team in crate::team_execution::code_running_teams(config) {
+    // Per team that runs code, whether its members' commands may run here.
+    for team in crate::team::execution::code_running_teams(config) {
         let label = format!("team execution ({team})");
-        match crate::team_execution::team_status(config, &team) {
+        match crate::team::execution::team_status(config, &team) {
             Ok(()) => out.push(Check::pass(
                 "teams",
                 &label,
@@ -507,7 +507,7 @@ pub(super) fn config_checks(
             other_vars.join(", ")
         ));
     }
-    // 5.1: `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` hold the same text in a file.
+    // `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE` hold the same text in a file.
     let bad_patch = [
         "MRSM_CONFIG",
         "MRSM_PATCH",

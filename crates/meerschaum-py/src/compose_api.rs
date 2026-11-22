@@ -1,4 +1,4 @@
-//! `meerschaum.compose.utils` over `meerschaum-compose` (wave 16, D14): the configuration
+//! `meerschaum.compose.utils` over `meerschaum-compose` (D14): the configuration
 //! helpers the Python names `read_compose_config`, `get_env_dict`, `get_dir_paths` and `init_env`
 //! delegate to. Dictionaries cross as `dict`s of plain values (paths as strings); the messages a
 //! call would have printed come back as `[('warn' | 'info', text)]` for the façade to print.

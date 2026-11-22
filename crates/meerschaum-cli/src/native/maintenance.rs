@@ -12,7 +12,8 @@ use crate::value::ArgsMap;
 use super::pipes::{SelectedPipe, hydrate, selected_pipes};
 use super::show::format_bytes;
 use super::sync::interval_str;
-use super::{Instance, flag, info, int, plural, session, thousands, warn, yes_no};
+use super::{Instance, flag, info, int, plural, session, warn, yes_no};
+use meerschaum_core::pyfmt::thousands;
 
 const PG_VACUUM_FAMILY: &[&str] = &[
     "postgresql",

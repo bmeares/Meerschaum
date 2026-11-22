@@ -9,7 +9,7 @@ Python code holds the dictionaries `get_config()` returns and mutates them, and 
 change on the next call, so the process-wide tree is one `dict` object. It lives here, in plain
 Python, so that `import meerschaum` and `import meerschaum.config` never load the native
 extension (an import must stay as cheap as v4's). The config registry in `meerschaum._core`
-(task O of wave 15) adopts this very object the first time it is used: `config_api.rs::store()`
+adopts this very object the first time it is used: `config_api.rs::store()`
 reads `_dict` from this module when it creates its own handle, and `set_store()` /
 `reset_store()` hand a replacement to an already loaded extension. There is one dictionary
 whichever side answers `get_config()`.

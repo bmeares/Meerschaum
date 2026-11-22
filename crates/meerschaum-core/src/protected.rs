@@ -14,7 +14,7 @@
 //! connector. Reads are never blocked.
 //!
 //! Every connector type checks its own attribute ([`is_protected_attribute`]) and refuses with
-//! [`refusal_message`] (the text is part of the rc15 contract C6).
+//! [`refusal_message`] (the text is a fixed contract).
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -136,7 +136,7 @@ pub fn child_env() -> Vec<(String, String)> {
     }
 }
 
-/// The refusal text (contract C6): `Refusing to <op> on protected instance '<keys>'. Pass
+/// The refusal text: `Refusing to <op> on protected instance '<keys>'. Pass
 /// --allow-protected (or set MRSM_ALLOW_PROTECTED=1).`
 pub fn refusal_message(op: &str, connector_keys: &str) -> String {
     format!(

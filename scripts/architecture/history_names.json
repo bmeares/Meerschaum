@@ -1,0 +1,19 @@
+{
+ "_about": "files and directories named after development history (w<N>_, rc<N>_, fx<N>, wave). This list may only shrink: lower a number or drop an entry.",
+ "crates/meerschaum-cli/tests/fixtures/w9_compose_instance": 1,
+ "scripts/parity/gen_w9_compose_instance.py": 1,
+ "tests/oracle/test_w9_filter_unseen_dtypes.json": 1,
+ "tests/oracle/test_w9_get_config.json": 1,
+ "tests/oracle/test_w9_verify.json": 1,
+ "tests/plugins/w15l_custom.py": 1,
+ "tests/plugins/w15l_plugdie.py": 1,
+ "tests/plugins/w15l_plugsrc.py": 1,
+ "tests/plugins/w15l_plugsync.py": 1,
+ "tests/plugins/w33_lapper.py": 1,
+ "tests/plugins/w7_dashapp": 1,
+ "tests/plugins/w7_native_fig": 1,
+ "tests/plugins/w7_pyfig": 1,
+ "tests/test_w9_filter_unseen_dtypes.py": 1,
+ "tests/test_w9_get_config.py": 1,
+ "tests/test_w9_verify.py": 1
+}

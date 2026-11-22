@@ -1,5 +1,5 @@
 """
-Wave 9 (task Q): the `_core.get_config` read-only fast path (PARITY row 12).
+The `_core.get_config` read-only fast path (PARITY row 12).
 
 Every scenario runs against the live `meerschaum.config.config` dictionary, and the observed
 values must match what the parity-phase Python mode returned (`tests/oracle/test_w9_get_config.json`,
@@ -167,7 +167,7 @@ def test_fast_path_values_match_python_for_loaded_keys():
     expected, actual = run_both(scenario)
     ### Harness URI overrides may replace recorded labels (including `main`) as well as add
     ### labels. Compare the same non-environment-owned defaults on both sides; URI override
-    ### behavior is covered separately by `test_w17b_env_uri.py`.
+    ### behavior is covered separately by `test_env_connector_uri.py`.
     env_labels = {
         key[len('MRSM_SQL_'):].lower()
         for key in os.environ

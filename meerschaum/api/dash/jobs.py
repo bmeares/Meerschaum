@@ -22,7 +22,6 @@ from datetime import datetime, timezone
 
 from meerschaum.utils.typing import List, Dict, Any, Optional, Tuple, WebState
 from meerschaum.utils.packages import attempt_import, import_html, import_dcc
-from meerschaum.api.dash.sessions import is_session_authenticated
 from meerschaum.api import CHECK_UPDATE
 from meerschaum.jobs import (
     get_jobs,
@@ -81,15 +80,15 @@ def is_automatic_job(job):
 
 def job_visible_to_session(job, session_id):
     """
-    Whether the session's viewer may see a job (AC9, `meerschaum.jobs.can_see_job`): a job
+    Whether the session's viewer may see a job (`meerschaum.jobs.can_see_job`): a job
     started through the API or the console is its team's (a console run is private to its owner,
     the team's managers and administrators); a local job is Everyone's.
     """
     from meerschaum.api import no_auth
-    from meerschaum.api.dash.access import get_viewer
+    from meerschaum.api.dash.access import resolve_viewer
     if no_auth:
         return True
-    viewer = get_viewer(session_id=(str(session_id) if session_id else None))
+    viewer = resolve_viewer(session_id=(str(session_id) if session_id else None))
     if not viewer.signed_in:
         return False
     if viewer.is_admin:
@@ -146,8 +145,8 @@ def may_manage_jobs(session_id: Optional[str]) -> bool:
     Whether a session may control jobs from the console at all (start, stop, pause, delete or
     create one: the job permissions) on a server that serves the `jobs` routes.
     """
-    from meerschaum.api.dash.access import get_viewer
-    rights = job_rights(get_viewer(session_id=(str(session_id) if session_id else None)))
+    from meerschaum.api.dash.access import resolve_viewer
+    rights = job_rights(resolve_viewer(session_id=(str(session_id) if session_id else None)))
     return any(value for key, value in rights.items() if key != 'logs')
 
 

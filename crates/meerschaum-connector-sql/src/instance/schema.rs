@@ -259,7 +259,8 @@ impl SqlConnector {
     /// `verify schema`: how the pipe's table differs from its declared dtypes (nothing is
     /// written). A missing table has an empty plan (`exists: false`).
     pub async fn get_pipe_schema_plan(&self, pipe: &Pipe) -> ConnectorResult<SchemaPlan> {
-        let sp = self.sql_pipe(pipe)?;
+        let sp = self.bind_pipe(pipe).await?;
+        let pipe: &Pipe = &sp;
         let schema = self.get_pipe_schema(&sp);
         let table = self.pipe_table_name(&sp);
         if !self
@@ -320,6 +321,9 @@ impl SqlConnector {
         plan: &SchemaPlan,
         safe_only: bool,
     ) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         if let Some(refused) = self.protected_refusal(pipe, "change the table of") {
             return refused;
         }
@@ -330,6 +334,7 @@ impl SqlConnector {
         {
             return refused;
         }
+        let pipe = &self.prepare_pipe(pipe).await;
         let fresh = match self.get_pipe_schema_plan(pipe).await {
             Ok(p) => p,
             Err(e) => return SuccessTuple::fail(e.to_string()),

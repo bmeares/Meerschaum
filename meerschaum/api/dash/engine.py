@@ -213,7 +213,7 @@ class Anonymizer:
         try:
             registry = (
                 _api_pipeline_registry(self.instance) if api
-                else dict(access._pipeline_registry(self.instance))
+                else dict(access.pipeline_registry(self.instance))
             )
             self.pipeline_definitions = access.visible_pipelines(
                 self.instance, viewer=self.viewer, include_members=False,
@@ -767,7 +767,8 @@ def _request_viewer() -> Any:
     """The viewer of the current request (`None` outside a request)."""
     try:
         from meerschaum.api.dash import access
-        if not access._in_request():
+        from meerschaum.api.dash.viewer import in_request
+        if not in_request():
             return None
         return access.current_viewer()
     except Exception:

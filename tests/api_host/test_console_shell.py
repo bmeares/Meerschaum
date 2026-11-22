@@ -6,7 +6,7 @@ The console's shell (design §8.1): the top navigation, the Overview at `/dash`,
 
 import json
 
-from tests.api_host._helpers import SIGN_IN, run_python, write_plugin, sandbox  # noqa: F401
+from tests.api_host._helpers import SIGN_IN, run_python, write_plugin
 
 #: Synthetic secrets: none of them may reach the browser.
 SECRETS = ('Sup3rS3cretPw', 'An0therS3cret', 'patch-client-s3cret', 'tok3n-in-query')
@@ -122,7 +122,7 @@ print('JSON:' + json.dumps({
     assert out['order'][0] == 'sql'
 
 
-#: Secrets under names and in shapes a list of secret words misses (the rc15 review found each
+#: Secrets under names and in shapes a list of secret words misses (a review found each
 #: one in the page's responses): an allowlist shows none of them.
 REVIEW_SECRETS = {
     'pass': 'PASS-s3cret-01',

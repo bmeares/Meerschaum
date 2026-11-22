@@ -1,4 +1,4 @@
-//! What a caller may write into a pipe's parameters through the API (AC4, AC5, AC8): the
+//! What a caller may write into a pipe's parameters through the API: the
 //! checks the pipe routes, the Pipelines routes and the MCP tools share.
 //!
 //! - **New pipes** ([`stamp_new_pipe`]): the owner is the caller (an administrator may name
@@ -378,11 +378,14 @@ pub async fn check_parameters(
     let Some(definition_hidden) = definition_hidden else {
         return Ok(());
     };
+    let policy = sql_guard::SqlPolicy::PipeDefinition {
+        hidden: &definition_hidden,
+    };
     for definition in sql_guard::definitions(new) {
-        sql_guard::check_definition(&definition, &definition_hidden).map_err(forbidden)?;
+        sql_guard::check_sql(&definition, &policy).map_err(|e| forbidden(e.into_message()))?;
     }
     for definition in sql_guard::definitions(resolved.parameters()) {
-        sql_guard::check_definition(&definition, &definition_hidden).map_err(forbidden)?;
+        sql_guard::check_sql(&definition, &policy).map_err(|e| forbidden(e.into_message()))?;
     }
     Ok(())
 }

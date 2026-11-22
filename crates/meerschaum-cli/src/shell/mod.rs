@@ -770,7 +770,7 @@ fn run_line_with(
                     words_of(kwargs)[0].clone()
                 }
                 Err(error) if restricted::active() => {
-                    let clean = crate::executor_jobs::LogSanitizer::default().push(&error.message);
+                    let clean = crate::executor::jobs::LogSanitizer::default().push(&error.message);
                     let clean = meerschaum_server::redact::mask_uri_passwords(&clean);
                     let message = format!(
                         "Confined plugin action metadata is unavailable: {}",
@@ -830,7 +830,7 @@ fn run_line_with(
         sysargs_to_execute.extend(pipeline_args);
     }
 
-    // 5.1: a restricted shell runs a line only when the server says this terminal's user may
+    // A restricted shell runs a line only when the server says this terminal's user may
     // (the decision of `POST /execute`), on exactly what the dispatcher gets.
     if let Err(message) = restricted::authorize(&sysargs_to_execute) {
         print_result(&meerschaum_core::SuccessTuple::fail(message), state, rt);

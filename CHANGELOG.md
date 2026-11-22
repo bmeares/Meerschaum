@@ -4,6 +4,51 @@
 
 ## Meerschaum 5
 
+### 5.1.2
+
+Maintenance release: leaner Docker images that share layers, stricter non-admin SQL checks, faster API reads on large SQL instances, and console, web terminal, and sync fixes.
+
+#### Before upgrading from 5.1.1
+
+- **Non-admin SQL checks are stricter.** Non-admin queries and pipe definitions over the API or MCP are now refused if *any* SQL dialect would parse them as multi-statement or mutating (such as `;` inside `$$...$$`, or a write keyword after `#` or space-less `--`). Admins and local `mrsm` commands are unaffected.
+- **Docker images always run as `1000:1000`.** Release images no longer inherit the build host's UID/GID.
+- **Standalone SQL `port` values must be integers.** Values like `abc`, `true`, or `5432.0` are refused instead of silently falling back to a default port. If you set a `uri`, Meerschaum uses the URI's port.
+
+#### Highlights & Fixes
+
+- **Leaner Docker images with shared layers.**  
+  `full`, `rust-full`, `slim`, and `rust` now share common layers (`mrsm`, the Python wheel, and the Rust compiler snapshot) and keep OS layers stable across patch releases, so `docker pull` downloads only what changed.
+
+  ```bash
+  docker pull bmeares/meerschaum:5.1.2-full
+  ```
+
+- **Smaller `mrsm` binary.**  
+  Release binaries and wheels drop unused Arrow/Polars features and strip symbol tables (~111 MB vs. ~135 MB). Panic backtraces still show the error message and source location.
+
+- **Faster API reads on large SQL instances.**  
+  Pipe data and CSV requests now look up a single pipe by key instead of scanning the full catalog on SQL and Valkey instances.
+
+- **Hardened SQL comment checks.**  
+  API and MCP SQL validation checks every dialect's comment syntax so internal tables hidden behind `#`, `--`, or nested `/* */` comments are blocked everywhere.
+
+- **Console & web terminal fixes.**  
+  - Console calls to the API ignore `HTTP_PROXY` and redirects so session credentials stay local.
+  - Job log streams renew their session authorization while open and stop immediately if credentials are rotated or revoked.
+  - The **Users & Teams** page follows the selected team in the team switcher (choose **All teams (Admin)** to manage everyone).
+  - Isolated team permissions are computed in one place across all console pages.
+  - Web terminal fixes: a refused window no longer blocks future windows, API-only panes set `TERM`, and closed sessions stop reconnecting.
+
+- **Sync, job, and database fixes.**  
+  - **Remote action results:** Log streams wait up to 2 seconds for a finished job's supervisor to save its result (and clients fall back to reading the saved result), eliminating spurious `No result available.` replies on busy hosts.
+  - **Startup pauses:** Pausing a job while it is still starting keeps its supervisor active so it can still stop cleanly when the executor exits.
+  - **SQLite / GeoPackage schema reload:** Pooled connections reload table schemas after a sync adds columns, preventing newly added columns from reading back with literal quotes.
+  - **In-place syncs:** A pipe whose source is the engine's home database but whose instance is elsewhere no longer runs in-place on the source database.
+  - **Engine metrics & Oracle:** Dropped sync metrics now log a rate-limited warning instead of vanishing silently, and Oracle instances keep internal table readiness across index DDL.
+
+- **Switched to released `sqlx 0.9.1` & contributor cleanups.**  
+  Dropped the temporary `sqlx` git patch in `Cargo.toml`, consolidated Rust integration tests from 411 binaries down to 45 suites, split oversize Rust modules, and added `scripts/check_architecture.py`, `GLOSSARY.md`, `CODING_STANDARDS.md`, and `docs/adr/`.
+
 ### 5.1.1
 
 Maintenance release with console UX improvements, credential handling fixes in `stack.yaml`, and Docker stack / isolated-team fixes.

@@ -32,7 +32,6 @@ use crate::error::{ApiError, ApiResult};
 use crate::routes::pipes::parse_json_body;
 use crate::state::AppState;
 
-#[path = "execute_capabilities.rs"]
 mod capabilities;
 
 /// Register `POST /execute` (part of the `actions` route group).
@@ -137,7 +136,7 @@ async fn validate_terminal_command(ctx: Ctx, body: Body) -> ApiResult {
         )
         .await
         .map_err(|message| ApiError::new(403, message))?;
-        // The pipes the command selects (rc15 access model).
+        // The pipes the command selects (the access model).
         crate::execute_access::check(&ctx.state, &caller, &args).await?;
     }
     // 5.1: a command allowed only as team execution: a job started for it must carry the mark
@@ -155,8 +154,13 @@ async fn validate_terminal_command(ctx: Ctx, body: Body) -> ApiResult {
 /// Retained summaries are owner filtered and redact the same secrets as Job metadata.
 async fn run_summaries(ctx: Ctx) -> ApiResult {
     let access = crate::access::require(&ctx.state, &ctx.headers, &["jobs:read"]).await?;
-    let mut records = Vec::new();
-    if let Ok(files) = std::fs::read_dir(ctx.state.config.root_dir.join("runs")) {
+    let runs = ctx.state.config.root_dir.join("runs");
+    // Every record is a file to read: off the async workers.
+    let mut records = tokio::task::spawn_blocking(move || {
+        let mut records = Vec::new();
+        let Ok(files) = std::fs::read_dir(runs) else {
+            return records;
+        };
         for file in files.flatten() {
             if file.path().extension().and_then(|v| v.to_str()) != Some("json") {
                 continue;
@@ -175,7 +179,10 @@ async fn run_summaries(ctx: Ctx) -> ApiResult {
             }
             records.push(record);
         }
-    }
+        records
+    })
+    .await
+    .map_err(|_| ApiError::unavailable("Could not read the retained executions."))?;
     let teams = if records.iter().any(|record| {
         record
             .get("metadata")
@@ -288,25 +295,39 @@ pub async fn prune_finished(state: &AppState) {
         let record = json!({"name": name, "metadata": meta, "ended": stopped,
             "summary_expires": stopped.timestamp().saturating_add(state.config.execution_retention[2] as i64)});
         let path = archive.join(format!("{name}.json"));
-        if meerschaum_core::team_scope::write_private(&path, &record.to_string()).is_ok() {
+        let record = record.to_string();
+        // The summary is on disk before its worker is deleted (off the async workers).
+        let archived = tokio::task::spawn_blocking(move || {
+            meerschaum_core::team_scope::write_private(&path, &record).is_ok()
+        })
+        .await
+        .unwrap_or(false);
+        if archived {
             let _ = state.jobs.delete(&name).await;
         }
     }
-    if let Ok(files) = std::fs::read_dir(&archive) {
-        for file in files.flatten() {
-            if file.path().extension().and_then(|v| v.to_str()) != Some("json") {
-                continue;
-            }
-            let record = std::fs::read(file.path())
-                .ok()
-                .and_then(|v| serde_json::from_slice::<Json>(&v).ok());
-            if record
-                .as_ref()
-                .and_then(|v| v["summary_expires"].as_i64())
-                .is_some_and(|v| v <= now.timestamp())
-            {
-                let _ = std::fs::remove_file(file.path());
-            }
+    // Every retained summary is a file to read: off the async workers, under the maintenance lock.
+    let _ = tokio::task::spawn_blocking(move || remove_expired_summaries(&archive, now)).await;
+}
+
+/// Remove the archived summaries in `archive` whose `summary_expires` has passed at `now`.
+fn remove_expired_summaries(archive: &std::path::Path, now: chrono::DateTime<chrono::Utc>) {
+    let Ok(files) = std::fs::read_dir(archive) else {
+        return;
+    };
+    for file in files.flatten() {
+        if file.path().extension().and_then(|v| v.to_str()) != Some("json") {
+            continue;
+        }
+        let record = std::fs::read(file.path())
+            .ok()
+            .and_then(|v| serde_json::from_slice::<Json>(&v).ok());
+        if record
+            .as_ref()
+            .and_then(|v| v["summary_expires"].as_i64())
+            .is_some_and(|v| v <= now.timestamp())
+        {
+            let _ = std::fs::remove_file(file.path());
         }
     }
 }
@@ -328,8 +349,8 @@ pub fn start_cleanup(state: &AppState) {
 
 /// `POST /execute`. The console's pipe operations (Sync, Verify, Clear, Drop, Delete of pipes
 /// and Pipelines) need `jobs:execute`, the operation's permission and edit rights on the pipes
-/// they select; any other action also needs `actions:execute` and `jobs:write` (rc15,
-/// [`crate::execute_access`]).
+/// they select; any other action also needs `actions:execute` and `jobs:write`
+/// ([`crate::execute_access`]).
 async fn execute(ctx: Ctx, body: Body) -> ApiResult {
     let body = parse_json_body(&body_bytes(body, ctx.state.config.limits.body).await?)?;
     let caller = crate::access::require(&ctx.state, &ctx.headers, &["jobs:execute"]).await?;

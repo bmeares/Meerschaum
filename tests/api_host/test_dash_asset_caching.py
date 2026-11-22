@@ -1,6 +1,6 @@
 """Compressed Dash bundles revalidate without downloading unchanged JavaScript again."""
 
-from tests.api_host._helpers import run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import run_python
 
 
 def test_component_bundles_accept_weak_etags_and_reload_changed_content(sandbox):

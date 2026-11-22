@@ -1,4 +1,4 @@
-//! The access model over HTTP (rc15, decisions AC3, AC4, AC5, AC12, AC13): teams, a pipe's access
+//! The access model over HTTP: teams, a pipe's access
 //! and locks, and users' permissions, roles, primary teams and email addresses, through the
 //! routes the server enforces:
 //!
@@ -183,7 +183,7 @@ fn names_with(team: &Team, role: TeamRole) -> Vec<String> {
 
 /// The path segment of a name (a team or a user).
 fn segment(name: &str) -> String {
-    crate::wire::quote_plus(name.trim())
+    meerschaum_core::pyfmt::quote_plus(name.trim())
 }
 
 impl APIConnector {

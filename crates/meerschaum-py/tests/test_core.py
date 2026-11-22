@@ -193,9 +193,9 @@ def _diff(left, right, path=''):
 
 
 ### Keys v5 adds to the v4 table (an overlay: the recorded v4 dictionary is never edited), as
-### paths. Includes the compose-root label, DataFrame selector and rc15 permission names.
+### paths. Includes the compose-root label, DataFrame selector and access permission names.
 ### Mirrors `static_toml_matches_python` in
-### `crates/meerschaum-core/tests/static_config.rs`.
+### `crates/meerschaum-core/tests/integration/static_config.rs`.
 V5_ONLY_STATIC_KEYS = (
     ('environment', 'compose_root'),
     ('environment', 'dataframe'),

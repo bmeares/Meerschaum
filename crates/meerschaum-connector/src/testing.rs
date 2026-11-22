@@ -421,7 +421,7 @@ pub async fn check_teams<C: InstanceConnector + ?Sized>(conn: &C, prefix: &str) 
     let _ = conn.delete_user(&User::new(&alice, None)).await;
 }
 
-/// FX1: users are looked up by their exact username. A username with a leading `_` (which a
+/// Users are looked up by their exact username. A username with a leading `_` (which a
 /// `params` filter reads as a negation) never reaches another user's row, and an unknown user
 /// has no fields.
 pub async fn check_user_lookups<C: InstanceConnector + ?Sized>(conn: &C, prefix: &str) {

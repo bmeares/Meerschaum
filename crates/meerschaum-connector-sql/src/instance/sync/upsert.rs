@@ -106,7 +106,7 @@ impl SqlConnector {
             date_bound_only: false,
             enforce_dtypes: false,
             filter_params_index_limit: self.settings.filter_params_index_limit,
-            // Declared text / index columns keep their null-like strings (rc15 Q18).
+            // Declared text / index columns keep their null-like strings.
             literal_null_markers: null_marker_columns(sp, state),
         };
         // The kernel's callback is synchronous: capture the backtrack request first, fetch it,
@@ -620,7 +620,7 @@ impl SqlConnector {
                 .filter(|c| existing_cols.contains_key(c))
                 .collect(),
         };
-        // NULL keys must be equal (rc15 S3). The conflict target follows the table's own unique
+        // NULL keys must be equal. The conflict target follows the table's own unique
         // key; when that key treats NULLs as distinct (MySQL / MariaDB, SQLite, PostgreSQL before
         // 15, a table made before 5.0.0rc15) and the batch has a NULL key, the upsert compares
         // the keys itself (`UpdateQueriesArgs::null_safe_upsert`).

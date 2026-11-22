@@ -392,7 +392,7 @@ pub async fn get_job_logs(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolErro
 /// `list_connectors`.
 pub async fn list_connectors(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
     let wanted = str_arg(args, "type");
-    // A connector reserved for other teams is not listed (rc15).
+    // A connector reserved for other teams is not listed.
     let caller = caller_access(cx).await?;
     let mut connectors = Vec::new();
     for (typ, labels) in cx.state.connectors().iter() {

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use meerschaum_cli::source_fetch_backend::NativeSqlSources;
+use meerschaum_cli::source_fetch::backend::NativeSqlSources;
 use meerschaum_connector::{
     Connector, ConnectorError, ConnectorResult, DataQuery, DateBound, InstanceConnector, PipeId,
     PipeKeysEntry, PipesKeys, PipesKeysQuery, SyncOptions, async_trait,

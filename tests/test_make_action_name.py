@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-`@make_action(name='weather wait')` (rc15 Q23) registers a multi-word action explicitly: it runs
+`@make_action(name='weather wait')` registers a multi-word action explicitly: it runs
 as `mrsm weather wait [more words]` exactly like the underscore action `weather_wait`, and the
 plugin manifest lists its words (`words`) so help and completion can show `wait` under `weather`.
 """

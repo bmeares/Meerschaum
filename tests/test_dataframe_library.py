@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-The DataFrame library setting (`meerschaum:dataframe`, `MRSM_DATAFRAME`; rc15 Q54).
+The DataFrame library setting (`meerschaum:dataframe`, `MRSM_DATAFRAME`).
 
 - a fresh root defaults to Polars (its `meerschaum.yaml` is written with `dataframe: polars`) and is
   never mistaken for an old root on its second run;

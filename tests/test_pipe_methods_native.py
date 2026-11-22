@@ -1,5 +1,5 @@
 """
-Wave 15 (task L2): the `Pipe` methods that wrap an instance connector run in Rust
+The `Pipe` methods that wrap an instance connector run in Rust
 (`_core.pipe_get_data`, `pipe_get_backtrack_data`, `pipe_get_sync_time`, `pipe_get_rowcount`,
 `pipe_infer_dtypes`, `pipe_enforce_dtypes`, `pipe_filter_existing`, `pipe_deduplicate`,
 `pipe_fetch`, `pipe_get_backtrack_interval`).
@@ -661,8 +661,8 @@ def test_enforce_dtypes_of_nothing(kind, instance, native_calls):
 def _by_family(kind):
     """
     The string backends of the unseen and update rows follow pandas' merge against the existing
-    rows' backend, which differs for an instance whose frames are Arrow-backed (PARITY, wave 15
-    L2); every value, column and dtype family is compared.
+    rows' backend, which differs for an instance whose frames are Arrow-backed (PARITY.md, the
+    `Pipe` methods over an instance); every value, column and dtype family is compared.
     """
     if kind != 'custom':
         return None
@@ -813,7 +813,7 @@ def test_deduplicate_without_index_columns(kind, instance, native_calls):
 
 def _fetched(result):
     """Chunks of a fetch as `(columns, rows without the datetime axis)`: the Rust driver parses
-    timestamps where SQLAlchemy over SQLite hands back text (PARITY, wave 15 L2)."""
+    timestamps where SQLAlchemy over SQLite hands back text (PARITY.md, `Pipe` methods)."""
     chunks = list(result) if hasattr(result, '__next__') else [result]
     out = []
     for chunk in chunks:
@@ -876,7 +876,7 @@ def test_valkey_cleanup(kind):
 
 
 # ---------------------------------------------------------------------------------------------
-# Wave 15 (L2) follow-ups: the connector's own backtrack hook, remote reads from plugin and
+# The `Pipe` methods, continued: the connector's own backtrack hook, remote reads from plugin and
 # Valkey sources, chunk hooks, the accepted input types, `workers`, exact `NUMERIC` specials.
 
 @pytest.fixture(scope='module')

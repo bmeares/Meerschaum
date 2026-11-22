@@ -1,8 +1,8 @@
 """
-Wave 18 (SW): what a Python user of `python -m meerschaum` sees from `show data` (pandas-style
+What a Python user of `python -m meerschaum` sees from `show data` (pandas-style
 truncation, `--all`) and `--nopretty` (a failing command exits 1), against a SQLite instance.
 
-The Rust integration tests (`crates/meerschaum-cli/tests/w18_show.rs`) cover the same behavior
+The Rust integration tests (`crates/meerschaum-cli/tests/shell_cli_suite/show_views.rs`) cover the same behavior
 through the standalone binary; these go through the console script path of the wheel.
 """
 

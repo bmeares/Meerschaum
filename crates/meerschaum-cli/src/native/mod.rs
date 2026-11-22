@@ -8,7 +8,7 @@
 //! - [`pipes`]: `get_pipes` and the pipe helpers the actions share.
 //! - [`sync`]: the sync seam (`Pipe.sync` for `sql:` source pipes; the engine replaces it).
 //! - [`show`], [`manage`], [`users`], [`maintenance`], [`jobs`]: the actions.
-//! - [`teams`], [`access`]: teams, pipe access and locks (rc15 wave 2); [`connector_mask`]: the
+//! - [`teams`], [`access`]: teams, pipe access and locks; [`connector_mask`]: the
 //!   secrets `show connectors` masks.
 //! - [`lifecycle`], [`pip`], [`plugin_files`]: `setup plugins`, `install plugins|required|packages`.
 //! - [`rich_json`]: `rich.json.JSON` (pipe attributes in `show pipes`).
@@ -141,7 +141,7 @@ pub fn run(function: &str, args: &ArgsMap, rt: &mut Runtime<'_>) -> Option<Actio
         "_backup_postgres" => upgrade_postgres::backup_postgres(args, rt),
         "_restore_postgres" => upgrade_postgres::restore_postgres(args, rt),
         "backup" | "restore" => subactions::choose_subaction(function, args, rt),
-        // Wave 15 (N2): plugins, packages and venvs.
+        // Plugins, packages and venvs.
         "_bootstrap_plugins" => bootstrap_plugins::bootstrap_plugins(args, rt),
         "_uninstall_plugins" => plugin_admin::uninstall_plugins(args, rt),
         "_uninstall_packages" => packages::uninstall_packages(args, rt),
@@ -430,19 +430,6 @@ pub fn yes_no(
 /// `"s"` unless `n == 1`.
 pub fn plural(n: usize) -> &'static str {
     if n != 1 { "s" } else { "" }
-}
-
-/// `f"{n:,}"`.
-pub fn thousands(n: i64) -> String {
-    let s = n.unsigned_abs().to_string();
-    let mut out = String::new();
-    for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    if n < 0 { format!("-{out}") } else { out }
 }
 
 /// `items_str(items, quotes=..., and_=..., and_str=...)` (`meerschaum/utils/misc.py`).

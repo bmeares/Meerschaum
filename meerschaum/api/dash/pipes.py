@@ -295,8 +295,8 @@ def get_pipes_cards(*keys, session_data: Optional[Dict[str, Any]] = None):
     alerts = [alert_from_success_tuple(pipes)]
     if not isinstance(pipes, list):
         pipes = []
-    from meerschaum.api.dash.access import get_viewer, visible_pipes
-    pipes = visible_pipes(get_viewer(session_data), pipes)
+    from meerschaum.api.dash.access import resolve_viewer, visible_pipes
+    pipes = visible_pipes(resolve_viewer(session_data), pipes)
 
     max_num_pipes_cards = get_config('dash', 'max_num_pipes_cards')
     overflow_pipes = pipes[max_num_pipes_cards:]

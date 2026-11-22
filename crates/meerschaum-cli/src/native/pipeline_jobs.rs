@@ -7,7 +7,7 @@
 //! pipelines NAME -i <registry> --loop` (`-s` makes it a schedule instead, `--min-seconds` sets
 //! the pace, `--name` names the job). `stop pipeline` stops them.
 //!
-//! Before rc15, `start pipeline ... -P '{"sub_args_line": ...}'` was how chains (`a + b : --loop`)
+//! In earlier 5.0 release candidates, `start pipeline ... -P '{"sub_args_line": ...}'` was how chains (`a + b : --loop`)
 //! were stored; the dispatcher still runs that form as a chain (`dispatch::run_action`).
 
 use indexmap::IndexMap;
@@ -131,7 +131,7 @@ fn new_job_sysargs(args: &ArgsMap, name: &str, registry: &str, saved_pace: bool)
             }
         }
     }
-    // Writes to protected instances are allowed only when the job carries the flag (Q20).
+    // Writes to protected instances are allowed only when the job carries the flag.
     if super::flag(args, "allow_protected") {
         sysargs.push("--allow-protected".into());
     }
@@ -613,7 +613,7 @@ mod tests {
         let jobs = |items: &[(&str, bool)]| -> Vec<(String, bool)> {
             items.iter().map(|(j, s)| (j.to_string(), *s)).collect()
         };
-        // A loop job and a scheduled one: only the scheduled one starts (Q31).
+        // A loop job and a scheduled one: only the scheduled one starts.
         assert_eq!(
             jobs_to_start(&jobs(&[("pipeline-daily", false), ("sched-daily", true)])),
             (v(&["sched-daily"]), v(&["pipeline-daily"]))

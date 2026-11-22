@@ -43,7 +43,7 @@ with its project block, applies `MRSM_PATCH`, then URI connectors and file conne
 Tests must run with fresh `MRSM_ROOT_DIR` and empty `MRSM_PLUGINS_DIR`. Generate the parameter
 matrix using `scripts/parity/run.sh crates/meerschaum-core/tests/fixtures/gen_parameter_resolution.py`.
 It uses in-memory instance stubs and never connects to a database. See `PARAMETER_CALL_SITES.md`
-for the audited consumer locations and required integration changes in other crates.
+for which consumers read raw parameters and which read resolved ones.
 
 `debug::dprint!` prints debug output: a `tracing` `DEBUG` event targeted at the caller's module,
 emitted only while `debug::enabled()` (`--debug`, the shell's `debug` toggle, or a Python binding
@@ -55,3 +55,10 @@ shell's toggle. Redact secrets with `debug::redact_uris` (URI passwords, secret 
 quoted secret keys in JSON or `repr` text, secret flags inside a word) and `debug::is_secret_key`
 before printing them. The CLI and the Python
 extension own the subscribers that print these events.
+
+**Teams.** `access` holds teams, roles, grants and locks; `execution` a team's placement
+(`host`, `container`, `api`); `team_scope` what an isolated team's processes receive (its
+configuration, the environment allowlist) and which team a caller acts for; `team_scope::sandbox`
+the Linux Landlock/seccomp sandbox those processes apply to themselves. These are trust-boundary
+modules: read `docs/agents/teams-and-executors.md` and ADRs 0007 to 0009 in `docs/adr/` before
+changing them.

@@ -103,6 +103,8 @@ jobs:
     if: ${{ needs.changes.outputs.pytest == 'true' && inputs.profile != 'release' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
+    outputs:
+      local_attempt: ${{ steps.local.outputs.attempt }}
     env:
       CARGO_INCREMENTAL: '0'
       CARGO_BUILD_JOBS: '24'
@@ -118,12 +120,21 @@ jobs:
         run: scripts/rust/ci.sh disk-guard
       - name: Build wheel and CLI before starting any test services
         run: bash scripts/ci/build_pytest.sh
+      # The artifacts and test jobs run on self-hosted runners of one host. With the repository variable
+      # CI_LOCAL_ARTIFACTS=true the verified artifacts stay on the host (a run-scoped directory in the
+      # runners' shared cache) instead of a round trip through GitHub over the host's uplink.
+      - name: Hand the verified artifacts to this host's test jobs
+        id: local
+        if: ${{ vars.CI_LOCAL_ARTIFACTS == 'true' && !inputs.artifacts_run_id && inputs.profile != 'release' }}
+        run: python3 scripts/ci/local_artifacts.py publish --source "$CI_ARTIFACT_DIR" --store "${MRSM_CI_CACHE:-$HOME/.cache/mrsm-ci}/pytest-artifacts"
       - uses: actions/upload-artifact@v7
+        if: ${{ !(vars.CI_LOCAL_ARTIFACTS == 'true' && !inputs.artifacts_run_id && inputs.profile != 'release') }}
         with: {name: pytest-wheel, path: '${{ env.CI_ARTIFACT_DIR }}/wheel/*', if-no-files-found: error, retention-days: 7}
       - uses: actions/upload-artifact@v7
+        if: ${{ !(vars.CI_LOCAL_ARTIFACTS == 'true' && !inputs.artifacts_run_id && inputs.profile != 'release') }}
         with: {name: pytest-binary, path: '${{ env.CI_ARTIFACT_DIR }}/binary/*', if-no-files-found: error, retention-days: 7}
       - uses: actions/upload-artifact@v7
-        if: ${{ env.MRSM_TEST_CONSOLE == '1' }}
+        if: ${{ env.MRSM_TEST_CONSOLE == '1' && !(vars.CI_LOCAL_ARTIFACTS == 'true' && !inputs.artifacts_run_id && inputs.profile != 'release') }}
         with: {name: console-native-fixture-debug, path: '${{ env.CI_ARTIFACT_DIR }}/console-native-fixture/**', if-no-files-found: error, retention-days: 7}
 
   tests:
@@ -155,20 +166,27 @@ jobs:
         with: {clean: false, persist-credentials: false, ref: '${{ github.sha }}'}
       - name: Clean the runner checkout, preserving build and dependency caches
         run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
+      - name: Take the verified artifacts from this host
+        if: ${{ vars.CI_LOCAL_ARTIFACTS == 'true' && !inputs.artifacts_run_id && inputs.profile != 'release' }}
+        env:
+          LOCAL_ATTEMPT: ${{ needs.artifacts.outputs.local_attempt }}
+        run: python3 scripts/ci/local_artifacts.py fetch --store "${MRSM_CI_CACHE:-$HOME/.cache/mrsm-ci}/pytest-artifacts" --attempt "$LOCAL_ATTEMPT" --output "$PYTEST_ARTIFACT_DIR"
       - uses: actions/download-artifact@v8
+        if: ${{ !(vars.CI_LOCAL_ARTIFACTS == 'true' && !inputs.artifacts_run_id && inputs.profile != 'release') }}
         with:
           name: ${{ needs.changes.outputs.wheel_artifact }}
           path: ${{ env.PYTEST_ARTIFACT_DIR }}/wheel
           run-id: ${{ inputs.artifacts_run_id || github.run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v8
+        if: ${{ !(vars.CI_LOCAL_ARTIFACTS == 'true' && !inputs.artifacts_run_id && inputs.profile != 'release') }}
         with:
           name: ${{ needs.changes.outputs.binary_artifact }}
           path: ${{ env.PYTEST_ARTIFACT_DIR }}/binary
           run-id: ${{ inputs.artifacts_run_id || github.run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v8
-        if: ${{ matrix.shard == 'core' && env.MRSM_TEST_CONSOLE == '1' }}
+        if: ${{ matrix.shard == 'core' && env.MRSM_TEST_CONSOLE == '1' && !(vars.CI_LOCAL_ARTIFACTS == 'true' && !inputs.artifacts_run_id && inputs.profile != 'release') }}
         with:
           name: ${{ inputs.profile == 'release' && 'console-native-fixture-release' || 'console-native-fixture-debug' }}
           path: ${{ env.PYTEST_ARTIFACT_DIR }}/console-native-fixture

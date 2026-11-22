@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Worker test plugin for the `Pipe` methods (wave 15, task L2).
+Worker test plugin for the `Pipe` methods.
 
 - `w15l2back:<label>`: an `IS_INSTANCE`, `IS_THREAD_SAFE` connector storing pipes as JSON files
   under the root directory that defines its own `get_backtrack_data()` (every call is recorded in

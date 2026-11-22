@@ -11,7 +11,6 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
-#[path = "batches.rs"]
 pub mod batches;
 
 const MAX_OUTSTANDING: usize = 256;

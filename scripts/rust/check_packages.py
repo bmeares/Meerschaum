@@ -8,8 +8,9 @@ Check the `.crate` archives `cargo package --workspace` wrote to `target/package
 For every archive:
 
 - the size is under crates.io's 10 MB limit (`--limit-mb`);
-- it ships no tests, fixtures, benches, generators, `.github`, virtualenvs or build output (each
-  crate declares an explicit `include`, so a path here means the list is too broad);
+- it ships no integration tests, fixtures, benches, generators, `.github`, virtualenvs or build output
+  (each crate declares an explicit `include`, so a path here means the list is too broad); a unit-test
+  module's own files under `src/` are source;
 - it carries a README, the root `LICENSE` and `NOTICE`, and a `Cargo.toml` with `description`, `license` and `repository`.
 
 - the `meerschaum` front crate also ships `src/main.rs` and its manifest declares the `mrsm` binary
@@ -33,6 +34,9 @@ FORBIDDEN = re.compile(
     r'(^|/)(tests?|fixtures|benches|bench|\.github|\.venv[^/]*|node_modules|target)(/|$)'
     r'|(^|/)gen_[^/]*\.py$|\.cast$|PARITY\.md$'
 )
+# A unit-test module split into files (`src/<module>/tests.rs` + `src/<module>/tests/<group>.rs`) is
+# source, like `tests.rs` itself; integration tests live in the crate's top-level `tests/`.
+UNIT_TEST_MODULE = re.compile(r'^src/(?:[^/]+/)*tests/[^/]+\.rs$')
 
 
 def check(archive: Path, limit: int) -> tuple[int, list[str]]:
@@ -46,7 +50,7 @@ def check(archive: Path, limit: int) -> tuple[int, list[str]]:
         manifest_name = f"{stem}/Cargo.toml"
         for name in names:
             relative = name[len(stem) + 1:] if name.startswith(stem + '/') else name
-            if FORBIDDEN.search(relative):
+            if FORBIDDEN.search(relative) and not UNIT_TEST_MODULE.fullmatch(relative):
                 failures.append(f"{archive.name}: ships {relative}")
         if not any(re.fullmatch(re.escape(stem) + r'/README(\.md)?', n) for n in names):
             failures.append(f"{archive.name}: has no README.md")

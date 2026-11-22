@@ -337,7 +337,7 @@ with mrsm.Venv('noaa'):
     import requests
 
 print(requests.__file__)
-# /home/bmeares/.config/meerschaum/venvs/noaa/lib/python3.12/site-packages/requests/__init__.py
+# ~/.config/meerschaum/venvs/noaa/lib/python3.12/site-packages/requests/__init__.py
 ```
 
 To import packages which may not be installed, use `meerschaum.attempt_import()`:
@@ -347,7 +347,7 @@ import meerschaum as mrsm
 
 requests = mrsm.attempt_import('requests', venv='noaa')
 print(requests.__file__)
-# /home/bmeares/.config/meerschaum/venvs/noaa/lib/python3.12/site-packages/requests/__init__.py
+# ~/.config/meerschaum/venvs/noaa/lib/python3.12/site-packages/requests/__init__.py
 ```
 
 </details>

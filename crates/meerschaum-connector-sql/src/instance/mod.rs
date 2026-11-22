@@ -204,10 +204,6 @@ struct State {
     /// Whether the instance tables were created (or found) in this process.
     tables_ready: bool,
     leases_ready: bool,
-    internal_pipe_states: HashMap<String, data::PipeState>,
-    /// The columns types a successful `sync_pipe` left behind, by table (see
-    /// `SqlConnector::take_synced_columns_types`).
-    synced_columns: HashMap<String, IndexMap<String, String>>,
     /// `db_version`.
     db_version: Option<String>,
     /// Whether the PostGIS catalog views exist (`SqlConnector::postgis_catalog`).
@@ -395,10 +391,10 @@ impl SqlConnector {
         self.schema.get().is_some()
     }
 
-    /// The gate of the `InstanceConnector` methods: a lazily built connector with no configured
-    /// schema asks the database for it before any table name is built, and refuses to run
-    /// (rather than use the flavor default, which a non-default `search_path` or default schema
-    /// would make the wrong schema) while the database cannot be asked.
+    /// The gate of every entry point: a lazily built connector with no configured schema asks
+    /// the database for it before any table name is built, and refuses to run (rather than use
+    /// the flavor default, which a non-default `search_path` or default schema would make the
+    /// wrong schema) while the database cannot be asked.
     pub async fn require_schema(&self) -> ConnectorResult<()> {
         if self.schema.get().is_some() {
             return Ok(());
@@ -412,6 +408,23 @@ impl SqlConnector {
                     self.label
                 ))
             })
+    }
+
+    /// Canonical private entry guard: settle the default schema on lazy connectors.
+    pub(crate) async fn ensure_schema(&self) -> ConnectorResult<()> {
+        self.require_schema().await
+    }
+
+    /// Canonical private pipe-entry guard: settle the default schema, resolve cross-pipe
+    /// templates (`prepare_pipe`), and bind the pipe to this connector (`sql_pipe`). The bound
+    /// pipe dereferences to the prepared `Pipe` (one copy of the pipe per call).
+    pub(crate) async fn bind_pipe(&self, pipe: &Pipe) -> ConnectorResult<SqlPipe> {
+        self.ensure_schema().await?;
+        if !meerschaum_connector::template::needs_instance_resolution(pipe) {
+            return Ok(self.sql_pipe(pipe)?);
+        }
+        let prepared = self.prepare_pipe(pipe).await;
+        Ok(self.sql_pipe_owned(prepared)?)
     }
 
     /// Ask the database for its default schema when none is configured (one query, cached
@@ -529,7 +542,12 @@ impl SqlConnector {
 
     /// Bind a pipe to this instance (its flavor-truncated `target` and the configured defaults).
     pub fn sql_pipe(&self, pipe: &Pipe) -> Result<SqlPipe> {
-        Ok(SqlPipe::new(pipe.clone(), self.flavor)?.with_defaults(
+        self.sql_pipe_owned(pipe.clone())
+    }
+
+    /// [`sql_pipe`](Self::sql_pipe) of a pipe the caller no longer needs.
+    fn sql_pipe_owned(&self, pipe: Pipe) -> Result<SqlPipe> {
+        Ok(SqlPipe::new(pipe, self.flavor)?.with_defaults(
             self.settings.pipe_defaults.clone(),
             self.settings.backtrack_minutes,
         ))
@@ -538,16 +556,6 @@ impl SqlConnector {
     /// Set the connectors cross-instance `{{ Pipe() }}` references resolve against.
     pub fn set_instance_provider(&self, provider: Arc<dyn InstanceProvider>) {
         *self.provider.lock().unwrap_or_else(|e| e.into_inner()) = Some(provider);
-    }
-
-    /// Forget the engine state of `pipe` that lives on **other** instances (GAP-002): its ledger
-    /// entries and the cursors in which it is the parent, written onto its cross-instance
-    /// children's instances. The pipe's state on this instance is
-    /// `pipe_ops::forget_engine_state`'s. Failures are reported in the result, never raised.
-    pub async fn forget_remote_engine_state(&self, pipe: &Pipe) -> meerschaum_core::SuccessTuple {
-        let provider = self.instance_provider();
-        meerschaum_connector::pipe_ops::forget_remote_engine_state(self, provider.as_ref(), pipe)
-            .await
     }
 
     /// The provider that reaches other instances: the one set with
@@ -1324,5 +1332,238 @@ mod engine_state_tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod entry_seam_tests {
+    use super::*;
+    use crate::facade::IfExists;
+    use crate::instance::data::DataQueryOptions;
+    use crate::queries::metadef::Bound;
+    use crate::uri::ConnectorAttributes;
+    use meerschaum_connector::{DataQuery, PipesKeysQuery, SyncOptions};
+    use meerschaum_core::Value;
+    use meerschaum_kernel::enforce::PipeInput;
+    use meerschaum_kernel::{Column, Frame};
+
+    fn unreachable_lazy_postgres() -> SqlConnector {
+        // Bind and drop an ephemeral localhost listener to obtain a port that fails immediately
+        // with ECONNREFUSED rather than timing out.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let port = listener.local_addr().expect("local addr").port();
+        drop(listener);
+        let spec = ConnectionSpec::from_attributes(&ConnectorAttributes {
+            flavor: Some(Flavor::Postgresql),
+            host: Some("127.0.0.1".into()),
+            port: Some(port),
+            username: Some("mrsm".into()),
+            password: Some("mrsm".into()),
+            database: Some("mrsm".into()),
+            ..Default::default()
+        })
+        .expect("spec");
+        let conn = SqlConnector::connect_lazy(
+            "lazy_pg",
+            spec,
+            InstanceSettings::defaults(Flavor::Postgresql),
+        )
+        .expect("lazy connector");
+        assert!(
+            !conn.schema_known(),
+            "lazy postgres without configured schema must defer schema discovery"
+        );
+        conn
+    }
+
+    fn sample_frame(id: i64, extra: Option<&str>) -> Frame {
+        let mut cols = vec![
+            Column::object("id", vec![KValue::Int(id)]),
+            Column::object("val", vec![KValue::Int(id * 10)]),
+        ];
+        if let Some(text) = extra {
+            cols.push(Column::object("extra", vec![KValue::Str(text.into())]));
+        }
+        Frame::new(cols).expect("frame")
+    }
+
+    #[tokio::test]
+    async fn lazy_connector_enforces_schema_discovery_on_inherent_and_facade_methods() {
+        let conn = unreachable_lazy_postgres();
+        let mut pipe = Pipe::builder("sql:lazy_pg", "seam_check")
+            .instance("sql:lazy_pg")
+            .parameters(
+                Value::from_json_str(
+                    r#"{"columns":{"datetime":"id"},"fetch":{"definition":"SELECT 1 AS id"}}"#,
+                )
+                .unwrap()
+                .to_map(),
+            )
+            .build()
+            .unwrap();
+        let df = sample_frame(1, None);
+        let cached: IndexMap<String, String> = [
+            ("id".into(), "BIGINT".into()),
+            ("val".into(), "BIGINT".into()),
+        ]
+        .into();
+        let schema_err = "Could not determine the default schema of 'lazy_pg'";
+
+        // Inherent methods must enforce lazy schema discovery, not silently use the fallback.
+        let res = conn.register_pipe(&pipe).await;
+        assert!(!res.success && res.message.contains(schema_err), "{res:?}");
+        assert!(
+            conn.get_pipe_id(&pipe)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains(schema_err)
+        );
+        assert!(
+            conn.get_pipe_attributes(&pipe)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains(schema_err)
+        );
+        assert!(
+            conn.fetch_pipes_keys(&PipesKeysQuery::default())
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains(schema_err)
+        );
+        let res = conn
+            .sync_pipe(&pipe, df.clone(), &SyncOptions::default())
+            .await;
+        assert!(!res.success && res.message.contains(schema_err), "{res:?}");
+        assert!(
+            conn.get_pipe_data(&pipe, &DataQuery::default())
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains(schema_err)
+        );
+        let res = conn.delete_pipe(&pipe).await;
+        assert!(!res.success && res.message.contains(schema_err), "{res:?}");
+        let res = conn.drop_pipe(&pipe).await;
+        assert!(!res.success && res.message.contains(schema_err), "{res:?}");
+        let res = conn.clear_pipe(&pipe, &DataQuery::default()).await;
+        assert!(!res.success && res.message.contains(schema_err), "{res:?}");
+        let res = conn
+            .sync_pipe_inplace(&pipe, None, Bound::None, Bound::None, true)
+            .await;
+        assert!(!res.success && res.message.contains(schema_err), "{res:?}");
+
+        // Facade methods must also enforce schema discovery even when caller cache is supplied.
+        assert!(
+            conn.get_sync_time_cached(&pipe, None, true, false, Some(cached.clone()))
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains(schema_err)
+        );
+        assert!(
+            conn.get_pipe_rowcount_cached(&pipe, &DataQuery::default(), Some(cached.clone()))
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains(schema_err)
+        );
+        let res = conn
+            .sync_pipe_mut_cached(
+                &mut pipe,
+                df.clone(),
+                &SyncOptions::default(),
+                Some(cached.clone()),
+            )
+            .await;
+        assert!(!res.success && res.message.contains(schema_err), "{res:?}");
+        assert!(
+            conn.get_pipe_data_and_state_with(
+                &pipe,
+                &DataQuery::default(),
+                &DataQueryOptions::default(),
+                Some(cached.clone()),
+            )
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains(schema_err)
+        );
+        assert!(
+            conn.get_pipe_docs_frame_cached(
+                &pipe,
+                &DataQuery::default(),
+                false,
+                Some(cached.clone())
+            )
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains(schema_err)
+        );
+        let (ok, msg) = conn
+            .frame_to_sql(&df, "lazy_tbl", None, IfExists::Replace, &cached, &[], None)
+            .await;
+        assert!(!ok && msg.contains(schema_err), "{msg}");
+    }
+
+    #[tokio::test]
+    async fn a_sync_hands_its_layout_out_once() {
+        let conn = SqlConnector::from_uri("cat_take", "sqlite:///:memory:")
+            .await
+            .expect("sqlite");
+        let pipe = Pipe::builder("cat", "take")
+            .instance("sql:cat_take")
+            .parameters(
+                Value::from_json_str(r#"{"columns":{"datetime":"id"}}"#)
+                    .unwrap()
+                    .to_map(),
+            )
+            .build()
+            .unwrap();
+        let other = Pipe::builder("cat", "other")
+            .instance("sql:cat_take")
+            .build()
+            .unwrap();
+        let sync = |id: i64, extra: Option<&'static str>| {
+            let conn = &conn;
+            let pipe = &pipe;
+            async move {
+                let res = conn
+                    .sync(
+                        pipe,
+                        PipeInput::Frame(sample_frame(id, extra)),
+                        &SyncOptions::default(),
+                    )
+                    .await;
+                assert!(res.success, "{}", res.message);
+            }
+        };
+
+        // The sync that created the table hands nothing out (whatever the catalog cache holds).
+        sync(1, None).await;
+        assert!(conn.take_synced_columns_types(&pipe).is_none());
+
+        // A sync into the existing table hands its layout out, once, for its own pipe only.
+        sync(2, None).await;
+        let handed = conn
+            .take_synced_columns_types(&pipe)
+            .expect("a sync into an existing table hands its layout out");
+        assert_eq!(handed, conn.get_pipe_columns_types(&pipe).await.unwrap());
+        assert!(conn.take_synced_columns_types(&pipe).is_none(), "once");
+        assert!(conn.take_synced_columns_types(&other).is_none());
+
+        // A sync that added a column hands out the layout after the `ADD COLUMN`.
+        sync(3, Some("x")).await;
+        let handed = conn.take_synced_columns_types(&pipe).expect("layout");
+        assert!(handed.contains_key("extra"), "{handed:?}");
+        assert_eq!(handed, conn.get_pipe_columns_types(&pipe).await.unwrap());
+
+        // An untaken layout does not outlive its table.
+        sync(4, None).await;
+        assert!(conn.drop_pipe(&pipe).await.success);
+        assert!(conn.take_synced_columns_types(&pipe).is_none());
     }
 }

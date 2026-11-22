@@ -1,21 +1,7 @@
 //! Python-compatible wire encoding helpers (`urllib.parse.quote_plus` / `urlencode`, and the way
 //! `requests` turns a `params=` dict into a query string).
 
-/// `urllib.parse.quote_plus(s)`: unreserved characters (`A-Za-z0-9_.-~`) stay, spaces become `+`,
-/// everything else is percent-encoded from UTF-8 with upper-case hex.
-pub fn quote_plus(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'.' | b'-' | b'~' => {
-                out.push(b as char)
-            }
-            b' ' => out.push('+'),
-            other => out.push_str(&format!("%{other:02X}")),
-        }
-    }
-    out
-}
+use meerschaum_core::pyfmt::quote_plus;
 
 /// `urllib.parse.unquote_plus(s)`.
 pub fn unquote_plus(s: &str) -> String {

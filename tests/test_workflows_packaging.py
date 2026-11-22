@@ -132,46 +132,127 @@ def test_the_binaries_include_intel_macos(wheels):
     }
 
 
-def test_docker_images_build_on_self_hosted_runners(docker_build):
+def _job_text(job):
+    return '\n'.join(str(step.get('run', '')) + str(step.get('uses', '')) + json.dumps(step.get('with', {}))
+                     for step in job['steps'])
+
+
+@pytest.mark.parametrize('runner,arch,expected', [
+    ('', 'amd64', 'ubuntu-24.04'),
+    ('', 'arm64', 'ubuntu-24.04-arm'),
+    ('hosted', 'arm64', 'ubuntu-24.04-arm'),
+    ('self-hosted', 'amd64', ['self-hosted', 'Linux', 'X64']),
+    ('self-hosted', 'arm64', ['self-hosted', 'Linux', 'X64']),
+])
+def test_docker_images_build_natively_on_hosted_runners_by_default(docker_build, runner, arch, expected):
     job = docker_build['jobs']['buildx']
     include = _matrix(docker_build, 'buildx', 'docker')
     assert {(e['arch'], e['platform']) for e in include} == {
         ('amd64', 'linux/amd64'), ('arm64', 'linux/arm64'),
     }
-    assert job['runs-on'] == ['self-hosted', 'Linux', 'X64']
+    values = {'vars.DOCKER_RUNNER': runner, 'matrix.arch': arch}
+    assert _evaluate_actions(job['runs-on'], values) == expected
+    self_hosted = runner == 'self-hosted'
+    assert _evaluate_actions(job['env']['SELF_HOSTED'], values) is self_hosted
+    assert _evaluate_actions(job['strategy']['max-parallel'], values) == (1 if self_hosted else 2)
+    ### QEMU and the persistent builder only for the opt-in self-hosted path; hosted arm64 is native.
+    qemu = next(s for s in job['steps'] if 'setup-qemu-action' in s.get('uses', ''))
+    assert _evaluate_actions(qemu['if'], {'env.SELF_HOSTED': str(self_hosted).lower(), 'matrix.arch': arch}) is (
+        self_hosted and arch == 'arm64')
+    persistent = next(s for s in job['steps'] if s.get('with', {}).get('keep-state') is True)
+    assert persistent['if'] == "env.SELF_HOSTED == 'true'"
+    assert 'memory=' in persistent['with']['driver-opts']
+    free = _step(job, 'Free disk space on the hosted runner')
+    assert free['if'] == "env.SELF_HOSTED != 'true'" and 'df -h /' in free['run']
+    assert 'df -h /' in _step(job, 'Disk use after the build')['run']
     assert job['env']['PYTHON_BIN'] == 'python3'
     assert not any('setup-python' in step.get('uses', '') for step in job['steps'])
-    assert job['strategy']['max-parallel'] == 1
     assert docker_build['concurrency']['cancel-in-progress'] is False
-    qemu = next(s for s in job['steps'] if 'setup-qemu-action' in s.get('uses', ''))
-    assert qemu['if'] == "matrix.arch == 'arm64'"
-    assert qemu['with']['platforms'] == 'arm64'
-    setup = next(s for s in job['steps'] if 'setup-buildx-action' in s.get('uses', ''))
-    assert setup['with']['keep-state'] is True
-    assert setup['with']['use'] is False
-    assert setup['with']['name'] == job['env']['BUILDX_BUILDER']
-    assert 'matrix.arch' in setup['with']['name']
     isolate = _step(job, 'Isolate Docker configuration')['run']
     assert 'mktemp -d "$RUNNER_TEMP/mrsm-docker.' in isolate
     assert 'DOCKER_CONFIG=$docker_config' in isolate
     assert job['env']['DOCKER_DEFAULT_PLATFORM'] == '${{ matrix.platform }}'
-    assert 'memory=' in setup['with']['driver-opts']
-    build = _step(job, 'Build Docker images')
-    assert '--platform "$DOCKER_DEFAULT_PLATFORM"' in build['run']
-    push = _step(job, "Publish this architecture's tested images")
-    assert push['if'] == 'inputs.publish'
-    assert 'docker_candidate.py promote' in push['run']
-    assert 'buildx.sh' not in push['run']
+    ### Published images run as 1000:1000, never as the hosted runner's own uid.
+    assert job['env']['MRSM_IMAGE_UID'] == '1000' and job['env']['MRSM_IMAGE_GID'] == '1000'
     assert _step(job, 'Download and verify the complete sealed SDK')['if'] == "inputs.candidate_run_id != ''"
 
-    publish = docker_build['jobs']['publish']
-    assert set(publish['needs']) == {'metadata', 'buildx'}
-    assert publish['runs-on'] == job['runs-on']
-    assert 'inputs.publish' in publish['if']
+
+def test_candidates_are_staged_on_ghcr_and_recorded_by_digest(docker_build):
+    jobs = docker_build['jobs']
+    registry = _step(jobs['metadata'], 'Name the GHCR staging and cache repositories')['run']
+    assert 'ghcr.io/${GITHUB_REPOSITORY,,}' in registry
+    assert 'candidates=$repository/candidate' in registry and 'cache=$repository/buildcache' in registry
+    buildx = jobs['buildx']
+    assert buildx['if'] == '${{ !inputs.publish && !inputs.rehearse }}'
+    build = _step(buildx, 'Build Docker images')['run']
+    assert '--candidate "$CANDIDATES" --metadata-dir "$IMAGE_RECEIPT_DIR/metadata"' in build
+    assert 'if [ "$SELF_HOSTED" != true ]; then args+=(--cache-ref "$BUILD_CACHE"); fi' in build
+    assert '--platform "$DOCKER_DEFAULT_PLATFORM"' in build
+    record = _step(buildx, 'Record the tested candidate digests')['run']
+    assert 'docker_candidate.py record' in record and '--repository "$CANDIDATES"' in record
+    assert '--metadata-dir "$IMAGE_RECEIPT_DIR/metadata"' in record
+    upload = next(s for s in buildx['steps'] if 'upload-artifact' in s.get('uses', ''))
+    assert upload['with']['name'] == 'docker-candidate-${{ matrix.arch }}'
+
+    executors = jobs['executors']
+    assert executors['runs-on'] == ['self-hosted', 'Linux', 'X64']
+    assert set(executors['needs']) == {'metadata', 'buildx'}
+    assert 'inputs.candidate_run_id' in executors['if'] and "contains(needs.metadata.outputs.platforms, 'linux/amd64')" in executors['if']
+    download = next(s for s in executors['steps'] if 'download-artifact' in s.get('uses', ''))
+    assert download['with']['name'] == 'docker-candidate-amd64'
+    assert 'docker_candidate.py executors' in _job_text(executors)
+    upload = next(s for s in executors['steps'] if 'upload-artifact' in s.get('uses', ''))
+    assert upload['with']['name'] == 'docker-executors-amd64'
+
+    promote = jobs['promote']
+    assert promote['runs-on'] == 'ubuntu-latest' and 'inputs.publish' in promote['if']
+    assert 'inputs.rehearse' in promote['if']
+    text = _job_text(promote)
+    assert text.index('docker_candidate.py sdk') < text.index('docker_candidate.py fetch') \
+        < text.index('docker_candidate.py check') < text.index('docker_candidate.py promote')
+    assert 'buildx.sh' not in text and 'docker push' not in text
+
+    publish = jobs['publish']
+    assert set(publish['needs']) == {'metadata', 'promote'}
+    assert publish['runs-on'] == 'ubuntu-latest' and 'inputs.publish' in publish['if']
     assert publish['env']['EXPECTED_PLATFORMS'] == '${{ needs.metadata.outputs.platforms }}'
     runs = '\n'.join(str(s.get('run', '')) for s in publish['steps'])
-    assert 'buildx.sh --merge' in runs
-    assert 'platforms == expected' in runs
+    assert 'docker_candidate.py index' in runs and '--rehearsal' in runs
+    assert '--platforms "$EXPECTED_PLATFORMS"' in runs and '--image-run-id "$IMAGE_RUN"' in runs
+
+
+def test_the_self_hosted_host_uploads_no_image_layers(docker_build):
+    """Self-hosted jobs only pull; every push and registry copy runs on a hosted runner."""
+    for name, job in docker_build['jobs'].items():
+        labels = _runner_labels(job)
+        if 'self-hosted' not in labels:
+            continue
+        text = _job_text(job)
+        assert name == 'executors', name
+        for forbidden in ('docker push', '--push', 'buildx build', 'imagetools create', 'buildx.sh', 'secrets.'):
+            assert forbidden not in text, (name, forbidden)
+    ### The opt-in self-hosted build is the only exception, and it is off by default.
+    assert _evaluate_actions(docker_build['jobs']['buildx']['runs-on'],
+                             {'vars.DOCKER_RUNNER': '', 'matrix.arch': 'amd64'}) == 'ubuntu-24.04'
+
+
+def test_docker_jobs_get_only_the_package_permissions_they_need(docker_build):
+    assert docker_build['permissions'] == {'contents': 'read', 'actions': 'read'}
+    expected = {'buildx': 'write', 'executors': 'read', 'promote': 'read'}
+    for name, job in docker_build['jobs'].items():
+        permissions = job.get('permissions', docker_build['permissions'])
+        assert permissions.get('packages') == expected.get(name), name
+        assert set(permissions) - {'packages'} == {'contents', 'actions'}, name
+        assert all(value == 'read' for key, value in permissions.items() if key != 'packages'), name
+        ### GHCR is reached with the job's own token; Docker Hub credentials only where a publication runs.
+        for step in job['steps']:
+            if 'login-action' not in str(step.get('uses', '')):
+                continue
+            if step['with'].get('registry') == 'ghcr.io':
+                assert step['with']['password'] == '${{ github.token }}', name
+            else:
+                assert 'secrets.DOCKER_PASSWORD' in step['with']['password'], name
+                assert 'inputs.publish' in str(step.get('if', '')) + str(job.get('if', '')), name
 
 
 @pytest.mark.parametrize('version', ['5.0.0-rc.4', '5.0.0-alpha.1', '5.0.0-beta.1', '5.0.0-dev.1'])
@@ -275,7 +356,9 @@ def test_nothing_publishes_without_the_input(docker_build):
     for name, job in docker_build['jobs'].items():
         for step in job['steps']:
             text = str(step.get('run', ''))
-            if '--push' in text or '--merge' in text or 'login-action' in str(step.get('uses', '')):
+            docker_hub = 'login-action' in str(step.get('uses', '')) and 'secrets.' in json.dumps(step.get('with', {}))
+            if ('--push' in text or '--merge' in text or 'promote' in text or 'imagetools create' in text
+                    or docker_hub):
                 assert 'inputs.publish' in str(step.get('if', '')) or 'inputs.publish' in str(
                     job.get('if', '')
                 ), (name, step.get('name'))
@@ -426,9 +509,10 @@ def test_pytest_builds_once_and_consumes_verified_complete_artifacts(pytest_work
     assert prepare < run, 'verify and install artifacts before starting test services'
 
     builder = (REPO / 'scripts/ci/build_pytest.sh').read_text()
-    assert 'maturin" build --profile ci --locked' in builder
+    assert '"$maturin_bin" build --profile ci --locked' in builder
+    assert 'scripts/rust/ci.sh maturin' in builder, 'one shared maturin helper (ci.sh)'
     assert 'artifacts.py create --kind wheel --profile ci' in builder
-    assert 'artifacts.py create --kind binary --profile debug' in builder
+    assert 'artifacts.py create --kind binary --profile ci' in builder
     consumer = (REPO / 'scripts/ci/prepare_pytest.sh').read_text()
     assert consumer.index('artifacts.py verify') < consumer.index('-m pip install')
     assert 'artifacts.py overlay-wheel' in consumer, 'bundled native libraries must travel with the extension'
@@ -593,7 +677,7 @@ def test_rust_jobs_follow_the_changes_job(rust):
         'fmt': 'rust', 'clippy': 'rust', 'check': 'rust', 'test': 'rust_test', 'parity': 'parity',
         'frontcrate': 'frontcrate', 'package': 'package', 'duckdb-platforms': 'duckdb',
     }
-    assert set(gates) == set(jobs) - {'changes', 'summary'}
+    assert set(gates) == set(jobs) - {'changes', 'guardrails', 'summary'}
     for name, flag in gates.items():
         job = jobs[name]
         assert 'changes' in job['needs'] if isinstance(job['needs'], list) else job['needs'] == 'changes', name
@@ -672,3 +756,185 @@ def test_the_ci_tools_are_pinned_by_checksum():
     assert 'sha256sum' in script and 'checksum mismatch' in script
     subprocess.run(['bash', '-n', str(REPO / 'scripts' / 'rust' / 'ci_tools.sh')], check=True)
     subprocess.run(['bash', '-n', str(REPO / 'scripts' / 'rust' / 'ci.sh')], check=True)
+
+
+# ---------------------------------------------------------------------------------------------
+# Host-local pytest artifacts, shared caches, guardrails and collection partition
+# ---------------------------------------------------------------------------------------------
+
+_LOCAL = "vars.CI_LOCAL_ARTIFACTS == 'true' && !inputs.artifacts_run_id && inputs.profile != 'release'"
+
+
+@pytest.mark.parametrize('variable,artifacts_run,profile,local', [
+    ('', None, None, False),
+    ('false', None, None, False),
+    ('true', None, None, True),
+    ('true', None, 'ci', True),
+    ('true', '123', 'ci', False),
+    ('true', '123', 'release', False),
+    ('true', None, 'release', False),
+])
+def test_pytest_artifacts_stay_on_the_host_only_when_enabled(pytest_workflow, variable, artifacts_run, profile, local):
+    jobs = pytest_workflow['jobs']
+    values = {'vars.CI_LOCAL_ARTIFACTS': variable, 'inputs.artifacts_run_id': artifacts_run,
+              'inputs.profile': profile, 'env.MRSM_TEST_CONSOLE': '1', 'matrix.shard': 'core'}
+    build = jobs['artifacts']
+    publish = _step(build, "Hand the verified artifacts to this host's test jobs")
+    assert 'local_artifacts.py publish' in publish['run'] and publish['id'] == 'local'
+    assert build['outputs']['local_attempt'] == '${{ steps.local.outputs.attempt }}'
+    assert _evaluate_actions(publish['if'], values) is local
+    uploads = [s for s in build['steps'] if str(s.get('uses', '')).startswith('actions/upload-artifact')]
+    assert len(uploads) == 3
+    ### The default (variable unset) uploads and downloads exactly as before.
+    assert all(_evaluate_actions(s['if'], values) is (not local) for s in uploads)
+    tests = jobs['tests']
+    fetch = _step(tests, 'Take the verified artifacts from this host')
+    assert 'local_artifacts.py fetch' in fetch['run'] and '--output "$PYTEST_ARTIFACT_DIR"' in fetch['run']
+    assert fetch['env']['LOCAL_ATTEMPT'] == '${{ needs.artifacts.outputs.local_attempt }}'
+    assert _evaluate_actions(fetch['if'], values) is local
+    downloads = [s for s in tests['steps'] if str(s.get('uses', '')).startswith('actions/download-artifact')]
+    assert all(_evaluate_actions(s['if'], values) is (not local) for s in downloads)
+    steps = [s.get('name') or s.get('uses') for s in tests['steps']]
+    prepare = next(i for i, s in enumerate(tests['steps']) if 'prepare_pytest.sh' in s.get('run', ''))
+    assert steps.index('Take the verified artifacts from this host') < prepare, 'prepare_pytest.sh verifies both paths'
+
+
+def _local_artifacts():
+    return runpy.run_path(str(REPO / 'scripts' / 'ci' / 'local_artifacts.py'), run_name='local_artifacts')
+
+
+def _fake_artifacts(root, run_id):
+    for kind in ('wheel', 'binary'):
+        (root / kind).mkdir(parents=True)
+        (root / kind / 'payload').write_bytes(kind.encode())
+        (root / kind / 'provenance.json').write_text(json.dumps({'actions': {'run_id': run_id}}))
+
+
+def test_local_artifacts_are_published_atomically_verified_and_pruned(tmp_path, monkeypatch):
+    module = _local_artifacts()
+    publish, fetch = module['publish'], module['fetch']
+    verified = []
+    monkeypatch.setattr(module['artifacts'], 'verify_manifest',
+                        lambda path, **kw: verified.append((path.parent.name, kw['kind'], kw['profile'])))
+    monkeypatch.delenv('GITHUB_REPOSITORY', raising=False)
+    source, store = tmp_path / 'source', tmp_path / 'store'
+    _fake_artifacts(source, '42')
+    stale = store / '7-1'
+    stale.mkdir(parents=True)
+    os.utime(stale, (1, 1))
+    fresh = store / '41-1'
+    fresh.mkdir()
+    path = publish(source, store, '42', '2', profile='ci')
+    assert path == store / '42-2' and (path / 'binary' / 'payload').read_bytes() == b'binary'
+    assert sorted(verified) == [('binary', 'binary', 'ci'), ('wheel', 'wheel', 'ci')]
+    assert not stale.exists() and fresh.exists(), 'only run directories older than two days are removed'
+    assert not list(store.glob('*.tmp-*'))
+    with pytest.raises(ValueError, match='already exists'):
+        publish(source, store, '42', '2', profile='ci')
+    output = tmp_path / 'workspace' / '.ci-artifacts'
+    fetch(store, '42', '2', output)
+    assert (output / 'wheel' / 'payload').read_bytes() == b'wheel'
+    with pytest.raises(ValueError, match='not empty'):
+        fetch(store, '42', '2', output)
+    with pytest.raises(ValueError, match='No local test artifacts'):
+        fetch(store, '43', '1', tmp_path / 'other')
+
+
+def test_local_artifacts_of_another_run_are_refused(tmp_path, monkeypatch):
+    module = _local_artifacts()
+    monkeypatch.setattr(module['artifacts'], 'verify_manifest', lambda path, **kw: None)
+    monkeypatch.delenv('GITHUB_REPOSITORY', raising=False)
+    source = tmp_path / 'source'
+    _fake_artifacts(source, '41')
+    with pytest.raises(ValueError, match='another workflow run'):
+        module['publish'](source, tmp_path / 'store', '42', '1', profile='ci')
+    store = tmp_path / 'store'
+    (store / '42-1').mkdir(parents=True)
+    _fake_artifacts(store / '42-1', '41')
+    with pytest.raises(ValueError, match='another workflow run'):
+        module['fetch'](store, '42', '1', tmp_path / 'out')
+
+
+def test_the_ci_test_cli_counts_as_a_development_build():
+    """An optimized CI `mrsm` outside a Cargo target would pick the host's systemd for unpinned jobs."""
+    script = (REPO / 'scripts' / 'ci' / 'prepare_pytest.sh').read_text()
+    tag = script[script.index('Signature: 8a477f597d28d172789f06886806bc55'):]
+    tag = tag[:tag.index('\n  > ')]
+    assert 'created by cargo' in tag, 'meerschaum_jobs::job::in_cargo_target looks for this text'
+    assert '> "$artifact_dir/CACHEDIR.TAG"' in script, 'an ancestor of binary/, outside the verified payload'
+    assert script.index('CACHEDIR.TAG') < script.index('MRSM_TEST_BIN=$binary')
+    rust = (REPO / 'crates' / 'meerschaum-jobs' / 'src' / 'job.rs').read_text()
+    assert 'tag.contains("created by cargo")' in rust
+
+
+def test_shared_ci_venvs_are_locked_keyed_and_never_cleared_in_place(rust):
+    step = _step(rust['jobs']['test'], 'Prepare the native API test interpreter')
+    assert step['run'].strip() == 'scripts/rust/ci.sh native-api-venv'
+    script = (REPO / 'scripts' / 'rust' / 'ci.sh').read_text()
+    body = script[script.index('step_native_api_venv() {'):script.index('step_frontcrate() {')]
+    assert 'ci_lock "$CI_CACHE/.native-api-venv.lock"' in body
+    assert 'sys.version, sys.abiflags' in body and 'date -u +%G-W%V' in body
+    assert 'native-api-venv-$key' in body and '.complete' in body
+    assert '--clear' not in body
+    maturin = script[script.index('maturin_tool() {'):script.index('step_maturin() {')]
+    assert 'ci_lock "$CI_CACHE/.maturin.lock"' in maturin and 'sys.abiflags' in maturin
+    assert '"maturin==$3"' in maturin and '--clear' not in maturin
+    assert re.search(r'^MATURIN_VERSION=\d+\.\d+\.\d+$', script, re.M)
+    subprocess.run(['bash', '-n', str(REPO / 'scripts' / 'rust' / 'ci.sh')], check=True)
+
+
+def test_guardrails_run_on_every_change(rust):
+    job = rust['jobs']['guardrails']
+    assert 'needs' not in job and 'if' not in job, 'never skipped by the changes job'
+    assert job['runs-on'] == 'ubuntu-latest'
+    run = _step(job, 'Architecture rules and public-file hygiene')['run']
+    assert '--list-files "$files"' in run and 'scripts/rust/ci.sh guardrails' in run
+    script = (REPO / 'scripts' / 'rust' / 'ci.sh').read_text()
+    body = script[script.index('step_guardrails() {'):]
+    body = body[:body.index('\n}\n')]
+    assert 'scripts/check_architecture.py' in body and 'check_fixture_hygiene.sh' in body
+    assert 'check_architecture.py' not in script[script.index('step_fmt() {'):script.index('step_guardrails() {')]
+
+
+def test_the_hygiene_list_holds_changed_existing_files_or_every_tracked_file(tmp_path):
+    changes = runpy.run_path(str(REPO / 'scripts' / 'ci' / 'changes.py'), run_name='changes')
+    listed = tmp_path / 'files.txt'
+    source = tmp_path / 'changed.txt'
+    source.write_text('scripts/ci/changes.py\nno/such/deleted.file\n')
+    assert changes['main'](['--event', 'push', '--files', str(source), '--list-files', str(listed)]) == 0
+    assert listed.read_text() == 'scripts/ci/changes.py\n'
+    assert changes['main'](['--event', 'workflow_dispatch', '--list-files', str(listed)]) == 0
+    everything = listed.read_text().splitlines()
+    assert 'Cargo.toml' in everything and len(everything) > 100
+
+
+def test_each_lane_is_collected_on_its_own_in_parallel(tmp_path, monkeypatch):
+    services = runpy.run_path(str(REPO / 'scripts' / 'ci' / 'services.py'), run_name='services')
+    validate = services['validate']
+    lanes = list(services['SHARDS'])
+    baseline = [{'nodeid': f'tests/test_{lane}.py::t', 'shard': lane} for lane in lanes]
+    baseline.append({'nodeid': 'tests/test_flavors.py::t[postgresql]', 'shard': lanes[0]})
+    calls = []
+
+    def collection(python, root, report, shard=None, pytest_args=()):
+        calls.append(shard)
+        if shard is None:
+            return baseline
+        records = [item for item in baseline if item['shard'] == shard]
+        if shard == lanes[0]:
+            ### This lane's flavors do not parametrize the item the unsharded catalog has.
+            records = [item for item in records if 'postgresql' not in item['nodeid']]
+        return records
+
+    validate.__globals__['collection'] = collection
+    args = type('Args', (), {'root': tmp_path / 'collection', 'python': 'python3'})()
+    with pytest.raises(ValueError, match='partition mismatch'):
+        validate(args)
+    assert sorted(calls, key=str) == sorted([None, *lanes], key=str)
+
+
+def test_pytest_keeps_its_default_norecursedirs():
+    import tomllib
+    options = tomllib.loads((REPO / 'pyproject.toml').read_text())['tool']['pytest']['ini_options']
+    defaults = {'*.egg', '.*', '_darcs', 'build', 'CVS', 'dist', 'node_modules', 'venv', '{arch}'}
+    assert defaults <= set(options['norecursedirs'])

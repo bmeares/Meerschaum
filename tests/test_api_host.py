@@ -12,7 +12,7 @@ over the shared secret file), so a token from either side validates on the other
 
 Skipped when the host's dependencies (`fastapi`, `uvicorn`, `dash`, `a2wsgi`, `PyJWT`) are not
 importable. The end-to-end test through the Rust server is
-`crates/meerschaum-server/tests/host_e2e.rs`.
+`crates/meerschaum-server/tests/executors_host_suite/host_e2e.rs`.
 """
 
 import os
@@ -297,7 +297,7 @@ print(json.dumps({
     assert out['plugin_paths'] == [
         '/dash/demo/page', '/dash/demo/other', '/dash/demo', '/dash/demo/demonstration',
     ]
-    ### rc1's per-plugin paths redirect to the v4 paths (the plugin's own pages keep theirs).
+    ### 5.0.0rc1's per-plugin paths redirect to the v4 paths (the plugin's own pages keep theirs).
     assert out['redirects'] == [
         None, '/dash/pipes', '/dash/pipes?a=1', None, None, None,
     ]

@@ -99,9 +99,13 @@ impl LoadedPlugin {
             return Err(error("manifest plugin name mismatch"));
         }
         // Optional extension: old libraries continue to use the original v1 entry point.
+        // SAFETY: an ABI v1 library (this function's contract) exports this symbol only with the
+        // `InvokeWithHost` signature; the copied function pointer stays valid because `library`
+        // is kept in the returned value for its whole life.
         let invoke_host = unsafe { library.get::<InvokeWithHost>(HOST_ENTRY_POINT) }
             .ok()
             .map(|symbol| *symbol);
+        // SAFETY: as above, for the rows ABI symbol and its `InvokeRows` signature.
         let invoke_rows = unsafe {
             library.get::<crate::rows_abi::InvokeRows>(crate::rows_abi::ROWS_ENTRY_POINT)
         }
@@ -255,6 +259,8 @@ impl LoadedPlugin {
             // SAFETY: all callback state lives through this synchronous invocation.
             unsafe { invoke(Bytes::borrowed(&bytes), &mut input, &mut output, &table) }
         } else {
+            // SAFETY: the validated table's `invoke`, with bytes borrowed from the local `bytes`
+            // and the exclusive local streams, all alive through this synchronous call.
             unsafe { (self.table.invoke)(Bytes::borrowed(&bytes), &mut input, &mut output) }
         };
         // SAFETY: result belongs to this table and is consumed exactly once.
@@ -289,6 +295,8 @@ impl LoadedPlugin {
                 table.as_ref().map_or(std::ptr::null(), |t| t),
             )
         };
+        // SAFETY: `result` comes from this library's rows entry point, so this table's
+        // `free_bytes` releases it, and it is consumed exactly once here.
         let mut reply = unsafe { decode(self.table, result) }?;
         let docs = rows_docs(reply["data"].take())?;
         Ok((reply["value"].take(), docs.map(PipeInput::Docs)))
@@ -459,6 +467,8 @@ unsafe extern "C" fn invoke_rows_host(context: *mut std::ffi::c_void, bytes: Byt
         }
         // SAFETY: caller is inside the synchronous scope that owns this context and bytes.
         let context = unsafe { &*context.cast::<crate::callbacks::HostContext<'_>>() };
+        // SAFETY: non-empty `bytes` have a non-null pointer (checked above), and the plugin keeps
+        // them alive through this synchronous call; the slice is parsed before it returns.
         let mut call: Value = serde_json::from_slice(unsafe { bytes.as_slice() }).map_err(error)?;
         let docs = rows_docs(call["data"].take())?;
         let call = crate::callbacks::HostCall::from_envelope(context.plugin, call)?;
@@ -491,6 +501,8 @@ pub fn validate_manifest(manifest: &Value) -> Result<()> {
     validator.validate(manifest).map_err(error)
 }
 unsafe fn decode(table: &MrsmPluginV1, result: CallResult) -> Result<Value> {
+    // SAFETY: the caller guarantees `result` came from a call into `table`'s library and is
+    // unconsumed, so that library's `free_bytes` is the matching deallocator.
     unsafe { decode_with(table.free_bytes, result) }
 }
 pub(crate) unsafe fn decode_with(

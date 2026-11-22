@@ -2,7 +2,7 @@
 # Usage: scripts/rust/ci.sh [STEP ...]
 #
 # Runs the same commands as .github/workflows/rust.yaml so every CI job can be reproduced locally.
-# With no STEP, runs: fmt clippy test build.
+# With no STEP, runs: guardrails fmt clippy test build.
 #
 # Steps:
 #   setup        Ensure rustup/cargo exist (installs rustup non-interactively if ~/.cargo/bin/cargo
@@ -10,7 +10,8 @@
 #                $CARGO_HOME/bin to later steps' PATH (GITHUB_PATH), installed now or already present.
 #   disk-guard   Run `cargo clean` when free space on the target dir's filesystem is below
 #                MRSM_CI_MIN_FREE_GB (default 10). Self-hosted runner safety valve.
-#   fmt          cargo fmt --all --check
+#   fmt          cargo fmt --all --check, then scripts/check_packaging.py (versions, extras, generated
+#                dependency tables).
 #   clippy       cargo clippy --all-targets -- -D warnings
 #   doc          RUSTDOCFLAGS="-D warnings" cargo doc --workspace --exclude meerschaum-py --no-deps --all-features
 #                (broken or private intra-doc links fail here instead of on docs.rs after a publish)
@@ -39,8 +40,15 @@
 #                interpreter (default python3); on GitHub it also exports MRSM_PYTHON to later steps.
 #   env          Print `export` lines for the build accelerators (below) for a workflow step that runs cargo or
 #                maturin itself: `eval "$(scripts/rust/ci.sh env)"`.
+#   maturin      Print the path of a `maturin` (exactly MATURIN_VERSION) for PYTHON_BIN: one tool venv per
+#                version and interpreter ABI in the shared cache, created once under a lock, else a scratch venv.
+#   native-api-venv  Create (once per requirements, interpreter and ISO week, under a lock) the interpreter the
+#                native API tests start workers with, in the shared cache; on GitHub export PYTHON_BIN/PYTHONPATH.
+#   guardrails   scripts/check_architecture.py, then scripts/parity/check_fixture_hygiene.sh over the tracked
+#                text files listed (one per line) in MRSM_CI_HYGIENE_FILES, or every tracked file without it.
 #   frontcrate   Compile the `meerschaum` front crate with `--no-default-features`, with each of
-#                `sql cli valkey api engine server plugin` alone (`cli` builds the `mrsm` binary), and
+#                `sql cli valkey api engine server plugin` alone (`cli` builds the `mrsm` binary), the SQL
+#                connector without its optional drivers (`-p meerschaum-connector-sql --no-default-features`), and
 #                `cargo test -p meerschaum --features full` (the `meerschaum` features are otherwise only built together by the workspace).
 #   package      cargo package --workspace --no-verify (the crates.io tarballs: manifests, `include` lists,
 #                lockstep versions) then scripts/rust/check_packages.py (size < 10 MB, no tests/fixtures/
@@ -194,7 +202,30 @@ step_fmt() {
   log "Packaging metadata and generated dependency tables"
   python3 -I "$REPO/scripts/check_packaging.py"
 }
-step_clippy() { log "cargo clippy --all-targets -- -D warnings"; cargo clippy --all-targets -- -D warnings; }
+step_guardrails() {
+  log "Architectural guardrails"
+  python3 -I "$REPO/scripts/check_architecture.py"
+  local files=() scanner="scripts/parity/check_fixture_hygiene.sh" path
+  if [ -n "${MRSM_CI_HYGIENE_FILES:-}" ]; then
+    mapfile -t files < "$MRSM_CI_HYGIENE_FILES"
+  else
+    mapfile -t files < <(git ls-files)
+  fi
+  local scanned=()
+  for path in "${files[@]}"; do
+    # The scanner's own pattern table names what it looks for; deleted paths have nothing to scan.
+    [ -n "$path" ] && [ "$path" != "$scanner" ] && [ -f "$path" ] && [ ! -L "$path" ] && scanned+=("$path")
+  done
+  log "Public-file hygiene over ${#scanned[@]} tracked file(s)"
+  [ "${#scanned[@]}" -eq 0 ] && return 0
+  printf '%s\0' "${scanned[@]}" | xargs -0 "$REPO/$scanner" --public
+}
+step_clippy() {
+  log "cargo clippy --all-targets -- -D warnings"
+  cargo clippy --all-targets -- -D warnings
+  # Here the registry is warm, so the dependency rules that need `cargo tree` cannot be skipped.
+  python3 -I "$REPO/scripts/check_architecture.py" --require-cargo
+}
 step_doc() {
   log "cargo doc --workspace --no-deps --all-features (-D warnings)"
   RUSTDOCFLAGS="${RUSTDOCFLAGS:+$RUSTDOCFLAGS }-D warnings" \
@@ -267,8 +298,10 @@ step_test()   {
     cargo test --locked -p meerschaum-cli --test team_sessions \
       --test host_api_terminals --test host_plugin_discovery --no-fail-fast
     # nextest runs every test in its own process (and does not run doc tests: those follow).
+    # Exclude the three launcher binaries already run above so they do not execute twice.
     log "cargo nextest run --workspace --no-fail-fast (DuckDB library: $MRSM_DUCKDB_LIB)"
-    cargo nextest run --workspace --no-fail-fast
+    cargo nextest run --workspace --no-fail-fast \
+      -E 'not (package(meerschaum-cli) and (binary(=team_sessions) | binary(=host_api_terminals) | binary(=host_plugin_discovery)))'
     log "cargo test --workspace --doc"
     cargo test --workspace --doc
   else
@@ -291,19 +324,99 @@ step_extension() {
     *) profile_args=(--profile "$profile") ;;
   esac
   log "Building the native extension ($profile) with $python"
-  "$python" -m venv "$scratch/tools"
-  "$scratch/tools/bin/python" -m pip install --quiet 'maturin>=1.9,<2.0'
+  local maturin_bin
+  maturin_bin="$(maturin_tool "$python" "$scratch")"
   # Scratch root and plugins for build_py.sh's import check (never the runner's config).
   mkdir -p "$scratch/root" "$scratch/plugins"
   # `build_py.sh` takes the tree's build lock (target/.build-py.lock) itself. `--debug`: the same
   # profile `cargo test --workspace` compiles, so most dependencies are shared (the release build
   # would add a second, optimized copy of every one); the debug extension keeps the oracle flavor (DuckDB's
   # own library is loaded at run time).
-  PYTHON="$python" MATURIN_BIN="$scratch/tools/bin/maturin" PYTHONPATH="$REPO" \
+  PYTHON="$python" MATURIN_BIN="$maturin_bin" PYTHONPATH="$REPO" \
     MRSM_ROOT_DIR="$scratch/root" MRSM_PLUGINS_DIR="$scratch/plugins" \
     scripts/rust/build_py.sh "${profile_args[@]}"
   if [ -n "${GITHUB_ENV:-}" ] && [ "${MRSM_CI_EXPORT_PYTHON:-1}" != 0 ]; then
     echo "MRSM_PYTHON=$python" >> "$GITHUB_ENV"
+  fi
+}
+# The maturin the CI builds of the extension use: one exact version (newest stable at the last bump; the
+# wheels are built by maturin-action with the pyproject's `maturin>=1.9,<2.0`).
+MATURIN_VERSION=1.16.0
+
+ci_lock() {
+  ### ci_lock <file> <command...>: run a command holding an exclusive lock shared by every runner of the host.
+  local file="$1"; shift
+  if command -v flock >/dev/null 2>&1; then
+    flock "$file" "$@"
+  else
+    "$@"
+  fi
+}
+
+maturin_tool() {
+  ### maturin_tool <python> <scratch>: print a maturin executable for <python>; logs go to stderr.
+  local python="$1" scratch="$2" abi venv
+  abi="$("$python" -c 'import sys; print(f"py{sys.version_info[0]}.{sys.version_info[1]}{sys.abiflags}")')"
+  if mkdir -p "$CI_CACHE" 2>/dev/null && [ -w "$CI_CACHE" ]; then
+    # Keyed by the exact version and the interpreter ABI (`3.14t` is not `3.14`), so a complete venv
+    # never changes and is never rebuilt under a running build.
+    venv="$CI_CACHE/maturin-$MATURIN_VERSION-$abi"
+    ci_lock "$CI_CACHE/.maturin.lock" bash -c '
+      set -euo pipefail
+      [ -f "$2/.complete" ] && exit 0
+      rm -rf -- "$2"
+      "$1" -m venv "$2"
+      "$2/bin/python" -m pip install --quiet "maturin==$3"
+      touch "$2/.complete"
+    ' _ "$python" "$venv" "$MATURIN_VERSION" >&2
+  else
+    venv="$scratch/maturin"
+    "$python" -m venv "$venv" >&2
+    "$venv/bin/python" -m pip install --quiet "maturin==$MATURIN_VERSION" >&2
+  fi
+  echo "$venv/bin/maturin"
+}
+step_maturin() {
+  local python scratch
+  python="$(command -v "${PYTHON_BIN:-python3}")"
+  scratch="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/mrsm-maturin.XXXXXX")"
+  maturin_tool "$python" "$scratch"
+}
+step_native_api_venv() {
+  # The interpreter the native API tests start Python workers with. Shared by the runners of the host:
+  # one directory per requirements hash, interpreter (version and ABI) and ISO week, created once
+  # under a lock and never cleared while a job may use it, so a branch with other requirements builds
+  # its own; the week refreshes the lower-bound requirements to their newest releases.
+  local python uv key venv
+  python="$(command -v "${PYTHON_BIN:-python3}")"
+  # The reference-interpreter setup also supplies uv on self-hosted runners.
+  "$REPO/scripts/parity/setup_reference.sh"
+  uv="$(command -v uv || printf '%s\n' "$HOME/.local/bin/uv")"
+  local requirements=(requirements/api.txt requirements/dash.txt requirements/sql.txt requirements/pandas.txt requirements/polars.txt)
+  key="$({ cat "${requirements[@]}"
+           "$python" -c 'import sys; print(sys.version, sys.abiflags, sys.implementation.cache_tag)'
+           date -u +%G-W%V; } | sha256sum | cut -c1-16)"
+  mkdir -p "$CI_CACHE"
+  venv="$CI_CACHE/native-api-venv-$key"
+  log "Native API test interpreter: $venv"
+  ci_lock "$CI_CACHE/.native-api-venv.lock" bash -c '
+    set -euo pipefail
+    python="$1" uv="$2" venv="$3" cache="$4"; shift 4
+    if [ ! -f "$venv/.complete" ]; then
+      rm -rf -- "$venv"
+      "$python" -m venv --without-pip "$venv"
+      args=()
+      for requirement in "$@"; do args+=(-r "$requirement"); done
+      "$uv" pip install --python "$venv/bin/python" pip "${args[@]}"
+      touch "$venv/.complete"
+    fi
+    # Older keys: two weeks after their creation no job can still use them.
+    find "$cache" -mindepth 1 -maxdepth 1 -type d -name "native-api-venv-*" ! -path "$venv" \
+      ! -newermt "15 days ago" -exec rm -rf -- {} +
+  ' _ "$python" "$uv" "$venv" "$CI_CACHE" "${requirements[@]}"
+  if [ -n "${GITHUB_ENV:-}" ]; then
+    echo "PYTHON_BIN=$venv/bin/python" >> "$GITHUB_ENV"
+    echo "PYTHONPATH=$REPO" >> "$GITHUB_ENV"
   fi
 }
 step_frontcrate() {
@@ -314,6 +427,8 @@ step_frontcrate() {
     log "cargo check -p meerschaum --no-default-features --all-targets --features $feature"
     cargo check -p meerschaum --no-default-features --all-targets --features "$feature"
   done
+  log "cargo check -p meerschaum-connector-sql --no-default-features"
+  cargo check -p meerschaum-connector-sql --no-default-features
   log "cargo test -p meerschaum --features full"
   cargo test -p meerschaum --features full
 }
@@ -426,7 +541,7 @@ step_parity() {
 }
 
 steps=("$@")
-[ "${#steps[@]}" -eq 0 ] && steps=(fmt clippy test build)
+[ "${#steps[@]}" -eq 0 ] && steps=(guardrails fmt clippy test build)
 
 ci_accel
 
@@ -445,6 +560,9 @@ for s in "${steps[@]}"; do
     generated)  step_generated ;;
     check)      step_check ;;
     extension)  step_extension ;;
+    maturin)    step_maturin ;;
+    native-api-venv) step_native_api_venv ;;
+    guardrails) step_guardrails ;;
     frontcrate) step_frontcrate ;;
     package)    step_package ;;
     publish-dry-run) step_publish_dry_run ;;
@@ -459,4 +577,4 @@ for s in "${steps[@]}"; do
   esac
 done
 
-[ "${steps[*]}" = env ] || ci_accel_stats
+case "${steps[*]}" in env|maturin) ;; *) ci_accel_stats ;; esac

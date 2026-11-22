@@ -1,10 +1,6 @@
 """The Performance page filters trusted metadata before calling the native metrics reader."""
 
-from tests.api_host._helpers import SIGN_IN, run_python, sandbox  # noqa: F401
-
-
-def check(result):
-    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-6000:]
+from tests.api_host._helpers import SIGN_IN, run_python, check
 
 
 def test_performance_uses_fresh_visibility_ceilings_and_refuses_hidden_filters(sandbox):

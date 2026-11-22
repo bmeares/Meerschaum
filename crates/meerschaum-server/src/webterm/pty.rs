@@ -107,50 +107,19 @@ pub(super) fn spawn_pty(
 /// The target is this authenticated terminal's own session, never a process-table scan.
 pub(super) fn shell_state(
     config: &WebtermConfig,
-    tmux: Option<&TmuxSettings>,
+    mux: Option<&TmuxMux>,
     session: Option<&str>,
     process_id: Option<u32>,
+    guardian: Option<&NativeGuardian>,
 ) -> Option<Value> {
     let dir = config.shell_state_directory()?;
-    let pid = if let (Some(tmux), Some(session)) = (tmux, session) {
-        let mut command = std::process::Command::new(&tmux.binary);
-        if let Some(socket) = &tmux.socket {
-            command.arg("-S").arg(socket);
-        }
-        // `=`: exactly this terminal's session, never another whose name starts with it.
-        let target = format!("={session}:");
-        let output = tmux_output(
-            command
-                .args(["display-message", "-p", "-t", &target, "#{pane_pid}"])
-                .envs(config.shell.env.iter().map(|(k, v)| (k, v)))
-                .env_remove("TMUX")
-                .env_remove("TMUX_PANE"),
-        )?;
-        if !output.status.success() {
-            return None;
-        }
-        String::from_utf8(output.stdout)
-            .ok()?
-            .trim()
-            .parse::<u32>()
-            .ok()?
+    let pid = if let (Some(mux), Some(session)) = (mux, session) {
+        mux.pane_pid(&config.shell, session)?
     } else {
         process_id?
     };
-    let pid = if config
-        .shell
-        .env
-        .iter()
-        .any(|(key, value)| key == "MRSM_API_EXECUTION" && value == "1")
-    {
-        let spec = config
-            .shell
-            .env
-            .iter()
-            .rev()
-            .find(|(key, _)| key == "MRSM_TEAM_SANDBOX")
-            .map(|(_, value)| Path::new(value))?;
-        meerschaum_jobs::supervisor::terminal_child_pid(i32::try_from(pid).ok()?, spec)?
+    let pid = if let Some(guardian) = guardian {
+        meerschaum_jobs::supervisor::terminal_child_pid(i32::try_from(pid).ok()?, guardian.spec())?
             .try_into()
             .ok()?
     } else {

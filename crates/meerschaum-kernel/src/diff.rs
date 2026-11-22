@@ -132,7 +132,7 @@ fn normalize_delta(df: &Frame, kinds: &HashMap<String, Kind>, literal: &[String]
             .get(&col.name)
             .cloned()
             .unwrap_or_else(|| column_kind(&col.data));
-        // A literal column's null-like strings are values (rc15 Q18).
+        // A literal column's null-like strings are values.
         let normalize = !literal.contains(&col.name);
         let data = match &col.data {
             ColumnData::Native(s) if matches!(s.dtype(), DataType::String) => {
@@ -810,6 +810,27 @@ pub struct BacktrackRequest {
     pub params: IndexMap<String, Vec<Value>>,
 }
 
+/// A backtrack request's `params` as `build_where` params: integers, floats and booleans keep
+/// their type, nulls become `None` and everything else its `str()`.
+pub fn backtrack_params(req: &BacktrackRequest) -> meerschaum_core::Map {
+    req.params
+        .iter()
+        .map(|(k, vals)| {
+            let items = vals
+                .iter()
+                .map(|v| match v {
+                    v if v.is_na() => meerschaum_core::Value::Null,
+                    Value::Int(i) => meerschaum_core::Value::Int(*i),
+                    Value::Float(f) => meerschaum_core::Value::Float(*f),
+                    Value::Bool(b) => meerschaum_core::Value::Bool(*b),
+                    other => meerschaum_core::Value::Str(other.py_str()),
+                })
+                .collect();
+            (k.clone(), meerschaum_core::Value::List(items))
+        })
+        .collect()
+}
+
 /// The pipe attributes `filter_existing` reads.
 #[derive(Clone, Debug)]
 pub struct FilterExistingParams {
@@ -829,8 +850,8 @@ pub struct FilterExistingParams {
     pub enforce_dtypes: bool,
     /// `pipes:sync:filter_params_index_limit` (default 250).
     pub filter_params_index_limit: usize,
-    /// The pipe's columns whose null-like strings are values (rc15 Q18,
-    /// `meerschaum_core::dtypes::null_marker_text_columns`): the backtrack request matches them
+    /// The pipe's columns whose null-like strings are values
+    /// (`meerschaum_core::dtypes::null_marker_text_columns`): the backtrack request matches them
     /// as text and the diff compares them as text. Empty: v4's rule everywhere.
     pub literal_null_markers: Vec<String>,
 }

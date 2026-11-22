@@ -607,9 +607,9 @@ def _teams_allow(attributes: Dict[str, Any], viewer: Any, keys: Optional[str] = 
     teams = attributes.get('teams')
     if teams is not None and not isinstance(teams, (str, list, tuple, set, frozenset)):
         return False
-    from meerschaum.api.dash import access
-    principal = viewer.principal or access._principal(viewer)
-    return access.core().can_use_connector(principal, teams, keys)
+    from meerschaum.api.dash.viewer import core, principal_of
+    principal = viewer.principal or principal_of(viewer)
+    return core().can_use_connector(principal, teams, keys)
 
 
 def connector_team_allows(keys: str, viewer: Any) -> bool:

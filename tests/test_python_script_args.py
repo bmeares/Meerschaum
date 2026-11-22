@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-`mrsm python file.py [args ...]` (rc15): every word after the file belongs to the script, as with
+`mrsm python file.py [args ...]`: every word after the file belongs to the script, as with
 `python file.py ...`. The Python argument parser mirrors the Rust one
 (`crates/meerschaum-cli/src/parse.rs::python_script_index`).
 """

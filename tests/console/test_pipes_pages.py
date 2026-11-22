@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-The Pipes pages (rc15 Q3, Q4, Q27, B5) against a real `mrsm start api`: the table renders,
+The Pipes pages against a real `mrsm start api`: the table renders,
 searches, filters, sorts and opens a pipe; a pipe's tabs render; Sync streams its output and
 the destructive actions confirm with the pipe's metric key; Manage is offered to sessions that
 may run actions only; New pipe previews a query (its columns fill the pickers) and registers the

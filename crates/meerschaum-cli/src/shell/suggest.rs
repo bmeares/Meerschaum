@@ -1,4 +1,4 @@
-//! A text prompt with a filtering dropdown of suggestions (wave 18, decision 4): what the
+//! A text prompt with a filtering dropdown of suggestions: what the
 //! `bootstrap pipes` wizard asks connector, metric and location keys with.
 //!
 //! The dropdown lists the suggestions which contain what has been typed (those which *start* with it

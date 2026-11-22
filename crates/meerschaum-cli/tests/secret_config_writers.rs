@@ -6,6 +6,9 @@
 //! resolved.
 //!
 //! Every value is synthetic; each test works in its own temporary root and opens no database.
+//!
+//! A test binary of its own: `MRSM{env:...}` reads the process environment, which these tests
+//! set, and a variable set in a shared suite would reach every other test of that suite.
 
 use std::path::{Path, PathBuf};
 use std::sync::Once;
@@ -27,10 +30,12 @@ fn no_env(_: &str) -> Option<String> {
     None
 }
 
+#[allow(unsafe_code)] // sets the process environment once, below
 fn setup() -> (tempfile::TempDir, PathBuf, PathBuf) {
     SET_ENV.call_once(|| {
-        // SAFETY: set once, before any test of this binary reads it, and never changed; the
-        // variable is private to these tests.
+        // SAFETY: these tests are the only ones in this binary (kept out of the suites for
+        // this reason): the variable is set once, before any of them reads it, never changed,
+        // and private to them.
         unsafe { std::env::set_var(ENV_VAR, ENV_SECRET) };
     });
     let dir = tempfile::tempdir().unwrap();

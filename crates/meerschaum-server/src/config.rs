@@ -341,7 +341,7 @@ pub struct ServerConfig {
     pub version: String,
     /// `MRSM_SERVER_ID`.
     pub server_id: String,
-    /// `api:permissions:registration:users` (default `false` since rc15: self-registration is
+    /// `api:permissions:registration:users` (default `false` since 5.0.0rc15: self-registration is
     /// off). While the user store has no users, registration is open anyway and the first
     /// account is an administrator (`POST /users/register`).
     pub registration_users: bool,
@@ -862,7 +862,7 @@ impl ServerConfig {
             no_webterm: flags.no_webterm || flags.no_auth || public,
             version: crate::VERSION.to_string(),
             server_id,
-            // The public preset turns user registration off. Off by default since rc15 (the
+            // The public preset turns user registration off. Off by default since 5.0.0rc15 (the
             // first account of an empty user store is still created: `POST /users/register`).
             registration_users: !public
                 && bool_at(cfg, &["api", "permissions", "registration", "users"], false),

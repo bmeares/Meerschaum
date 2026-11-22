@@ -4,11 +4,19 @@ name: buildx
 # rust (Python-free runtime), and rust-full (Python-free with the Rust toolchain), then runs
 # native/offline runtime smokes and size gates for all four targets. api aliases full.
 #
-# All Docker builds run on self-hosted Linux x86_64 runners. Prereleases build amd64 only;
-# finals also build arm64 under QEMU. Each architecture has a persistent, resource-limited
-# BuildKit cache. Jobs and runs are serialized because the runners share a Docker daemon.
-# The publish job merges exactly the architectures selected from the Cargo version.
-# Prereleases only get version-qualified tags; floating tags remain unchanged.
+# Where the bytes go (the self-hosted host uploads slowly, so it uploads no image layers):
+#   - `buildx` builds, smoke-tests and size-gates each architecture natively on GitHub-hosted runners
+#     (`ubuntu-24.04`, `ubuntu-24.04-arm`; no QEMU) with a registry build cache on GHCR, pushes each
+#     image to the GHCR staging repository `ghcr.io/<owner>/<repo>/candidate` and tests it pulled back
+#     by digest. The `docker-candidate-<arch>` receipt records those digests.
+#   - `executors` (self-hosted, amd64) pulls the tested `full` digest and runs the installed Team
+#     executor suite (the one step that compiles Rust); its receipt is `docker-executors-amd64`.
+#   - Promotion copies the tested digests from GHCR to Docker Hub. The publish job verifies each
+#     multi-platform index against the receipts before moving release aliases. Rehearsals write
+#     run-specific tags only. Prereleases receive version-qualified tags only.
+# The repository variable DOCKER_RUNNER=self-hosted moves `buildx` back to the self-hosted Linux
+# runners (persistent per-architecture BuildKit caches, arm64 under QEMU); it still stages the
+# candidates on GHCR, so it uploads every image from that host.
 #
 # The size gate ENFORCES by default (5.0.0rc1 requires it, §13): the job fails when `slim`
 # exceeds 250 MB or `full` exceeds 2500 MB (uncompressed, `docker image inspect`). `warn` only
@@ -21,6 +29,10 @@ on:
         description: 'Publish the images to DockerHub.'
         type: boolean
         default: false
+      rehearse:
+        description: 'Copy to temporary Docker Hub tags and verify the indexes without moving release tags.'
+        type: boolean
+        default: false
       candidate_run_id:
         description: 'Successful release.yaml run supplying the sealed SDK artifacts.'
         type: string
@@ -29,10 +41,6 @@ on:
         description: 'Successful Docker candidate run to promote without rebuilding.'
         type: string
         default: ''
-      rebuild_on_missing:
-        description: 'Explicitly rebuild missing candidate images from the same sealed SDK and rerun all gates.'
-        type: boolean
-        default: false
       v4_only:
         description: 'Build only the default-target images per dep group (no slim).'
         type: boolean
@@ -52,7 +60,7 @@ permissions:
   contents: read
   actions: read
 
-# Shared daemon, image tags and persistent builders: never overlap two release builds.
+# Never overlap two release runs: a publication moves shared tags.
 concurrency:
   group: mrsm-docker-release
   cancel-in-progress: false
@@ -64,32 +72,68 @@ jobs:
     outputs:
       docker: ${{ steps.matrix.outputs.docker }}
       platforms: ${{ steps.matrix.outputs.docker_platforms }}
+      candidates: ${{ steps.registry.outputs.candidates }}
+      cache: ${{ steps.registry.outputs.cache }}
     steps:
       - uses: actions/checkout@v7
         with: { persist-credentials: false }
       - uses: actions/setup-python@v7
         with:
           python-version: '3.14'
+      - name: Verify publication inputs
+        env:
+          PUBLISH: ${{ inputs.publish }}
+          REHEARSE: ${{ inputs.rehearse }}
+          SDK_RUN: ${{ inputs.candidate_run_id }}
+          IMAGE_RUN: ${{ inputs.image_run_id }}
+          V4_ONLY: ${{ inputs.v4_only }}
+          SIZE_GATE: ${{ inputs.size_gate }}
+        run: |
+          if [ "$PUBLISH" = true ] || [ "$REHEARSE" = true ]; then
+            [ "$PUBLISH" != "$REHEARSE" ] || {
+              echo 'Choose publication or rehearsal.' >&2; exit 1;
+            }
+            [ -n "$SDK_RUN" ] && [ -n "$IMAGE_RUN" ] && [ "$V4_ONLY" != true ] && [ "$SIZE_GATE" = enforce ] || {
+              echo 'Publication requires a sealed SDK run, a tested image run and all enforced gates.' >&2; exit 1;
+            }
+          fi
       - name: Select release platforms
         id: matrix
         run: python scripts/ci/release_matrix.py --github-output "$GITHUB_OUTPUT"
+      - name: Name the GHCR staging and cache repositories
+        id: registry
+        run: |
+          repository="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "candidates=$repository/candidate" >> "$GITHUB_OUTPUT"
+          echo "cache=$repository/buildcache" >> "$GITHUB_OUTPUT"
 
   buildx:
     name: buildx (${{ matrix.arch }})
     needs: metadata
-    runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 720
+    if: ${{ !inputs.publish && !inputs.rehearse }}
+    runs-on: ${{ vars.DOCKER_RUNNER == 'self-hosted' && fromJSON('["self-hosted","Linux","X64"]') || (matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04') }}
+    # Pushes the candidates and the build cache to GHCR; nothing else needs write access.
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    timeout-minutes: ${{ vars.DOCKER_RUNNER == 'self-hosted' && 720 || 300 }}
     env:
-      # Keep login credentials and builder selection out of the user's Docker config.
       PYTHON_BIN: python3
       BUILDX_BUILDER: meerschaum-release-${{ matrix.arch }}
       DOCKER_DEFAULT_PLATFORM: ${{ matrix.platform }}
       GH_TOKEN: ${{ github.token }}
       SDK_RUN: ${{ inputs.candidate_run_id }}
-      IMAGE_RUN: ${{ inputs.image_run_id }}
+      CANDIDATES: ${{ needs.metadata.outputs.candidates }}
+      BUILD_CACHE: ${{ needs.metadata.outputs.cache }}
+      SELF_HOSTED: ${{ vars.DOCKER_RUNNER == 'self-hosted' }}
+      # The published images run as 1000:1000 whatever account the runner uses.
+      MRSM_IMAGE_UID: '1000'
+      MRSM_IMAGE_GID: '1000'
     strategy:
       fail-fast: false
-      max-parallel: 1
+      # Self-hosted runners share one Docker daemon; hosted runners build both architectures at once.
+      max-parallel: ${{ vars.DOCKER_RUNNER == 'self-hosted' && 1 || 2 }}
       matrix: ${{ fromJSON(needs.metadata.outputs.docker) }}
     steps:
       - name: Checkout code
@@ -108,48 +152,27 @@ jobs:
           echo "SDK_ARTIFACT_DIR=$RUNNER_TEMP/mrsm-sdk-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.arch }}" >> "$GITHUB_ENV"
           echo "IMAGE_RECEIPT_DIR=$RUNNER_TEMP/mrsm-image-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.arch }}" >> "$GITHUB_ENV"
 
+      # A hosted runner starts with about 20 GB free; `full` with its cache needs about 20 GB more.
+      - name: Free disk space on the hosted runner
+        if: env.SELF_HOSTED != 'true'
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
+          docker image prune --all --force >/dev/null
+          df -h /
+
       # setup-python's downloaded interpreters do not support every self-hosted Linux distro.
       # The orchestration scripts use only the standard library; the image builds its own Python.
       - name: Check host Python
         run: python3 -c 'import sys, tomllib; assert sys.version_info >= (3, 11); print(sys.version)'
 
-      - name: Verify publication inputs
-        env:
-          PUBLISH: ${{ inputs.publish }}
-          V4_ONLY: ${{ inputs.v4_only }}
-          SIZE_GATE: ${{ inputs.size_gate }}
-        run: |
-          if [ "$PUBLISH" = true ]; then
-            [ -n "$SDK_RUN" ] && [ -n "$IMAGE_RUN" ] && [ "$V4_ONLY" != true ] && [ "$SIZE_GATE" = enforce ] || {
-              echo 'Publication requires a sealed SDK run, a tested image run and all enforced gates.' >&2; exit 1;
-            }
-          fi
-
       - name: Download and verify the complete sealed SDK
         if: inputs.candidate_run_id != ''
         run: python3 scripts/ci/docker_candidate.py sdk --sdk-run-id "$SDK_RUN" --platform "$DOCKER_DEFAULT_PLATFORM" --output "$SDK_ARTIFACT_DIR"
 
-      - name: Select build or immutable image promotion
-        id: plan
-        env:
-          PUBLISH: ${{ inputs.publish }}
-          REBUILD: ${{ inputs.rebuild_on_missing }}
-        run: |
-          build=true
-          if [ "$PUBLISH" = true ]; then
-            python3 scripts/ci/docker_candidate.py fetch --sdk-run-id "$SDK_RUN" --image-run-id "$IMAGE_RUN" --platform "$DOCKER_DEFAULT_PLATFORM" --output "$IMAGE_RECEIPT_DIR"
-            status=0
-            python3 scripts/ci/docker_candidate.py check --sdk-run-id "$SDK_RUN" --platform "$DOCKER_DEFAULT_PLATFORM" --sdk "$SDK_ARTIFACT_DIR" --record "$IMAGE_RECEIPT_DIR/docker-candidate.json" || status=$?
-            if [ "$status" = 0 ]; then
-              build=false
-            elif [ "$status" != 2 ] || [ "$REBUILD" != true ]; then
-              exit "$status"
-            fi
-          fi
-          echo "build=$build" >> "$GITHUB_OUTPUT"
-
-      - name: Set up ARM64 emulation
-        if: matrix.arch == 'arm64'
+      - name: Set up ARM64 emulation on the self-hosted runner
+        if: env.SELF_HOSTED == 'true' && matrix.arch == 'arm64'
         uses: docker/setup-qemu-action@v4
         # The action runs its binfmt image without `--platform`: under the job's default platform
         # (linux/arm64) Docker would pull the arm64 image, which cannot run before QEMU is installed.
@@ -158,7 +181,8 @@ jobs:
         with:
           platforms: arm64
 
-      - name: Set Up Docker Buildx
+      - name: Set Up Docker Buildx (self-hosted, persistent cache)
+        if: env.SELF_HOSTED == 'true'
         uses: docker/setup-buildx-action@v4
         with:
           name: meerschaum-release-${{ matrix.arch }}
@@ -175,17 +199,45 @@ jobs:
               maxUsedSpace = "100GB"
               minFreeSpace = "30GB"
 
-      # Load and test the requested architecture, including under QEMU for arm64.
+      - name: Set Up Docker Buildx (hosted, registry cache)
+        if: env.SELF_HOSTED != 'true'
+        uses: docker/setup-buildx-action@v4
+        with:
+          name: meerschaum-release-${{ matrix.arch }}
+          use: false
+
+      - name: Log in to the GHCR staging repository
+        if: inputs.candidate_run_id != '' && !inputs.v4_only
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # A candidate is pushed to GHCR and tested by digest; other builds load and test local tags.
       - name: Build Docker images
         id: build
-        if: steps.plan.outputs.build == 'true'
         run: |
-          args=()
+          args=(--platform "$DOCKER_DEFAULT_PLATFORM")
           if [ -n "$SDK_RUN" ]; then args+=(--sdk-artifacts "$SDK_ARTIFACT_DIR"); fi
-          ./scripts/docker/buildx.sh --platform "$DOCKER_DEFAULT_PLATFORM" ${{ inputs.v4_only && '--v4-only' || '' }} "${args[@]}"
+          if [ -n "$SDK_RUN" ] && [ "$V4_ONLY" != true ]; then
+            args+=(--candidate "$CANDIDATES" --metadata-dir "$IMAGE_RECEIPT_DIR/metadata")
+            if [ "$SELF_HOSTED" != true ]; then args+=(--cache-ref "$BUILD_CACHE"); fi
+          elif [ "$V4_ONLY" = true ]; then
+            args+=(--v4-only)
+          fi
+          ./scripts/docker/buildx.sh "${args[@]}"
+        env:
+          V4_ONLY: ${{ inputs.v4_only }}
+
+      - name: Disk use after the build
+        if: always() && env.SELF_HOSTED != 'true'
+        run: |
+          df -h /
+          docker system df
 
       - name: Size gate
-        if: ${{ steps.plan.outputs.build == 'true' && !inputs.v4_only && inputs.size_gate != 'skip' }}
+        if: ${{ !inputs.v4_only && inputs.size_gate != 'skip' }}
         env:
           # `inputs` is empty on events other than workflow_dispatch: default to enforcing.
           SIZE_GATE_MODE: ${{ inputs.size_gate || 'enforce' }}
@@ -204,7 +256,7 @@ jobs:
       # filesystem, with installs disabled (scripts/docker/smoke_facade.py exits nonzero otherwise).
       # The slim rootfs ships `python3` (also as `python`) and `bash`.
       - name: Facade smoke (slim)
-        if: ${{ steps.plan.outputs.build == 'true' && !inputs.v4_only }}
+        if: ${{ !inputs.v4_only }}
         env:
           SLIM_IMAGE: ${{ steps.build.outputs.slim_image }}
         run: |
@@ -228,56 +280,180 @@ jobs:
           runpy.run_path("/smoke_facade.py", run_name="__main__")
           '
 
-      - name: Test installed Team executors on native Linux and record the exact images
-        if: ${{ steps.plan.outputs.build == 'true' && inputs.candidate_run_id != '' && !inputs.v4_only && inputs.size_gate == 'enforce' }}
+      - name: Record the tested candidate digests
+        if: ${{ inputs.candidate_run_id != '' && !inputs.v4_only && inputs.size_gate == 'enforce' }}
         run: |
-          mkdir -p "$IMAGE_RECEIPT_DIR"
-          python3 scripts/ci/docker_candidate.py record --sdk-run-id "$SDK_RUN" --platform "$DOCKER_DEFAULT_PLATFORM" --sdk "$SDK_ARTIFACT_DIR" --output "$IMAGE_RECEIPT_DIR/docker-candidate.json"
+          python3 scripts/ci/docker_candidate.py record --sdk-run-id "$SDK_RUN" --platform "$DOCKER_DEFAULT_PLATFORM" \
+            --sdk "$SDK_ARTIFACT_DIR" --metadata-dir "$IMAGE_RECEIPT_DIR/metadata" --repository "$CANDIDATES" \
+            --output "$IMAGE_RECEIPT_DIR/docker-candidate.json"
 
       - uses: actions/upload-artifact@v7
-        if: ${{ steps.plan.outputs.build == 'true' && inputs.candidate_run_id != '' && !inputs.v4_only && inputs.size_gate == 'enforce' }}
+        if: ${{ inputs.candidate_run_id != '' && !inputs.v4_only && inputs.size_gate == 'enforce' }}
         with:
           name: docker-candidate-${{ matrix.arch }}
           path: ${{ env.IMAGE_RECEIPT_DIR }}/docker-candidate.json
           if-no-files-found: error
           retention-days: 90
 
+  # The installed Team executor suite compiles Rust, so it stays on the self-hosted runner with its warm
+  # target; it pulls the tested `full` digest from GHCR (downloads are fast there) and uploads nothing
+  # but its receipt.
+  executors:
+    name: installed Team executors (amd64)
+    needs: [metadata, buildx]
+    if: ${{ !inputs.publish && !inputs.rehearse && inputs.candidate_run_id != '' && !inputs.v4_only && inputs.size_gate == 'enforce' && contains(needs.metadata.outputs.platforms, 'linux/amd64') }}
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SDK_RUN: ${{ inputs.candidate_run_id }}
+      DOCKER_DEFAULT_PLATFORM: linux/amd64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          clean: false
+
+      - name: Clean the checkout, preserving other CI caches
+        run: git clean -ffdx -e /target -e /.venv-ref -e /.venv-test
+
+      - name: Isolate Docker configuration
+        run: |
+          docker_config="$(mktemp -d "$RUNNER_TEMP/mrsm-docker.XXXXXX")"
+          echo "DOCKER_CONFIG=$docker_config" >> "$GITHUB_ENV"
+          echo "SDK_ARTIFACT_DIR=$RUNNER_TEMP/mrsm-sdk-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-executors" >> "$GITHUB_ENV"
+          echo "RECEIPTS=$RUNNER_TEMP/mrsm-receipts-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-executors" >> "$GITHUB_ENV"
+
+      - name: Check host Python
+        run: python3 -c 'import sys, tomllib; assert sys.version_info >= (3, 11); print(sys.version)'
+
+      - name: Rust toolchain
+        run: scripts/rust/ci.sh setup
+
+      - name: Download and verify the complete sealed SDK
+        run: python3 scripts/ci/docker_candidate.py sdk --sdk-run-id "$SDK_RUN" --platform linux/amd64 --output "$SDK_ARTIFACT_DIR"
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: docker-candidate-amd64
+          path: ${{ env.RECEIPTS }}/candidate
+
+      - name: Log in to the GHCR staging repository (read)
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Test installed Team executors on the tested image
+        run: |
+          mkdir -p "$RECEIPTS/executors"
+          python3 scripts/ci/docker_candidate.py executors --sdk-run-id "$SDK_RUN" --platform linux/amd64 \
+            --sdk "$SDK_ARTIFACT_DIR" --record "$RECEIPTS/candidate/docker-candidate.json" \
+            --output "$RECEIPTS/executors/docker-executors.json"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: docker-executors-amd64
+          path: ${{ env.RECEIPTS }}/executors/docker-executors.json
+          if-no-files-found: error
+          retention-days: 90
+
+  # Publication: verify the candidate run's receipts against a freshly verified sealed SDK and the
+  # staging registry, then copy exactly those digests to Docker Hub (registry to registry).
+  promote:
+    name: promote (${{ matrix.arch }})
+    needs: metadata
+    if: ${{ inputs.publish || inputs.rehearse }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SDK_RUN: ${{ inputs.candidate_run_id }}
+      IMAGE_RUN: ${{ inputs.image_run_id }}
+      REHEARSE: ${{ inputs.rehearse }}
+      DOCKER_DEFAULT_PLATFORM: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.metadata.outputs.docker) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with: { persist-credentials: false }
+
+      - name: Isolate Docker configuration
+        run: |
+          docker_config="$(mktemp -d "$RUNNER_TEMP/mrsm-docker.XXXXXX")"
+          echo "DOCKER_CONFIG=$docker_config" >> "$GITHUB_ENV"
+          echo "SDK_ARTIFACT_DIR=$RUNNER_TEMP/mrsm-sdk-${{ matrix.arch }}" >> "$GITHUB_ENV"
+          echo "RECEIPTS=$RUNNER_TEMP/mrsm-receipts-${{ matrix.arch }}" >> "$GITHUB_ENV"
+
+      - name: Download and verify the complete sealed SDK
+        run: python3 scripts/ci/docker_candidate.py sdk --sdk-run-id "$SDK_RUN" --platform "$DOCKER_DEFAULT_PLATFORM" --output "$SDK_ARTIFACT_DIR"
+
+      - name: Fetch the candidate run's receipts
+        run: python3 scripts/ci/docker_candidate.py fetch --sdk-run-id "$SDK_RUN" --image-run-id "$IMAGE_RUN" --platform "$DOCKER_DEFAULT_PLATFORM" --output "$RECEIPTS"
+
+      - name: Set Up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+        with:
+          use: false
+
+      - name: Log in to the GHCR staging repository (read)
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Check the tested digests are still staged
+        run: python3 scripts/ci/docker_candidate.py check --sdk-run-id "$SDK_RUN" --platform "$DOCKER_DEFAULT_PLATFORM" --sdk "$SDK_ARTIFACT_DIR" --receipts "$RECEIPTS"
+
       - name: Login to DockerHub
-        if: inputs.publish
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Publish this architecture's tested images without rebuilding
-        if: inputs.publish
         run: |
-          python3 scripts/ci/docker_candidate.py promote --sdk-run-id "$SDK_RUN" --platform "$DOCKER_DEFAULT_PLATFORM" --sdk "$SDK_ARTIFACT_DIR" --record "$IMAGE_RECEIPT_DIR/docker-candidate.json"
+          args=()
+          if [ "$REHEARSE" = true ]; then args+=(--rehearsal); fi
+          python3 scripts/ci/docker_candidate.py promote --sdk-run-id "$SDK_RUN" --platform "$DOCKER_DEFAULT_PLATFORM" \
+            --sdk "$SDK_ARTIFACT_DIR" --receipts "$RECEIPTS" "${args[@]}"
 
-  # Joins the architectures' images into the published tags. Runs only for a publish, and only when
-  # every architecture built, passed its gates and pushed.
+  # Create and verify indexes from the candidate digests copied by every successful promote job.
+  # Rehearsals write run-specific tags only. Publication moves aliases after verification.
   publish:
     name: publish (multi-architecture tags)
-    needs: [metadata, buildx]
-    if: ${{ inputs.publish }}
-    runs-on: [self-hosted, Linux, X64]
+    needs: [metadata, promote]
+    if: ${{ inputs.publish || inputs.rehearse }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
-      PYTHON_BIN: python3
+      GH_TOKEN: ${{ github.token }}
+      SDK_RUN: ${{ inputs.candidate_run_id }}
+      IMAGE_RUN: ${{ inputs.image_run_id }}
+      REHEARSE: ${{ inputs.rehearse }}
       EXPECTED_PLATFORMS: ${{ needs.metadata.outputs.platforms }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-        with: { persist-credentials: false, clean: false }
+        with: { persist-credentials: false }
 
       - name: Isolate Docker configuration
         run: |
           docker_config="$(mktemp -d "$RUNNER_TEMP/mrsm-docker.XXXXXX")"
           echo "DOCKER_CONFIG=$docker_config" >> "$GITHUB_ENV"
-
-      # setup-python's downloaded interpreters do not support every self-hosted Linux distro.
-      # The orchestration scripts use only the standard library; the image builds its own Python.
-      - name: Check host Python
-        run: python3 -c 'import sys, tomllib; assert sys.version_info >= (3, 11); print(sys.version)'
 
       - name: Set Up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -290,29 +466,9 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Create the multi-architecture tags
-        run: ./scripts/docker/buildx.sh --merge ${{ inputs.v4_only && '--v4-only' || '' }}
-
-      - name: Check the published platforms
-        env:
-          V4_ONLY: ${{ inputs.v4_only }}
+      - name: Verify the multi-architecture tags against the candidate receipts
         run: |
-          version="$(python3 scripts/check_packaging.py --version)"
-          groups="minimal full"
-          if [ "$V4_ONLY" != true ]; then groups="$groups slim rust rust-full"; fi
-          for group in $groups; do
-            docker buildx imagetools inspect --raw "bmeares/meerschaum:$version-$group" > manifest.json
-            python3 - <<'PY'
-          import json, os
-          with open('manifest.json') as stream:
-              manifest = json.load(stream)
-          platforms = {
-              p['os'] + '/' + p['architecture']
-              for m in manifest['manifests']
-              if (p := m.get('platform', {})).get('os') == 'linux'
-          }
-          expected = set(os.environ['EXPECTED_PLATFORMS'].split(','))
-          assert platforms == expected, (platforms, expected)
-          print('Verified platforms:', ', '.join(sorted(platforms)))
-          PY
-          done
+          args=()
+          if [ "$REHEARSE" = true ]; then args+=(--rehearsal); fi
+          python3 scripts/ci/docker_candidate.py index --sdk-run-id "$SDK_RUN" --image-run-id "$IMAGE_RUN" \
+            --platforms "$EXPECTED_PLATFORMS" --output "$RUNNER_TEMP/mrsm-receipts" "${args[@]}"

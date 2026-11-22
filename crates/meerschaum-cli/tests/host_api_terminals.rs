@@ -20,7 +20,7 @@ mod fixture {
     use std::time::{Duration, Instant};
 
     use futures_util::{SinkExt, StreamExt};
-    use meerschaum_cli::executor_client::Controller;
+    use meerschaum_cli::executor::client::Controller;
     use meerschaum_connector::InstanceConnector;
     use meerschaum_core::access::{Team, TeamRole};
     use meerschaum_core::config::ConfigOptions;
@@ -261,7 +261,7 @@ mod fixture {
                             .rev()
                             .collect::<String>();
                         let tail =
-                            meerschaum_cli::executor_jobs::LogSanitizer::default().push(&tail);
+                            meerschaum_cli::executor::jobs::LogSanitizer::default().push(&tail);
                         eprintln!(
                             "Owned terminal {pane} history before cleanup: {}",
                             meerschaum_server::redact::mask_uri_passwords(&tail)
@@ -549,7 +549,7 @@ mod fixture {
         let mut last = Json::Null;
         let mut startup = String::new();
         let diagnostic = |output: &str| {
-            let output = meerschaum_cli::executor_jobs::LogSanitizer::default().push(output);
+            let output = meerschaum_cli::executor::jobs::LogSanitizer::default().push(output);
             meerschaum_server::redact::mask_uri_passwords(&output)
         };
         loop {

@@ -10,7 +10,7 @@ scope is refused with v4's message, a non-administrator's `*` holds only their o
 (the server's rule), and `meerschaum.core.Token` keeps the `*` it is given instead of expanding it.
 """
 
-from tests.api_host._helpers import run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import run_python
 
 
 def test_star_grants_custom_scopes_in_plugin_routes(sandbox):

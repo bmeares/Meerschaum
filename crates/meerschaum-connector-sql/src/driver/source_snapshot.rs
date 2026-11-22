@@ -20,7 +20,7 @@ pub(super) fn pool(spec: &ConnectionSpec) -> Option<SqlitePool> {
         .row_buffer_size(1);
     let geopackage = spec.flavor == crate::flavor::Flavor::Geopackage;
     Some(
-        SqlitePoolOptions::new()
+        sqlite::refresh_schema_on_acquire(SqlitePoolOptions::new())
             .after_connect(move |connection, _| {
                 Box::pin(async move {
                     // Compose the same GPKG hook as ordinary connections before applying this

@@ -163,24 +163,28 @@ pub fn compact_json(j: &serde_json::Value) -> String {
     ensure_ascii(&s)
 }
 
+/// A JSON document with every object's keys sorted, recursively (`json.dumps(sort_keys=True)`).
+pub fn sort_json_keys(j: &serde_json::Value) -> serde_json::Value {
+    match j {
+        serde_json::Value::Object(o) => {
+            let mut keys: Vec<&String> = o.keys().collect();
+            keys.sort();
+            let mut m = serde_json::Map::new();
+            for k in keys {
+                m.insert(k.clone(), sort_json_keys(&o[k]));
+            }
+            serde_json::Value::Object(m)
+        }
+        serde_json::Value::Array(a) => {
+            serde_json::Value::Array(a.iter().map(sort_json_keys).collect())
+        }
+        other => other.clone(),
+    }
+}
+
 /// `json.dumps(x, sort_keys=True, separators=(',', ':'), default=str)`.
 pub fn compact_json_sorted(j: &serde_json::Value) -> String {
-    fn sort(j: &serde_json::Value) -> serde_json::Value {
-        match j {
-            serde_json::Value::Object(o) => {
-                let mut keys: Vec<&String> = o.keys().collect();
-                keys.sort();
-                let mut m = serde_json::Map::new();
-                for k in keys {
-                    m.insert(k.clone(), sort(&o[k]));
-                }
-                serde_json::Value::Object(m)
-            }
-            serde_json::Value::Array(a) => serde_json::Value::Array(a.iter().map(sort).collect()),
-            other => other.clone(),
-        }
-    }
-    compact_json(&sort(j))
+    compact_json(&sort_json_keys(j))
 }
 
 /// Python's `json.dumps` escapes non-ASCII characters by default (`ensure_ascii=True`).

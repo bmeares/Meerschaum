@@ -18,6 +18,7 @@ use regex::Regex;
 
 use crate::error::{Result, SqlError};
 use crate::flavor::Flavor;
+use meerschaum_core::pyfmt::quote_plus;
 
 /// SQLAlchemy `QueuePool` size from `system.connectors.sql.create_engine.pool_size`
 /// (`meerschaum/config/_default.py`), which overrides the static `os.cpu_count()` default.
@@ -60,9 +61,8 @@ impl ConnectionOptions {
 
 /// The attributes of a `sql:` connector as found in `connectors.yaml`, keyword arguments or an
 /// `MRSM_SQL_<LABEL>` URI. Every field is optional; [`ConnectionSpec::from_attributes`] applies
-/// the flavor defaults and requirements.
-// TODO(connector-registry): built from the merged config (`meerschaum_core::Config`) once the
-// connector registry is ported; not a type duplicate.
+/// the flavor defaults and requirements. [`ConnectorAttributes::from_attribute_map`] reads them from an
+/// attribute map, wherever it comes from (the merged config, a Python connector, a JSON request).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConnectorAttributes {
     /// The connector label (`sql:<label>`).
@@ -84,6 +84,111 @@ pub struct ConnectorAttributes {
     pub pool_size: Option<u32>,
     /// `create_engine.max_overflow`.
     pub max_overflow: Option<u32>,
+}
+
+/// What [`ConnectorAttributes::from_attribute_map`] does with a `port` that is not an integer from 0 to
+/// 65535 (`'abc'`, `'5432.0'`, `True`, `70000`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InvalidPort {
+    /// Refuse the attributes (`Invalid port '<value>'.`). Connecting does this: v4 builds the
+    /// engine URL with `str(port)` and SQLAlchemy parses that text as an integer.
+    Reject,
+    /// Leave the port unset. Describing a configured connector without connecting does this:
+    /// v4's `SQLConnector.__init__` keeps any port and only creating the engine reads it.
+    Ignore,
+}
+
+impl ConnectorAttributes {
+    /// The attributes of `sql:<label>` from an attribute map (`connectors.yaml`, a Python
+    /// connector's attributes or a JSON request), as `SQLConnector.__init__` reads its keyword
+    /// arguments.
+    ///
+    /// - Null values are absent; `label` is the `label` argument, never an attribute.
+    /// - `flavor`, `uri`, `host`, `username`, `password`, `database` and `schema` are `str(value)`;
+    ///   an unknown flavor is an error.
+    /// - A `uri` supplies the port, ignoring any standalone `port`. Otherwise `port` is an
+    ///   integer or integer text (surrounding whitespace, a sign and `_` separators allowed)
+    ///   from 0 to 65535; anything else follows `invalid_port`.
+    /// - `options` is a mapping (values as `str()`) or query-string text.
+    /// - `pool_size` and `max_overflow` are `int(value)` when that is a non-negative integer, and
+    ///   otherwise absent (the configured default applies).
+    /// - Any other scalar attribute is kept as `str(value)` (`sslmode`, `driver`, `protected`,
+    ///   ...); lists and mappings are not connection parameters and are dropped.
+    pub fn from_attribute_map(
+        label: &str,
+        attrs: &meerschaum_core::Map,
+        invalid_port: InvalidPort,
+    ) -> Result<Self> {
+        use meerschaum_core::Value;
+        use meerschaum_core::pyfmt::{parse_py_int, py_int, py_str};
+
+        let mut out = ConnectorAttributes {
+            label: Some(label.to_string()),
+            ..Default::default()
+        };
+        let has_uri = attrs.get("uri").is_some_and(|uri| !uri.is_null());
+        for (key, value) in attrs {
+            if value.is_null() {
+                continue;
+            }
+            match key.as_str() {
+                "label" => {}
+                "flavor" => {
+                    out.flavor = Some(
+                        py_str(value)
+                            .parse::<Flavor>()
+                            .map_err(|e| SqlError::InvalidArgument(e.to_string()))?,
+                    )
+                }
+                "uri" => out.uri = Some(py_str(value)),
+                "host" => out.host = Some(py_str(value)),
+                // PARITY: an explicit URI bypasses assembly of the URL from standalone
+                // attributes (`_create_engine.py:103-109`). The port in the URI is parsed later.
+                "port" if !has_uri => {
+                    // PARITY: v4 interpolates `str(port)` into the URL (`_create_engine.py:106`).
+                    // SQLAlchemy parses that text, so even a whole-number float is invalid.
+                    let port = match value {
+                        Value::Int(i) => Some(*i),
+                        Value::Str(s) => parse_py_int(s),
+                        _ => None,
+                    }
+                    .and_then(|p| u16::try_from(p).ok());
+                    out.port = match (port, invalid_port) {
+                        (Some(port), _) => Some(port),
+                        (None, InvalidPort::Ignore) => None,
+                        (None, InvalidPort::Reject) => {
+                            return Err(SqlError::InvalidArgument(format!(
+                                "Invalid port '{}'.",
+                                py_str(value)
+                            )));
+                        }
+                    };
+                }
+                "port" => {}
+                "username" => out.username = Some(py_str(value)),
+                "password" => out.password = Some(py_str(value)),
+                "database" => out.database = Some(py_str(value)),
+                "schema" => out.schema = Some(py_str(value)),
+                "options" => {
+                    out.options = Some(match value {
+                        Value::Map(m) => ConnectionOptions::Pairs(
+                            m.iter().map(|(k, v)| (k.clone(), py_str(v))).collect(),
+                        ),
+                        other => ConnectionOptions::Str(py_str(other)),
+                    })
+                }
+                "pool_size" => out.pool_size = py_int(value).and_then(|n| u32::try_from(n).ok()),
+                "max_overflow" => {
+                    out.max_overflow = py_int(value).and_then(|n| u32::try_from(n).ok())
+                }
+                _ => match value {
+                    Value::List(_) | Value::Map(_) => {}
+                    scalar => out.extra.push((key.clone(), py_str(scalar))),
+                },
+            }
+        }
+        Ok(out)
+    }
 }
 
 /// A fully resolved connection: what `SQLConnector.__dict__` holds after `__init__` and
@@ -456,7 +561,7 @@ impl ConnectionSpec {
                 (Some(configured), Some(from_uri))
                     if configured.driver_family() != from_uri.driver_family() =>
                 {
-                    // Intentional fix (PARITY.md, wave 17b): v4 keeps the label's flavor here,
+                    // Intentional fix (PARITY.md): v4 keeps the label's flavor here,
                     // then generates SQL for the wrong dialect on the URI's database.
                     Some(from_uri)
                 }
@@ -714,21 +819,6 @@ pub fn unquote(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// `urllib.parse.quote_plus(s)` with the default `safe=''`.
-pub fn quote_plus(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'.' | b'-' | b'~' => {
-                out.push(b as char)
-            }
-            b' ' => out.push('+'),
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
 /// `urllib.parse.urlencode(pairs)` (`quote_via=quote_plus`, no `doseq`).
 pub fn urlencode(pairs: &[(String, String)]) -> String {
     pairs
@@ -827,6 +917,157 @@ fn resolve_sqlite_path(value: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use meerschaum_core::{Map, Value};
+
+    fn pg_attrs(port: Option<Value>) -> Map {
+        let mut attrs: Map = [
+            ("flavor", Value::Str("postgresql".into())),
+            ("host", Value::Str("db".into())),
+            ("username", Value::Str("u".into())),
+            ("password", Value::Str("p".into())),
+            ("database", Value::Str("d".into())),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+        if let Some(port) = port {
+            attrs.insert("port".into(), port);
+        }
+        attrs
+    }
+
+    fn port_of(port: Option<Value>, invalid_port: InvalidPort) -> Result<Option<u16>> {
+        ConnectorAttributes::from_attribute_map("x", &pg_attrs(port), invalid_port).map(|a| a.port)
+    }
+
+    #[test]
+    fn attribute_map_port_by_input_class() {
+        let reject = InvalidPort::Reject;
+        let ignore = InvalidPort::Ignore;
+        // A valid integer and integer text (`int(port)` accepts whitespace, a sign and `_`).
+        for policy in [reject, ignore] {
+            assert_eq!(port_of(Some(Value::Int(5432)), policy).unwrap(), Some(5432));
+            assert_eq!(
+                port_of(Some(Value::Str("5432".into())), policy).unwrap(),
+                Some(5432)
+            );
+            assert_eq!(
+                port_of(Some(Value::Str(" 5432 ".into())), policy).unwrap(),
+                Some(5432)
+            );
+            assert_eq!(
+                port_of(Some(Value::Str("5_432".into())), policy).unwrap(),
+                Some(5432)
+            );
+            // Missing or null: the flavor's default applies later.
+            assert_eq!(port_of(None, policy).unwrap(), None);
+            assert_eq!(port_of(Some(Value::Null), policy).unwrap(), None);
+        }
+        // Not an integer from 0 to 65535: refused when connecting, unset when describing.
+        for (value, text) in [
+            (Value::Str("abc".into()), "abc"),
+            (Value::Str("5432.0".into()), "5432.0"),
+            (Value::Float(5432.0), "5432.0"),
+            (Value::Float(5432.5), "5432.5"),
+            (Value::Bool(true), "True"),
+            (Value::Int(70000), "70000"),
+            (Value::Int(-1), "-1"),
+            (Value::Str("70000".into()), "70000"),
+        ] {
+            let err = port_of(Some(value.clone()), reject).unwrap_err();
+            assert_eq!(err.to_string(), format!("Invalid port '{text}'."));
+            assert_eq!(port_of(Some(value), ignore).unwrap(), None);
+        }
+    }
+
+    #[test]
+    fn attribute_map_uses_the_uri_port_instead_of_an_invalid_standalone_port() {
+        let mut attrs = pg_attrs(Some(Value::Str("invalid".into())));
+        attrs.insert(
+            "uri".into(),
+            Value::Str("postgresql://localhost:5433/example".into()),
+        );
+        let attributes =
+            ConnectorAttributes::from_attribute_map("x", &attrs, InvalidPort::Reject).unwrap();
+        let spec = ConnectionSpec::from_attributes(&attributes).unwrap();
+        assert_eq!(spec.port, Some(5433));
+
+        attrs.insert(
+            "uri".into(),
+            Value::Str("postgresql://localhost:invalid/example".into()),
+        );
+        let attributes =
+            ConnectorAttributes::from_attribute_map("x", &attrs, InvalidPort::Reject).unwrap();
+        assert!(ConnectionSpec::from_attributes(&attributes).is_err());
+    }
+
+    #[test]
+    fn attribute_map_reads_every_connection_key() {
+        let mut attrs = pg_attrs(Some(Value::Int(5433)));
+        attrs.insert("label".into(), Value::Str("ignored".into()));
+        attrs.insert("schema".into(), Value::Str("s".into()));
+        attrs.insert(
+            "options".into(),
+            Value::Map(
+                [("sslmode".to_string(), Value::Str("require".into()))]
+                    .into_iter()
+                    .collect(),
+            ),
+        );
+        attrs.insert("pool_size".into(), Value::Str("4".into()));
+        attrs.insert("max_overflow".into(), Value::Int(-1));
+        attrs.insert("protected".into(), Value::Bool(true));
+        attrs.insert("application_name".into(), Value::Str("app".into()));
+        attrs.insert("teams".into(), Value::List(vec![Value::Str("a".into())]));
+        attrs.insert("nothing".into(), Value::Null);
+        let out =
+            ConnectorAttributes::from_attribute_map("lbl", &attrs, InvalidPort::Reject).unwrap();
+        assert_eq!(out.label.as_deref(), Some("lbl"));
+        assert_eq!(out.flavor, Some(Flavor::Postgresql));
+        assert_eq!(out.host.as_deref(), Some("db"));
+        assert_eq!(out.port, Some(5433));
+        assert_eq!(out.schema.as_deref(), Some("s"));
+        assert_eq!(
+            out.options,
+            Some(ConnectionOptions::Pairs(vec![(
+                "sslmode".into(),
+                "require".into()
+            )]))
+        );
+        assert_eq!(out.pool_size, Some(4));
+        assert_eq!(out.max_overflow, None);
+        assert_eq!(
+            out.extra,
+            vec![
+                ("protected".to_string(), "True".to_string()),
+                ("application_name".to_string(), "app".to_string()),
+            ]
+        );
+        let text_options: Map = [("options".to_string(), Value::Str("a=1&b=2".into()))]
+            .into_iter()
+            .collect();
+        assert_eq!(
+            ConnectorAttributes::from_attribute_map("lbl", &text_options, InvalidPort::Reject)
+                .unwrap()
+                .options,
+            Some(ConnectionOptions::Str("a=1&b=2".into()))
+        );
+    }
+
+    #[test]
+    fn attribute_map_refuses_an_unknown_flavor() {
+        let attrs: Map = [("flavor".to_string(), Value::Str("nosuchdb".into()))]
+            .into_iter()
+            .collect();
+        for policy in [InvalidPort::Reject, InvalidPort::Ignore] {
+            assert_eq!(
+                ConnectorAttributes::from_attribute_map("x", &attrs, policy)
+                    .unwrap_err()
+                    .to_string(),
+                "Flavor 'nosuchdb' is not supported by Meerschaum SQLConnector"
+            );
+        }
+    }
 
     #[test]
     fn interactive_client_preference_is_not_a_driver_option() {

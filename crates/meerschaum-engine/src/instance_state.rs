@@ -1353,7 +1353,7 @@ fn cursor_doc(cursor: &EdgeCursor) -> Doc {
 impl InstanceState {
     /// Record, on `owner`'s home instance, that engine state of `owner` is written onto
     /// `state_instance` (a cross-instance child's). A removed pipe's instance reads these
-    /// markers to forget that state too (GAP-002, [`remote_state_key`]). Nothing is recorded
+    /// markers to forget that state too ([`remote_state_key`]). Nothing is recorded
     /// for state on the owner's own instance. Failing to record is logged, never fatal: the
     /// state write that follows still proceeds.
     async fn note_remote_state(&self, owner: &PipeRef, state_instance: &str) {

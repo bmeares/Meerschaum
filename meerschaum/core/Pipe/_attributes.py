@@ -167,7 +167,7 @@ def get_parameters(
     ### including a sync's dtype edits) and expires after
     ### `pipes:attributes:local_cache_timeout_seconds`, v4's own staleness window for attributes
     ### (another process's edit of a referenced pipe shows up within it). Re-resolving on every
-    ### access cost one instance round trip per reference per access (wave 9 U).
+    ### access cost one instance round trip per reference per access.
     cross_pipe = _has_cross_pipe_template(self, core, raw_parameters)
     if cross_pipe:
         from meerschaum.core.Pipe._cache import _INVALIDATION_EPOCH

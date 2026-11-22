@@ -1,5 +1,5 @@
 """
-Wave 9 (task Q): `Pipe.verify()` runs in Rust (`_core.verify_pipe`).
+`Pipe.verify()` runs in Rust (`_core.verify_pipe`).
 
 Each scenario runs a sequence of verification calls on pipes and compares what it observes with
 the results recorded from the parity-phase Python mode (`tests/oracle/test_w9_verify.json`, not
@@ -225,7 +225,7 @@ def test_empty_target_cannot_determine_bounds(tmp_path):
 
 
 def test_every_call_gets_a_native_context(tmp_path):
-    """Wave 15 (L): `debug`, forwarded keywords, plugin sources, references and templates all
+    """`debug`, forwarded keywords, plugin sources, references and templates all
     run natively; only an instance without a native driver would keep the Python orchestration."""
     from meerschaum.core.Pipe._verify import _rust_verify_context
     suffix = uuid.uuid4().hex[:6]

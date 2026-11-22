@@ -1,7 +1,8 @@
-//! Replacing syncs ([`SyncOptions::replace`], rc15): the frame's rows replace the pipe's rows of
+//! Replacing syncs ([`SyncOptions::replace`]): the frame's rows replace the pipe's rows of
 //! a window `[begin, end)` (matching `params`). The instances share the window rules here; each
 //! deletes the window and writes the rows its own way (SQL in one transaction).
 
+use meerschaum_core::pyfmt::thousands;
 use meerschaum_core::success::SyncResult;
 use meerschaum_core::{Map, Pipe};
 use meerschaum_kernel::Frame;
@@ -203,19 +204,6 @@ pub fn rows_datetime_range(df: &Frame, dt_col: &str) -> (Option<DateBound>, Opti
         }
     };
     (bounds.first().cloned(), bounds.last().map(after))
-}
-
-/// `1,234`.
-fn thousands(n: u64) -> String {
-    let digits = n.to_string();
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
 }
 
 /// The result of a replacing sync: `Replaced {deleted} rows with {inserted} rows.` (the engine

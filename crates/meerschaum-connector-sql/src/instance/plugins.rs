@@ -52,6 +52,9 @@ impl SqlConnector {
         force: bool,
         keep_owner: bool,
     ) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         let _ = self.ensure_instance_tables(true).await;
         let table = self.instance_table_name("mrsm_plugins");
         let f = self.flavor;
@@ -174,6 +177,7 @@ impl SqlConnector {
         plugin: &PluginRecord,
         column: &str,
     ) -> ConnectorResult<Option<crate::driver::SqlValue>> {
+        self.ensure_schema().await?;
         if !self.ensure_instance_tables(true).await {
             return Ok(None);
         }
@@ -188,6 +192,7 @@ impl SqlConnector {
 
     /// `get_plugin_id(plugin)`.
     pub async fn get_plugin_id(&self, plugin: &PluginRecord) -> ConnectorResult<Option<i64>> {
+        self.ensure_schema().await?;
         Ok(self
             .plugin_value(plugin, "plugin_id")
             .await
@@ -209,6 +214,7 @@ impl SqlConnector {
 
     /// `get_plugin_user_id(plugin)`.
     pub async fn get_plugin_user_id(&self, plugin: &PluginRecord) -> ConnectorResult<Option<i64>> {
+        self.ensure_schema().await?;
         Ok(self
             .plugin_value(plugin, "user_id")
             .await
@@ -227,6 +233,7 @@ impl SqlConnector {
         plugin: &PluginRecord,
     ) -> ConnectorResult<Option<String>> {
         let _ = plugin;
+        self.ensure_schema().await?;
         let users = self.instance_table_name("mrsm_users");
         let plugins = self.instance_table_name("mrsm_plugins");
         let query = format!(
@@ -251,6 +258,7 @@ impl SqlConnector {
         user_id: Option<&Value>,
         search_term: Option<&str>,
     ) -> ConnectorResult<Vec<String>> {
+        self.ensure_schema().await?;
         let _ = self.ensure_instance_tables(true).await;
         let table = self.instance_table_name("mrsm_plugins");
         let f = self.flavor;
@@ -286,6 +294,9 @@ impl SqlConnector {
 
     /// `delete_plugin(plugin)`.
     pub async fn delete_plugin(&self, plugin: &PluginRecord) -> SuccessTuple {
+        if let Err(e) = self.ensure_schema().await {
+            return SuccessTuple::fail(e.to_string());
+        }
         let plugin_id = match self.get_plugin_id(plugin).await {
             Ok(Some(id)) => id,
             Ok(None) => return SuccessTuple::ok(format!("Plugin '{plugin}' was not registered.")),

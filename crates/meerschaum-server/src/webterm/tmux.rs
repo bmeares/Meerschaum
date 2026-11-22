@@ -137,38 +137,108 @@ pub fn tmux_owner_path(socket: &Path) -> PathBuf {
     socket.with_extension("owner")
 }
 
-/// Whether a tmux server answers on `socket`.
-pub(super) fn tmux_server_running(tmux: &TmuxSettings, socket: &Path) -> bool {
-    std::process::Command::new(&tmux.binary)
-        .arg("-S")
-        .arg(socket)
-        .arg("list-sessions")
-        .env_remove("TMUX")
-        .env_remove("TMUX_PANE")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
-}
-
-/// Before a terminal starts on a dedicated socket: remember that this process starts the tmux
-/// server when none answers there yet (so [`stop_owned_servers`] stops it with the API). `true`
-/// when a server already answers there.
-pub(super) fn claim_tmux_server(tmux: &TmuxSettings) -> bool {
-    let Some(socket) = &tmux.socket else {
-        return false;
-    };
-    if tmux_server_running(tmux, socket) {
-        adopt_orphaned_server(tmux);
-        return true;
+impl TmuxMux {
+    /// Whether a tmux server answers on this mux's socket.
+    pub(super) fn server_running(&self) -> bool {
+        let Some(mut command) = self.command(None) else {
+            return false;
+        };
+        command.arg("list-sessions");
+        tmux_output(&mut command).is_some_and(|output| output.status.success())
     }
-    owned_servers()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(socket.clone());
-    record_owner(socket);
-    false
+
+    /// Before a terminal starts on this mux's socket: remember that this process starts the
+    /// tmux server when none answers there yet (so [`stop_owned_servers`] stops it with the
+    /// API). `true` when a server already answers there.
+    pub(super) fn claim_server(&self) -> bool {
+        let Some(socket) = &self.settings.socket else {
+            return false;
+        };
+        if self.server_running() {
+            self.adopt_orphaned_server();
+            return true;
+        }
+        owned_servers()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(socket.clone());
+        record_owner(socket);
+        false
+    }
+
+    /// Take over the tmux server on this mux's socket when the API that started it is gone
+    /// (killed, so it never stopped it): this process then stops it with itself
+    /// ([`stop_owned_servers`]), and its sessions stay until then. A server whose recorded
+    /// owner still runs (another API on the same root) or that has no record (started by an
+    /// earlier release) is left alone. Called when the terminal is configured, so a server left
+    /// behind is stopped even when no terminal opens, and again before each terminal starts.
+    /// `true` when adopted.
+    pub(super) fn adopt_orphaned_server(&self) -> bool {
+        let Some(socket) = &self.settings.socket else {
+            return false;
+        };
+        let Some(owner) = recorded_owner(socket) else {
+            return false;
+        };
+        if !owner_gone(owner) || !self.server_running() {
+            return false;
+        }
+        owned_servers()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(socket.clone());
+        record_owner(socket);
+        true
+    }
+
+    /// Unset the server's job context ([`job_context_vars`]) on this mux's tmux server: in its
+    /// global environment and in the user's `session` (exact name), either of which a server
+    /// started by an earlier release, from a job's environment or with an `update-environment`
+    /// setting may hold. Windows opened afterwards, with the terminal's `["new_window"]` or
+    /// with tmux's own keys, start without it. Nothing happens when no server answers or the
+    /// session does not exist yet.
+    pub(super) fn scrub_server_env(&self, session: Option<&str>) {
+        let context = job_context_vars();
+        // `=name`: exactly this session, never one whose name merely starts with it.
+        let target = session.map(|name| format!("={name}"));
+        let mut scopes: Vec<Vec<&str>> = vec![vec!["-g"]];
+        if let Some(target) = &target {
+            scopes.push(vec!["-t", target.as_str()]);
+        }
+        for scope in scopes {
+            let Some(mut command) = self.command(None) else {
+                return;
+            };
+            let Some(listing) = tmux_output(command.arg("show-environment").args(&scope)) else {
+                return;
+            };
+            if !listing.status.success() {
+                continue;
+            }
+            let present: Vec<String> = String::from_utf8_lossy(&listing.stdout)
+                .lines()
+                .filter_map(|line| line.split_once('=').map(|(name, _)| name.to_string()))
+                .filter(|name| context.contains(name))
+                .collect();
+            if present.is_empty() {
+                continue;
+            }
+            // One tmux invocation: `set-environment <scope> -u A ; set-environment <scope> -u B`.
+            let Some(mut command) = self.command(None) else {
+                return;
+            };
+            for (i, name) in present.iter().enumerate() {
+                if i > 0 {
+                    command.arg(";");
+                }
+                command
+                    .arg("set-environment")
+                    .args(&scope)
+                    .args(["-u", name.as_str()]);
+            }
+            let _ = tmux_output(&mut command);
+        }
+    }
 }
 
 /// The process recorded as the owner of the tmux server on `socket` ([`tmux_owner_path`]).
@@ -210,31 +280,6 @@ pub(super) fn owner_gone(pid: u32) -> bool {
     }
 }
 
-/// Take over the tmux server on the terminal's own socket when the API that started it is gone
-/// (killed, so it never stopped it): this process then stops it with itself
-/// ([`stop_owned_servers`]), and its sessions stay until then. A server whose recorded owner
-/// still runs (another API on the same root) or that has no record (started by an earlier
-/// release) is left alone. Called when the terminal is configured, so a server left behind is
-/// stopped even when no terminal opens, and again before each terminal starts. `true` when
-/// adopted.
-pub(super) fn adopt_orphaned_server(tmux: &TmuxSettings) -> bool {
-    let Some(socket) = &tmux.socket else {
-        return false;
-    };
-    let Some(owner) = recorded_owner(socket) else {
-        return false;
-    };
-    if !owner_gone(owner) || !tmux_server_running(tmux, socket) {
-        return false;
-    }
-    owned_servers()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(socket.clone());
-    record_owner(socket);
-    true
-}
-
 /// Apply Meerschaum's window list ([`TMUX_WINDOW_LIST`]) again to a tmux server that already runs
 /// on the terminal's own socket (one `tmux -S <socket> set-option -g ... ; ...`): a server started
 /// by an earlier release (whose configuration turned the status line off), or left behind by an
@@ -242,80 +287,22 @@ pub(super) fn adopt_orphaned_server(tmux: &TmuxSettings) -> bool {
 /// `set-option -g`s: applying them again changes nothing. A file of the user's own
 /// (`api:webterm:tmux:config`) is theirs to apply; nothing happens without a dedicated socket.
 pub fn refresh_tmux_config(tmux: &TmuxSettings) -> bool {
-    let (Some(socket), Some(file)) = (&tmux.socket, &tmux.config_file) else {
+    let Some(file) = &tmux.config_file else {
         return false;
     };
     if std::fs::read_to_string(file).ok().as_deref() != Some(TMUX_CONF) {
         return false;
     }
-    let mut command = std::process::Command::new(&tmux.binary);
-    command.arg("-S").arg(socket);
+    let Some(mut command) = TmuxMux::new(tmux.clone(), TmuxProfile::Full).command(None) else {
+        return false;
+    };
     for (i, (name, value)) in TMUX_WINDOW_LIST.iter().enumerate() {
         if i > 0 {
             command.arg(";");
         }
         command.args(["set-option", "-g", name, value]);
     }
-    command.env_remove("TMUX").env_remove("TMUX_PANE");
     tmux_output(&mut command).is_some_and(|output| output.status.success())
-}
-
-/// Unset the server's job context ([`job_context_vars`]) on the terminal's own tmux server (`-S`,
-/// never the default server): in its global environment and in the user's `session` (exact name),
-/// either of which a server started by an earlier release, from a job's environment or with an
-/// `update-environment` setting may hold. Windows opened afterwards, with the terminal's
-/// `["new_window"]` or with tmux's own keys, start without it. Nothing happens when no server
-/// answers or the session does not exist yet.
-pub(super) fn scrub_tmux_server_env(tmux: &TmuxSettings, session: Option<&str>) {
-    let Some(socket) = &tmux.socket else {
-        return;
-    };
-    let tmux_command = || {
-        let mut command = std::process::Command::new(&tmux.binary);
-        command
-            .arg("-S")
-            .arg(socket)
-            .env_remove("TMUX")
-            .env_remove("TMUX_PANE")
-            .stdin(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        command
-    };
-    let context = job_context_vars();
-    // `=name`: exactly this session, never one whose name merely starts with it.
-    let target = session.map(|name| format!("={name}"));
-    let mut scopes: Vec<Vec<&str>> = vec![vec!["-g"]];
-    if let Some(target) = &target {
-        scopes.push(vec!["-t", target.as_str()]);
-    }
-    for scope in scopes {
-        let Some(listing) = tmux_output(tmux_command().arg("show-environment").args(&scope)) else {
-            return;
-        };
-        if !listing.status.success() {
-            continue;
-        }
-        let present: Vec<String> = String::from_utf8_lossy(&listing.stdout)
-            .lines()
-            .filter_map(|line| line.split_once('=').map(|(name, _)| name.to_string()))
-            .filter(|name| context.contains(name))
-            .collect();
-        if present.is_empty() {
-            continue;
-        }
-        // One tmux invocation: `set-environment <scope> -u A ; set-environment <scope> -u B ...`.
-        let mut command = tmux_command();
-        for (i, name) in present.iter().enumerate() {
-            if i > 0 {
-                command.arg(";");
-            }
-            command
-                .arg("set-environment")
-                .args(&scope)
-                .args(["-u", name.as_str()]);
-        }
-        let _ = tmux_output(&mut command);
-    }
 }
 
 /// Run a tmux command within [`TMUX_TIMEOUT`] (killed when it takes longer): its output, or

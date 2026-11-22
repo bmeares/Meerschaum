@@ -13,12 +13,12 @@ import json
 import time
 import sqlite3
 
-from tests.api_host._helpers import run_python, sandbox  # noqa: F401
+from tests.api_host._helpers import run_python
 
 PRELUDE = """
 import json, time
 import meerschaum.api as api
-from meerschaum.api.dash import sessions as s
+from meerschaum.api.dash import sessions as s, session_store
 """
 
 
@@ -103,7 +103,7 @@ conn.register_user(User('bob', 'bob-password-1', type='admin', instance=conn))
 conn.register_user(User('rust-claims', 'claims-password-1', instance=conn))
 s.set_session('00000000-0000-4000-8000-00000000a005', {'username': 'rust-claims', 'admin': True})
 ### Written as the Rust store writes it, bound to bob's credential; one without it names nobody.
-s._instance_set(
+session_store._instance_set(
     '00000000-0000-4000-8000-00000000a006',
     json.dumps({'username': 'bob', 'admin': True, 'credential': user_credential('bob')}),
 )

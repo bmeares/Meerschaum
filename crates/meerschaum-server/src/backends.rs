@@ -509,7 +509,7 @@ pub trait JobsBackend: Send + Sync {
     async fn monitor_logs(&self, name: &str) -> Option<LogMonitor>;
 
     /// The jobs whose `team` is `team` (names compare without case; `Everyone`: the jobs without
-    /// a team), e.g. for the confirmation of a team's deletion (decision AC3).
+    /// a team), e.g. for the confirmation of a team's deletion.
     async fn team_jobs(&self, _team: &str) -> Vec<String> {
         Vec::new()
     }

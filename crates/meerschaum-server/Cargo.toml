@@ -68,7 +68,7 @@ aws-lc-sys = { version = "0.46", features = ["prebuilt-nasm"] }
 
 [dev-dependencies]
 # Certificates for the HTTPS tests (`aws_lc_rs`: RSA keys too).
-rcgen = { version = "0.14", features = ["aws_lc_rs"] }
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
 tokio = { workspace = true, features = ["test-util"] }
 tempfile = "3"
 regex = { workspace = true }
@@ -78,3 +78,6 @@ meerschaum-connector-sql = { workspace = true }
 # A Valkey instance (in memory) behind the router: its read errors must fail closed too.
 meerschaum-connector-valkey = { workspace = true }
 meerschaum-connector-api = { workspace = true, features = ["client"] }
+
+[lints]
+workspace = true

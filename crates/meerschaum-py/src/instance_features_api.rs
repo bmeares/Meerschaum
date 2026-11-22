@@ -1,9 +1,9 @@
-//! rc15 instance features bound into `meerschaum._core`:
+//! Instance features bound into `meerschaum._core`:
 //!
 //! - **Protected connectors** (`meerschaum_core::protected`): `protected_allowed()`,
 //!   `allow_protected_enter()` / `allow_protected_exit()` (the
 //!   `meerschaum.connectors.allow_protected()` context manager) and
-//!   `protected_refusal_message(op, keys)` (the one refusal text, contract C6), and
+//!   `protected_refusal_message(op, keys)` (the one refusal text), and
 //!   `sql_is_read_statement(query, flavor)`, the check `SQLConnector.read()` / `value()` apply
 //!   to a query on a protected connector (`meerschaum_connector_sql::readonly`), and
 //!   `uri_marks_protected(uri)` (`?protected=true` on a connector URI).

@@ -1,5 +1,5 @@
 //! `meerschaum-connector-sql` bound into `meerschaum._core`: the `SqlConnector` instance methods behind
-//! the v4 `SQLConnector` façade (design §4.4, D12), and its raw SQL (`sql_*`, rc15 Q53).
+//! the v4 `SQLConnector` façade (design §4.4, D12), and its raw SQL (`sql_*`).
 //!
 //! `_core.SqlConnector(label, attributes)` is built from the same attributes the Python
 //! `SQLConnector` resolved (its `__dict__`: `flavor`, `uri`, `host`, `port`, `username`,
@@ -17,13 +17,13 @@ use meerschaum_connector::{PipesKeys, PipesKeysQuery, SyncOptions};
 use meerschaum_connector_sql::instance::InstanceSettings;
 use meerschaum_connector_sql::instance::data::DataQueryOptions;
 use meerschaum_connector_sql::pipe::ChunkInterval;
-use meerschaum_connector_sql::uri::{ConnectionOptions, ConnectionSpec, ConnectorAttributes};
+use meerschaum_connector_sql::uri::{ConnectionSpec, ConnectorAttributes, InvalidPort};
 use meerschaum_connector_sql::{Flavor, SqlConnector as RsSqlConnector};
 use meerschaum_core::{Map, Value};
 use meerschaum_kernel::Frame;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyTuple};
+use pyo3::types::{PyDict, PyInt, PyList, PyString, PyTuple};
 
 use crate::convert::{PyCtx, core_to_py, py_to_core};
 use crate::pandas_bridge::{
@@ -179,72 +179,57 @@ fn settings_from_py(py: Python<'_>, flavor: Flavor) -> InstanceSettings {
     s
 }
 
-/// The connector attributes from the Python connector's `__dict__`-like mapping.
+/// The connector attributes from the Python connector's `__dict__`-like mapping
+/// ([`ConnectorAttributes::from_attribute_map`]). Convert option keys and values with Python
+/// `str()`. An attribute outside the connection keys counts only when it is a string or an integer.
 pub(crate) fn attributes_from_py(
     label: &str,
     attrs: &Bound<'_, PyDict>,
 ) -> PyResult<ConnectorAttributes> {
-    let mut out = ConnectorAttributes {
-        label: Some(label.to_string()),
-        ..Default::default()
-    };
+    const CONNECTION_KEYS: [&str; 11] = [
+        "flavor",
+        "uri",
+        "host",
+        "port",
+        "username",
+        "password",
+        "database",
+        "schema",
+        "options",
+        "pool_size",
+        "max_overflow",
+    ];
+    let mut map = Map::new();
     for (k, v) in attrs.iter() {
         if v.is_none() {
             continue;
         }
         let key: String = k.str()?.extract()?;
-        let text = || -> PyResult<String> { Ok(v.str()?.to_str()?.to_string()) };
-        match key.as_str() {
-            "flavor" => {
-                out.flavor = Some(
-                    text()?
-                        .parse()
-                        .map_err(|e| PyValueError::new_err(format!("{e:?}")))?,
-                )
-            }
-            "uri" => out.uri = Some(text()?),
-            "host" => out.host = Some(text()?),
-            "port" => {
-                out.port = Some(
-                    text()?
-                        .parse()
-                        .map_err(|_| PyValueError::new_err(format!("Invalid port '{v}'.")))?,
-                )
-            }
-            "username" => out.username = Some(text()?),
-            "password" => out.password = Some(text()?),
-            "database" => out.database = Some(text()?),
-            "schema" => out.schema = Some(text()?),
-            "options" => {
-                out.options = Some(if let Ok(mapping) = v.cast::<PyDict>() {
-                    ConnectionOptions::Pairs(
-                        mapping
-                            .iter()
-                            .map(|(key, value)| {
-                                Ok((
-                                    key.str()?.to_str()?.to_string(),
-                                    value.str()?.to_str()?.to_string(),
-                                ))
-                            })
-                            .collect::<PyResult<_>>()?,
-                    )
-                } else {
-                    ConnectionOptions::Str(text()?)
-                });
-            }
-            "pool_size" => out.pool_size = text()?.trim().parse().ok(),
-            "max_overflow" => out.max_overflow = text()?.trim().parse().ok(),
-            "label" => {}
-            _ => {
-                if v.is_instance_of::<pyo3::types::PyString>()
-                    || v.is_instance_of::<pyo3::types::PyInt>()
-                {
-                    out.extra.push((key, text()?));
-                }
-            }
+        if key == "label"
+            || !(CONNECTION_KEYS.contains(&key.as_str())
+                || v.is_instance_of::<PyString>()
+                || v.is_instance_of::<PyInt>())
+        {
+            continue;
         }
+        let value = if key == "options"
+            && let Ok(options) = v.cast::<PyDict>()
+        {
+            Value::Map(
+                options
+                    .iter()
+                    .map(|(key, value)| {
+                        Ok((key.str()?.extract()?, Value::Str(value.str()?.extract()?)))
+                    })
+                    .collect::<PyResult<Map>>()?,
+            )
+        } else {
+            Value::Str(v.str()?.extract()?)
+        };
+        map.insert(key, value);
     }
-    Ok(out)
+    ConnectorAttributes::from_attribute_map(label, &map, InvalidPort::Reject)
+        .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
 /// The pandas dtype hints of a read (`read(dtype=...)` in v4: `to_pandas_dtype()` of the
@@ -402,7 +387,7 @@ impl PySqlConnector {
     }
 
     // -----------------------------------------------------------------------------------------
-    // Raw SQL (`SQLConnector.read` / `exec` / `exec_queries` / `value` / `to_sql`, rc15 Q53;
+    // Raw SQL (`SQLConnector.read` / `exec` / `exec_queries` / `value` / `to_sql`;
     // see `sql_raw_api.rs`)
 
     /// Run a row-returning statement (`?` / `$n` / `@Pn` / `:n` placeholders bound to `params`):
@@ -773,30 +758,6 @@ impl PySqlConnector {
         success_to_py(py, &res)
     }
 
-    /// `pipe_ops::forget_engine_state(self, pipe)`: forget the Syncing Engine's state of `pipe`
-    /// (ledger entries, edge cursors, definition hash) where this instance keeps it
-    /// (`_mrsm_internal` on schema flavors, namespaced by the instance schema). The façade
-    /// calls it after a successful drop, delete or full clear.
-    #[pyo3(signature = (pipe))]
-    fn forget_engine_state<'py>(
-        &self,
-        py: Python<'py>,
-        pipe: &Bound<'py, PyAny>,
-    ) -> PyResult<Bound<'py, PyTuple>> {
-        let p = core_pipe(pipe, ParamsView::Resolved)?;
-        let c = self.conn();
-        let res = block_on(py, async move {
-            let local = meerschaum_connector::pipe_ops::forget_engine_state(c.as_ref(), &p).await;
-            // GAP-002: also the state written onto other instances (cross-instance children).
-            let remote = c.forget_remote_engine_state(&p).await;
-            if !remote.success {
-                tracing::warn!("{}", remote.message);
-            }
-            local
-        });
-        success_to_py(py, &res)
-    }
-
     #[pyo3(signature = (pipe, begin=None, end=None, params=None, **_kw))]
     fn clear_pipe<'py>(
         &self,
@@ -965,17 +926,7 @@ impl PySqlConnector {
         let cached = cached_columns_types(pipe);
         let c = self.conn();
         let df = block_on(py, async move {
-            let sp = c.sql_pipe(&p)?;
-            let state = c.pipe_state_cached(&sp, cached).await;
-            if !state.exists {
-                return Ok::<_, meerschaum_connector::ConnectorError>(None);
-            }
-            let opts = DataQueryOptions {
-                no_order,
-                ..Default::default()
-            };
-            let sql = c.build_data_query(&sp, &state, &q, &opts).await?;
-            Ok(c.driver().read_docs_frame(&sql).await.ok())
+            c.get_pipe_docs_frame_cached(&p, &q, no_order, cached).await
         })
         .map_err(backend_err)?;
         match df {

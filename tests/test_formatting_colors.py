@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Output styles in `meerschaum.utils.formatting` follow the CLI's rules (rc15, Q14): `NO_COLOR`
+Output styles in `meerschaum.utils.formatting` follow the CLI's rules: `NO_COLOR`
 turns them off, a non-terminal stdout prints plain text unless the process is a job's or
 `FORCE_COLOR` is set, and `formatting:ansi` still has the last word.
 """

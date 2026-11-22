@@ -4,6 +4,8 @@
 //! Versioned native plugin ABI, safe author SDK, discovery and connector adapters.
 //! See the crate README for ownership, threading and wire contracts.
 #![deny(unsafe_op_in_unsafe_fn)]
+// The C ABI of native plugins is `unsafe` by nature; each block says why it holds.
+#![allow(unsafe_code)]
 pub mod abi;
 pub mod api;
 pub mod callbacks;

@@ -10,7 +10,7 @@ users or pipes on `sql:main` writes there.
 
 import json
 
-from tests.api_host._helpers import run_python, sandbox, sandbox_main_db  # noqa: F401
+from tests.api_host._helpers import run_python, sandbox_main_db
 
 
 def test_sql_main_is_the_sandbox_sqlite_file(sandbox):

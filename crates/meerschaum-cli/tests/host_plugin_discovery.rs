@@ -8,8 +8,8 @@ fn main() {}
 #[cfg(target_os = "linux")]
 mod fixture {
     use meerschaum_cli::{
-        executor_client::Controller,
-        executor_jobs::{Catalog, JobPlacement, Record},
+        executor::client::Controller,
+        executor::jobs::{Catalog, JobPlacement, Record},
     };
     use meerschaum_connector::InstanceConnector;
     use meerschaum_core::{

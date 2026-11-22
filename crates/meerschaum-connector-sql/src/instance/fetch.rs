@@ -141,7 +141,7 @@ impl SqlConnector {
 
     /// The query a sync runs for [`get_pipe_metadef`](SqlConnector::get_pipe_metadef): the same
     /// definition and bounds, with SQLite datetimes compared in their canonical text form and
-    /// null-like `params` strings matched as text on declared text / index columns (rc15).
+    /// null-like `params` strings matched as text on declared text / index columns.
     pub fn get_pipe_metadef_for_sync(
         &self,
         pipe: &Pipe,
@@ -165,6 +165,7 @@ impl SqlConnector {
         pipe: &Pipe,
         args: &FetchArgs,
     ) -> ConnectorResult<String> {
+        self.ensure_schema().await?;
         // Resolve cross-pipe templates (`{{ Pipe() }}` in the SQL definition) first.
         let pipe = self.prepare_pipe(pipe).await;
         let mut args = args.clone();

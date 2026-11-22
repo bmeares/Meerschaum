@@ -2,7 +2,7 @@
 # vim:fenc=utf-8
 
 """
-Wave 16 (task S): `meerschaum.connectors.api.APIConnector` is a façade over the Rust client
+`meerschaum.connectors.api.APIConnector` is a façade over the Rust client
 (`meerschaum._core.ApiConnector`).
 
 The server tests run against a loopback `mrsm start api` (random port, temporary root, a SQLite
@@ -141,7 +141,7 @@ def test_unreachable_server_raises_like_requests_and_warns(capsys):
     assert conn.test_connection() is False
     assert conn.get_chaining_status() is None
     assert conn.get_mrsm_version() is None
-    # rc15 Q17: a read of an unreachable instance raises (v4 warned and returned `None`);
+    # A read of an unreachable instance raises (v4 warned and returned `None`);
     # `silent=True` on the pipe keeps v4's results.
     with pytest.raises(ConnectionError):
         conn.get_pipe_data(pipe)

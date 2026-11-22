@@ -183,21 +183,19 @@ def table_layout(
 
 def layout(pathname=None, href=None):
     """The layout of a Pipes path (`/dash/pipes`, `/dash/pipes/new` or a pipe's page)."""
-    from meerschaum.api.dash import engine
-    from meerschaum.api.dash import pipes_access
+    from meerschaum.api.dash import access, engine
     from meerschaum.api.dash.pipes_table import filters_from_search, global_instance_keys
     query = urlparse(href or '').query
     filters = filters_from_search(query)
     requested = filters.get('instance', None)
     instance_keys, problem, instance_blocked = engine.page_instance(requested)
     global_instance = global_instance_keys()
-    session_data = pipes_access.session_data_from_context()
     parts = split_path(pathname)
 
-    viewer = pipes_access.viewer(session_data)
+    viewer = access.resolve_viewer({})
     if parts == ['new']:
         from meerschaum.api.dash import new_pipe
-        allowed, reason = pipes_access.can_register(session_data)
+        allowed, reason = viewer.can_register_pipes()
         keys = parse_qs(query)
         page = new_pipe.layout(
             instance_keys, allowed=allowed, reason=reason,
@@ -219,7 +217,7 @@ def layout(pathname=None, href=None):
         )
         problem = None
     else:
-        allowed_new, _ = pipes_access.can_register(session_data)
+        allowed_new, _ = viewer.can_register_pipes()
         page = table_layout(
             instance_keys, global_instance, filters, allowed_new=allowed_new,
             problem=problem, viewer=viewer, instance_blocked=instance_blocked,

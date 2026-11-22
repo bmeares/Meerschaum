@@ -3,7 +3,7 @@
 # vim:fenc=utf-8
 
 """
-Wave 18 (FX7): the dashboard's Exec button never runs an action in the host.
+The dashboard's Exec button never runs an action in the host.
 
 The host-local fallback of the first draft started a hidden job in the host process whenever the
 server's `POST /execute` could not be reached (no `server_url`, a connection error, a route the
@@ -13,10 +13,8 @@ shows the server's answer; nothing runs locally. Everything runs in a subprocess
 with a temporary root, plugins directory and SQLite instance.
 """
 
-import json
 
-from tests.api_host._helpers import make_env, run_python, write_plugin, sandbox  # noqa: F401
-from tests.api_host.test_console_support import _json
+from tests.api_host._helpers import extract_json, run_python
 
 
 FAKE_SERVER = '''
@@ -58,15 +56,16 @@ os.environ[HOST_CONFIG_ENV] = json.dumps({'server_url': f'http://127.0.0.1:{serv
 
 
 def test_exec_never_runs_an_action_in_the_host(sandbox):
-    """RV2 #1: no `server_url` (a bare host) used to start the action as a local job, unchecked."""
+    """No `server_url` (a bare host) used to start the action as a local job, unchecked."""
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json, time, pathlib
 from meerschaum.api.dash import execute
 from meerschaum.jobs import get_jobs
 
 marker = pathlib.Path('PWNED').resolve()
-out = {'server_url': execute.server_url()}
+from meerschaum.api.host._server_client import server_url
+out = {'server_url': server_url()}
 result = execute.run_action(['python', '-c', f"open({str(marker)!r}, 'w').write('bob')"], 'bob')
 out['result'] = result
 time.sleep(3)
@@ -86,7 +85,7 @@ print('JSON:' + json.dumps(out))
 def test_exec_shows_the_servers_error_and_runs_nothing_locally(sandbox):
     """A missing `/execute` route, a refusal, a refused permission and a dead server: all errors."""
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, FAKE_SERVER + '''
+    out = extract_json(run_python(root, plugins, FAKE_SERVER + '''
 import time, pathlib
 from meerschaum.api.dash import execute
 from meerschaum.jobs import get_jobs
@@ -124,7 +123,7 @@ print('JSON:' + json.dumps(out))
 def test_exec_sends_the_users_scopes_not_the_hosts(sandbox):
     """A non-admin's bearer carries the non-admin's own scopes (the server decides from them)."""
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, FAKE_SERVER + '''
+    out = extract_json(run_python(root, plugins, FAKE_SERVER + '''
 import jwt
 from meerschaum.api._oauth2 import SECRET
 from meerschaum.api import get_api_connector
@@ -145,7 +144,7 @@ print('JSON:' + json.dumps(out))
 
 def test_the_console_reads_the_servers_policy_and_falls_back_to_its_own(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, FAKE_SERVER + '''
+    out = extract_json(run_python(root, plugins, FAKE_SERVER + '''
 from meerschaum.api.dash import execute
 
 out = {'builtin': sorted(execute.OMIT_ACTIONS)}
@@ -175,7 +174,7 @@ print('JSON:' + json.dumps(out))
 def test_the_dashboard_has_no_polling_of_job_logs(sandbox):
     """`poll_exec` read any job's log named in a client-held store, without checking a session."""
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 from meerschaum.api.dash.callbacks import execute as callbacks
 from meerschaum.api.dash.pages import dashboard

@@ -39,7 +39,7 @@ Versions have two spellings that must agree (`scripts/check_packaging.py` enforc
 `meerschaum==5.0.0rc1`) and `cargo install meerschaum --locked --version 5.0.0-rc.1` (cargo never picks a
 pre-release without the explicit version). `rc2` is `5.0.0-rc.2` / `5.0.0rc2`.
 
-**Platform policy (releases after rc3): prereleases publish Linux x86_64 artifacts only.**
+**Platform policy: prereleases publish Linux x86_64 artifacts only.**
 This applies to Docker (`linux/amd64`), Python wheels (glibc and musl, plus experimental cp314t if
 its checks pass), and the standalone CLI binary (`x86_64-unknown-linux-gnu`). The sdist and all
 15 crates.io packages remain platform independent. Final releases retain the complete platform
@@ -54,18 +54,19 @@ in the `rust-musl-cross` containers on `ubuntu-latest`, the aarch64 one smoke-te
 sdist. Standalone `mrsm` binaries (the `cargo install meerschaum` program) are built for five targets
 (`x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` in `manylinux_2_28` containers, so the glibc floor is 2.28;
 `aarch64-apple-darwin` and `x86_64-apple-darwin`; `x86_64-pc-windows-msvc`) as GitHub release assets, not on PyPI.
-**Not built:** Windows arm64, Linux arm64 free-threaded, musl standalone binaries. Docker builds run
-on self-hosted Linux x86_64 runners: AMD64 natively, ARM64 under QEMU for final releases. Each has a
-persistent BuildKit cache. `buildx.sh --merge` joins the selected platforms (5.7).
+**Not built:** Windows arm64, Linux arm64 free-threaded, musl standalone binaries. Docker images build
+natively per architecture on GitHub-hosted runners (`ubuntu-24.04`, `ubuntu-24.04-arm`) with a GHCR
+build cache; `buildx.sh --merge` joins the selected platforms (5.7).
 
 ## 5.1 Prepare the release commit
 
-All on `main`; do not commit or tag as an agent unless the maintainer says so.
+Prepare the release on a branch (`release/<version>`, or the feature branch of a pre-release) that
+reaches `main` through a reviewed PR; do not commit or tag as an agent unless the maintainer says so.
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH" CARGO_INCREMENTAL=0
-OLD_CARGO=5.0.0-a1  OLD_PEP=5.0.0a1        # the current values (Cargo.toml / _version.py)
-NEW_CARGO=5.0.0-rc.1 NEW_PEP=5.0.0rc1      # final: 5.0.0 and 5.0.0
+OLD_CARGO=5.1.1      OLD_PEP=5.1.1          # the current values (Cargo.toml / _version.py)
+NEW_CARGO=5.1.2      NEW_PEP=5.1.2          # a pre-release: 5.2.0-rc.1 and 5.2.0rc1
 ```
 
 1. **Bump the version everywhere it is a literal** (the Cargo workspace version is the single source of
@@ -88,14 +89,11 @@ NEW_CARGO=5.0.0-rc.1 NEW_PEP=5.0.0rc1      # final: 5.0.0 and 5.0.0
      ':!.agents' ':!.claude' ':!docs/zensical/llms-full.txt'
    ```
 
-   At 5.0.0-a1 this listed `tests/plugins/w7_native_fig/plugin.rs`, `crates/meerschaum-plugin/examples/native_demo.rs`
-   and `native_probe.rs` (`"meerschaum_version"` literals), `CLAUDE.md` ("version `5.0.0-a1` is the single source of
-   truth"), `crates/meerschaum-py/README.md` and `docs/design/v5-build.md`. `build_info.rs` and
-   `check_packaging.py` only use the strings as examples and test vectors; leave them. Historical
-   benchmark results keep the version they were measured with.
-2. **PyPI classifier.** `pyproject.toml` carries `Development Status :: 4 - Beta` for every pre-release.
-   **For 5.0.0 final switch it back to `Development Status :: 5 - Production/Stable`** (and remove the comment
-   above it). Also re-read `requires-python` (`>=3.11`), the `Programming Language :: Python :: 3.x`
+   Expect `"meerschaum_version"` literals in native example and test plugins, and prose that states the
+   current version. `build_info.rs` and `check_packaging.py` only use the strings as examples and test
+   vectors; leave them. Historical benchmark results keep the version they were measured with.
+2. **PyPI classifier.** `pyproject.toml` carries `Development Status :: 4 - Beta` for the pre-releases of a
+   new minor version and `Development Status :: 5 - Production/Stable` for finals and patch releases. Also re-read `requires-python` (`>=3.11`), the `Programming Language :: Python :: 3.x`
    classifiers (3.11 to 3.15; the smoke matrix covers 3.11 and 3.14), and `license = "Apache-2.0"` with
    `license-files` (PEP 639; `twine check` validates it).
 3. **Changelog.** Edit `docs/zensical/changelog/v5.md` (source of truth) following `.claude/skills/docs/SKILL.md`: brief 1–2 sentence bullets with bold lead-ins, short code/CLI examples where helpful, concise upgrade callouts, and links to reference pages instead of long prose walls. Collapse older minor series under `<details markdown="1">`. Then run `python3 scripts/generate_changelog.py` and `python3 scripts/gen_llms_txt.py` (or `./scripts/docs.sh`) so root `CHANGELOG.md` and `docs/zensical/llms*.txt` are regenerated and committed.
@@ -105,14 +103,17 @@ NEW_CARGO=5.0.0-rc.1 NEW_PEP=5.0.0rc1      # final: 5.0.0 and 5.0.0
    python3 scripts/check_packaging.py          # versions, console scripts, extras, lockstep pins, crates.io metadata
    scripts/rust/ci.sh doc                     # public Rust docs must pass before freezing the candidate
    scripts/rust/ci.sh package                   # cargo package --workspace --no-verify + size/content checks
-   scripts/parity/check_fixture_hygiene.sh      # on any touched public file or fixture directory
+   scripts/parity/check_fixture_hygiene.sh      # fixture directories
+   scripts/parity/check_fixture_hygiene.sh --public   # every tracked file, Markdown and Python included
    ```
 
    `scripts/rust/ci.sh publish-dry-run` builds every tarball against crates.io (no `[patch]`, plain sqlx)
    and mutates the shared `target/` and `$CARGO_HOME`: run it yourself when nothing else is building (tens
    of minutes), after `package`. It is the only check that the published crates compile against the
    released sqlx, so do it before step 5.5.
-5. Commit on `main` (`🦀 v5.0.0rc1: ...`), push the branch: **[needs explicit user authorization to push]**.
+5. Commit (`🦀 v5.1.2: ...`) and push the branch: **[needs explicit user authorization to push]**. Open the PR
+   to `main` (gitmoji title, changelog-verbatim body); after review and green CI, merge it and run 5.2 on the
+   merged commit.
 
 ## 5.2 CI on the release commit
 
@@ -215,8 +216,7 @@ The sdist built by CI is the one to upload (`maturin sdist --out <dir>` or `pyth
 locally give the same file; a local `python -m build` wheel is `linux_x86_64` and PyPI rejects it, so never
 upload anything from `scripts/build.sh`'s `dist/`). The sdist excludes `crates/meerschaum-py/tests/**`
 and has no `rust-toolchain.toml` (the manifests carry `rust-version = "1.95"`: read it from `Cargo.toml`, it moves with the toolchain). Building from it needs a
-Rust toolchain and network access to crates.io **and to GitHub**: the root `Cargo.toml` `[patch.crates-io]`
-points sqlx at a git revision. A pre-release `pip install` of a wheel never compiles anything.
+Rust toolchain and network access to crates.io. A pre-release `pip install` of a wheel never compiles anything.
 
 ## 5.4 PyPI **[needs explicit user authorization]**
 
@@ -260,9 +260,8 @@ level can go in any order except where a dev-dependency says otherwise, below), 
 cargo publish -p meerschaum-core --locked      # then the next one, ...
 ```
 
-Consequences to state before publishing: (1) crates.io ignores the root `[patch.crates-io]`, so the
-published SQL connector crates build against plain sqlx 0.9.x (not the pinned git revision) until sqlx 0.9.1
-ships: `scripts/rust/ci.sh publish-dry-run` is the check that this compiles. (2) Publishing cannot be undone:
+Consequences to state before publishing: (1) `scripts/rust/ci.sh publish-dry-run` checks that all published
+crates compile from their packaged tarballs against crates.io. (2) Publishing cannot be undone:
 a version can only be yanked (`cargo yank --version 5.0.0-rc.1 <crate>`), never reused, so a fix is `rc.2`
 for all crates (lockstep `=` pins). (3) `cargo install meerschaum --version 5.0.0-rc.1 --locked` builds the
 `mrsm` binary from the front crate. (4) CI never runs `cargo publish`.
@@ -284,48 +283,48 @@ assets. Say in the notes that the macOS binary is not signed or notarized (Gatek
 `xattr -d com.apple.quarantine mrsm-...`, documented under Setup in the docs), that `cargo install meerschaum --locked` (Rust 1.95 or newer) and
 `pip install meerschaum` are the supported installs, and that the Linux binaries need glibc 2.28 or newer.
 
-For an rc, write release-specific GitHub notes separately; the changelog keeps its single unreleased
-`v5.0.0` entry. For a final, use the changelog notes with the heading demoted to one `#`. For an rc **always**
+For an rc, write release-specific GitHub notes separately; the changelog keeps one unreleased
+entry for the coming final (`v5.2.0`). For a final, use the changelog notes with the heading demoted to one `#`. For an rc **always**
 pass `--prerelease` (and not `--latest`). Do not `git push origin --tags` (it would push unrelated tags).
 
 ## 5.7 Docker **[needs explicit user authorization, separate from 5.4 to 5.6]**
 
-Use the same clean release commit for both dispatches. The SDK candidate must have
+Use the same clean release commit for the Docker runs. The SDK candidate must have
 passed every full gate before Docker consumes its sealed wheel and CLI. Local
 `buildx.sh` builds still default to source for development.
 
 ```bash
-# No registry credentials are used by the candidate build.
+# The candidate run uses no Docker Hub credentials (it stages on GHCR with the workflow token).
 gh workflow run docker-build.yaml --ref main -f candidate_run_id=SDK_RUN_ID -f size_gate=enforce
+# With authorization to write temporary Docker Hub tags, rehearse the first promotion.
+gh workflow run docker-build.yaml --ref main -f rehearse=true -f candidate_run_id=SDK_RUN_ID -f image_run_id=DOCKER_RUN_ID
 # After the Docker candidate passes, and publication is authorized:
 gh workflow run docker-build.yaml --ref main -f publish=true -f candidate_run_id=SDK_RUN_ID -f image_run_id=DOCKER_RUN_ID -f size_gate=enforce
 ```
 
-Dispatch the Docker candidate as soon as the SDK candidate succeeds (about 9 minutes on
-one self-hosted runner) and do the dev host upgrade and other preparation while it runs.
+Dispatch the Docker candidate as soon as the SDK candidate succeeds and do the dev host upgrade and
+other preparation while it runs (14 minutes with a warm GHCR cache, 21 cold).
 
-The first run loads and tests every selected architecture, enforces the existing
-size limits, runs the offline facade smoke, and records immutable image IDs in
-`docker-candidate-<arch>`. The second run verifies the same SDK and image receipt,
-pushes those exact IDs without rebuilding, checks their registry config digests,
-and merges the selected architectures. Repository Docker Hub secrets are used
-only for publication. SDK binaries are copied unchanged from the release artifacts.
+Before the first publication through this workflow, require a successful rehearsal. Rehearsal tags
+end in `-check-<run>-<attempt>`. See `docs/design/v5-build.md` "Docker publication" for GHCR access,
+the verification steps and the self-hosted fallback.
 
-Candidate receipts and their complete SDK payloads must remain unexpired. Local
-candidate image tags keep the tested IDs on the shared daemon. Missing images stop
-publication. Only an explicit `rebuild_on_missing=true` allows a rebuild from the
-same sealed SDK; every image gate and smoke runs again before publication.
+The candidate run builds each architecture on hosted runners, pushes it to the GHCR staging
+repository (`ghcr.io/<owner>/<repo>/candidate`), runs every smoke, size gate and the facade smoke on
+the images pulled back by digest, and records the digests in `docker-candidate-<arch>`. The amd64
+`full` digest is pulled on the self-hosted runner for the installed Team executor suite
+(`docker-executors-amd64`). The publish run verifies the same SDK and both receipts, checks that the
+digests are still staged, copies exactly those digests to Docker Hub registry to registry, checks the
+published digests, and merges the selected architectures. Docker Hub secrets are used only by the
+publication jobs. SDK binaries are copied unchanged from the release artifacts.
 
-Prereleases select Linux amd64 and version-qualified tags only. Finals also build
-arm64 under QEMU and update floating tags after every architecture passes. Capture
-`latest` before a prerelease and verify it remains unchanged afterward. Do not prune
-the shared daemon or touch unrelated containers, images or builders.
+Candidate receipts and their complete SDK payloads must remain unexpired. A staged digest that is
+missing stops publication: dispatch a new candidate run (every gate runs again) and publish that run.
 
-The workflow retains per-architecture BuildKit caches, a bounded CPU/memory budget
-and private Docker configuration. `tests/test_ci_docker_candidate.py` exercises
-promotion, missing-image refusal, source/platform/checksum mismatches and registry
-digest verification. `tests/test_docker_buildx.py` and workflow tests retain the
-prerelease/final platform and smoke contracts.
+Prereleases select Linux amd64 and version-qualified tags only. Finals also build arm64 natively and
+update floating tags after every architecture passes. Capture `latest` before a prerelease and verify
+it remains unchanged afterward. On the self-hosted runner, do not prune the shared daemon or touch
+unrelated containers, images or builders.
 
 ## 5.8 Docs
 
@@ -335,14 +334,13 @@ authorization]**: `ssh $MRSM_DOCS_SSH` (from `.env`), `cd "$MRSM_DOCS_DIR"`, che
 run `./scripts/docs.sh`. Never build or run Docker images there. Commit the regenerated `CHANGELOG.md` and `requirements/*.txt`
 in the release commit (5.1), not after the tag.
 
-## 5.9 Final release (5.0.0) differences
+## 5.9 Final and patch release differences
 
-- Version `5.0.0-rc.N` becomes `5.0.0` in Cargo/`_version.py` (and `5.0.0` PEP 440); classifier back to
-  `5 - Production/Stable`; changelog final.
-- The release is cut from `main`: open the PR `v5` to `main` (gitmoji title, changelog-verbatim body), CI
-  green, merge, then run 5.2 to 5.6 on the merged commit. The tag is `v5.0.0` and the GitHub release is
-  created without `--prerelease` (with `--latest`).
-- `pip install meerschaum` (no `--pre`) and `cargo install meerschaum --locked` now resolve to 5.0.0.
+- The version has no pre-release part (`5.1.2` in Cargo and PEP 440); classifier
+  `5 - Production/Stable`; the changelog entry is final.
+- The release commit is the merge of its PR into `main` (5.1 step 5). The tag is `v5.1.2` and the GitHub
+  release is created without `--prerelease` (with `--latest`).
+- `pip install meerschaum` (no `--pre`) and `cargo install meerschaum --locked` now resolve to it.
 - Docker: only now do `latest`, `full`, `minimal`, `slim`, `rust`, `rust-full` and `api` move (`buildx.sh --merge`, run by the `publish` job of
   `docker-build.yaml`, does it for a non-pre-release version): needs its own authorization and a passing size gate and façade smoke.
 - Re-run the full gate: all flavors, parity, packaging, `publish-dry-run`.
@@ -356,7 +354,7 @@ in the release commit (5.1), not after the tag.
 - [ ] **PyPI** uploaded (authorized), verified in a clean venv with `--pre`
 - [ ] **crates.io** `cargo publish --workspace --exclude meerschaum-py` done (authorized), `cargo install meerschaum --locked --version ...` verified
 - [ ] **Tag** `v5.0.0rc1` pushed and **GitHub pre-release** created with the selected binaries + `SHA256SUMS` attached (authorized)
-- [ ] **Docker** (separately authorized), built and pushed from the build host (or `docker-build.yaml` for multi-arch): version-qualified tags only for an rc; `latest` unchanged
+- [ ] **Docker** (separately authorized), candidate and publish runs of `docker-build.yaml`: version-qualified tags only for an rc; `latest` unchanged
 - [ ] Docs rebuilt
 
 ---

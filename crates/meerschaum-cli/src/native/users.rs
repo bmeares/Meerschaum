@@ -1,5 +1,5 @@
 //! `register users` (`actions/register.py`), `edit users` (`actions/edit.py`), `delete users`
-//! (`actions/delete.py`) and `show users`, with the access model of rc15 wave 2 (AC1, AC2, AC10):
+//! (`actions/delete.py`) and `show users`, with the access model of teams and roles:
 //!
 //! - a user's permissions come from their role (`viewer`, `editor`, `operator`; the instance's
 //!   `api:permissions:default_role` when none is stored), explicit permissions (a custom list,
@@ -193,7 +193,7 @@ pub fn register_users(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             ),
         );
     }
-    // AC1: the first account of an instance without users may become its administrator.
+    // The first account of an instance without users may become its administrator.
     let mut first_admin = !nonregistered.is_empty()
         && session
             .block_on(conn.get_users())

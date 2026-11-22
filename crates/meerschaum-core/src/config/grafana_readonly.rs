@@ -77,7 +77,8 @@ pub enum MainSource {
     Absent,
 }
 
-fn text(value: Option<&Value>) -> String {
+/// A config value as trimmed text: `str(value).strip()`, empty when it is missing or null.
+pub fn trimmed_text(value: Option<&Value>) -> String {
     match value {
         None | Some(Value::Null) => String::new(),
         Some(v) => v.py_str().trim().to_string(),
@@ -116,11 +117,11 @@ pub fn switch_main_datasource(
     };
     let Some(Value::Map(source)) = sources
         .iter_mut()
-        .find(|s| text(s.get("name")) == MAIN_DATASOURCE_NAME)
+        .find(|s| trimmed_text(s.get("name")) == MAIN_DATASOURCE_NAME)
     else {
         return MainSource::Absent;
     };
-    let user = text(source.get("user"));
+    let user = trimmed_text(source.get("user"));
     let owner = owner.map(str::trim).filter(|o| !o.is_empty());
     if !user.is_empty() && Some(user.as_str()) != owner {
         return MainSource::Customized { user };
@@ -137,13 +138,13 @@ pub fn switch_main_datasource(
     if let Value::Map(secure) = secure {
         secure.insert("password".into(), Value::Str(password.to_string()));
     }
-    let (host, port) = host_port(&text(source.get("url")));
+    let (host, port) = host_port(&trimmed_text(source.get("url")));
     let database = [
         source.get("jsonData").and_then(|j| j.get("database")),
         source.get("database"),
     ]
     .into_iter()
-    .map(text)
+    .map(trimmed_text)
     .find(|d| !d.is_empty())
     .or_else(|| fallback_database.map(str::to_string))
     .unwrap_or_default();

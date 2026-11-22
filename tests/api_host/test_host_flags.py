@@ -12,7 +12,7 @@ server does, §7.1), and accepts the signed internal token as `X-Mrsm-Host-Token
 
 import json
 
-from tests.api_host._helpers import run_python, write_plugin, sandbox  # noqa: F401
+from tests.api_host._helpers import run_python, write_plugin
 
 PLUGIN = '''
 from meerschaum.plugins import api_plugin, dash_plugin, web_page

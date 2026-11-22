@@ -4,10 +4,10 @@
 
 """
 `pipe.drop()`, `pipe.delete()` and a full `pipe.clear()` forget the pipe's Syncing Engine state
-(ledger entries, edge cursors, definition hash; wave 9), so a pipe recreated under the same keys
+(ledger entries, edge cursors, definition hash), so a pipe recreated under the same keys
 starts fresh, as in v4. Partial clears keep it. Synthetic, on the SQLite test instance and, when
 selected in `MRSM_TEST_FLAVORS`, the PostgreSQL-family instances, where the state lives in the
-internal schema `_mrsm_internal` (wave 17b, GAP-001).
+internal schema `_mrsm_internal` (PARITY.md GAP-001).
 """
 
 import os

@@ -1,6 +1,6 @@
 //! `/connectors` (`api/routes/_connectors.py`).
 //!
-//! A connector with `teams: [...]` (rc15) is for those teams' pipes: it is listed to
+//! A connector with `teams: [...]` is for those teams' pipes: it is listed to
 //! administrators and the members of those teams only.
 
 use axum::Router;

@@ -8,7 +8,7 @@ Flavor-specific SQL tools.
 Only `sql_item_name` and `build_where` are used by the Rust engine (they delegate to it). The rest
 (`get_update_queries`, `get_create_table_queries`, `dateadd_str`, `table_exists`, ...) are SDK helpers
 for plugin and custom-connector authors: they keep their v4 implementations and are not used by
-`Pipe` syncs. With a `SQLConnector` they run through its Rust connection pool (raw SQL, rc15 Q53:
+`Pipe` syncs. With a `SQLConnector` they run through its Rust connection pool (raw SQL:
 `table_exists`, `get_table_cols_types`, `get_table_cols_indices` need no SQLAlchemy); a SQLAlchemy
 session, engine or connection keeps working as in v4 (the `sql` extra).
 """
@@ -930,7 +930,7 @@ def table_exists(
     from meerschaum.connectors.sql._native import table_exists as native_table_exists
     schema = schema or connector.schema
     truncated_table_name = truncate_item_name(str(table), connector.flavor)
-    ### Raw SQL through the Rust connector: no SQLAlchemy (rc15 Q53).
+    ### Raw SQL through the Rust connector: no SQLAlchemy.
     exists = native_table_exists(connector, truncated_table_name, schema)
     if exists is not None:
         return exists

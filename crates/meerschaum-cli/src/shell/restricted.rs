@@ -1,4 +1,4 @@
-//! The shell's restricted mode (5.1): the web terminal of a user who may not run system
+//! The shell's restricted mode: the web terminal of a user who may not run system
 //! commands (`meerschaum_server::webterm::restricted`).
 //!
 //! The server starts the shell with [`RESTRICTED_ENV`], the address of its policy socket and a

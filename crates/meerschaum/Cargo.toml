@@ -66,3 +66,6 @@ path = "src/main.rs"
 required-features = ["cli"]
 test = false
 doc = false
+
+[lints]
+workspace = true

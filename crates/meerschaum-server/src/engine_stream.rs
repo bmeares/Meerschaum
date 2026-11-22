@@ -41,18 +41,16 @@
 //! job-log streams (`api:permissions:log_streams`, a separate count). A run the store cannot be
 //! read for is an error (`500`, or `501` without a store), never "not found".
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::convert::Infallible;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use async_trait::async_trait;
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
-use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
+use axum::response::sse::{Event as SseEvent, KeepAlive};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use meerschaum_connector::pipe_ops::Doc;
-use meerschaum_connector_api::models::EngineRunEvent;
+use meerschaum_connector_api::models::{EngineRunEvent, RunRecord};
 use meerschaum_kernel::value::Value as KValue;
 use serde_json::Value as Json;
 use tokio::sync::broadcast;
@@ -61,8 +59,8 @@ use tokio::time::Instant;
 use crate::backends::{EngineBackend, EngineStoreError, RunsFilter};
 use crate::error::ApiError;
 use crate::routes::Ctx;
+use crate::sse::{self, BrowserAuth, StreamAuth, StreamGuard, StreamSlots};
 use crate::state::AppState;
-use meerschaum_connector_api::models::RunRecord;
 
 /// How often a stream reads the persisted events.
 pub const POLL: Duration = Duration::from_millis(500);
@@ -70,12 +68,11 @@ pub const POLL: Duration = Duration::from_millis(500);
 pub const GAP_GRACE: Duration = Duration::from_secs(1);
 /// How often an idle stream sends a comment.
 pub const HEARTBEAT: Duration = Duration::from_secs(15);
-/// How often a stream checks the run's record (an interrupted run never sends `run_finished`).
+/// How often a stream checks the run's record (an interrupted run never sends `run_finished`)
+/// and re-authorizes the caller/console session.
 const STATUS_CHECK: Duration = Duration::from_secs(5);
 /// How long a stream keeps reading after the run's record says it finished.
 const CLOSE_GRACE: Duration = Duration::from_secs(3);
-/// How often a console stream re-checks that its session still exists.
-const SESSION_CHECK: Duration = Duration::from_secs(10);
 /// The most a request may wait (`?wait=`) for a run that has not started yet.
 pub const MAX_WAIT: Duration = Duration::from_secs(60);
 /// How long a run may go without any event before its stream ends (`run_closed`, `idle`);
@@ -95,31 +92,6 @@ const TS_SLACK: chrono::TimeDelta = chrono::TimeDelta::seconds(60);
 /// The scopes of the stream (those of `GET /engine/runs`).
 const SCOPES: &[&str] = &["pipes:read"];
 
-/// Authenticates a browser request that carries no `Authorization` header (the console's
-/// `EventSource` cannot set one) by its console session. `meerschaum-web` installs one with
-/// [`EngineStreams::set_browser_auth`].
-#[async_trait]
-pub trait BrowserAuth: Send + Sync {
-    /// `None` when the request has no console session; otherwise the headers to authorize it
-    /// with (a short-lived bearer for the session's user) and the session ID, or the status to
-    /// answer (`401`, `503`). An open stream calls it again (with the request's cookies) at each
-    /// access check, so it must check the session and its user every time.
-    async fn authorize(
-        &self,
-        state: &AppState,
-        headers: &HeaderMap,
-    ) -> Option<Result<(HeaderMap, String), StatusCode>>;
-
-    /// Whether the session still exists (a logout ends its streams).
-    async fn session_active(&self, state: &AppState, session_id: &str) -> bool;
-
-    /// On a `--no-auth` server: who an unauthenticated request counts against for the
-    /// per-user stream limit (the console cookie). `None`: only the server-wide limit applies.
-    fn anonymous_key(&self, _headers: &HeaderMap) -> Option<String> {
-        None
-    }
-}
-
 /// An event published live, with the keys of the instance that keeps its run.
 #[derive(Debug, Clone)]
 pub struct LiveRunEvent {
@@ -134,7 +106,7 @@ pub struct LiveRunEvent {
 pub struct EngineStreams {
     tx: broadcast::Sender<LiveRunEvent>,
     browser_auth: OnceLock<Arc<dyn BrowserAuth>>,
-    open: Arc<Mutex<(usize, HashMap<String, usize>)>>,
+    slots: StreamSlots,
 }
 
 impl Default for EngineStreams {
@@ -142,7 +114,7 @@ impl Default for EngineStreams {
         EngineStreams {
             tx: broadcast::channel(4096).0,
             browser_auth: OnceLock::new(),
-            open: Arc::default(),
+            slots: StreamSlots::new("event streams"),
         }
     }
 }
@@ -215,44 +187,14 @@ impl EngineStreams {
         self.browser_auth.get().cloned()
     }
 
-    fn take_slot(&self, key: &str, max: usize, per_user: usize) -> Result<Slot, &'static str> {
-        let mut open = self.open.lock().unwrap_or_else(|e| e.into_inner());
-        if open.0 >= max {
-            return Err("Too many event streams are open on this server.");
-        }
-        if open.1.get(key).copied().unwrap_or(0) >= per_user {
-            return Err("Too many event streams are open for this user.");
-        }
-        open.0 += 1;
-        *open.1.entry(key.to_string()).or_insert(0) += 1;
-        Ok(Slot {
-            open: self.open.clone(),
-            key: key.to_string(),
-        })
+    /// The shared stream slot tracker.
+    pub fn slots(&self) -> &StreamSlots {
+        &self.slots
     }
 
     /// The number of open streams (for tests).
     pub fn open_streams(&self) -> usize {
-        self.open.lock().unwrap_or_else(|e| e.into_inner()).0
-    }
-}
-
-/// One open stream; freed when the stream drops.
-struct Slot {
-    open: Arc<Mutex<(usize, HashMap<String, usize>)>>,
-    key: String,
-}
-
-impl Drop for Slot {
-    fn drop(&mut self) {
-        let mut open = self.open.lock().unwrap_or_else(|e| e.into_inner());
-        open.0 = open.0.saturating_sub(1);
-        if let Some(n) = open.1.get_mut(&self.key) {
-            *n = n.saturating_sub(1);
-            if *n == 0 {
-                open.1.remove(&self.key);
-            }
-        }
+        self.slots.open()
     }
 }
 
@@ -324,21 +266,6 @@ pub fn api_error(e: EngineStoreError) -> ApiError {
     }
 }
 
-/// Who a stream counts against.
-fn slot_key(principal: Option<&crate::auth::Principal>, session: Option<&str>) -> String {
-    match principal {
-        Some(crate::auth::Principal::Execution(identity)) => identity.owner_key(),
-        Some(crate::auth::Principal::User(user)) => format!("user:{}", user.username),
-        Some(crate::auth::Principal::Token(token)) => {
-            format!(
-                "token:{}",
-                token.id.map(|id| id.to_string()).unwrap_or_default()
-            )
-        }
-        None => format!("session:{}", session.unwrap_or("")),
-    }
-}
-
 /// The store that keeps the run's history: the server's engine store, or (`instance_keys`
 /// naming another instance the server may use) that instance's state pipes. Also the keys
 /// under which that instance's runs are published live ([`own_instance_names`] for the server's).
@@ -402,28 +329,15 @@ async fn run_known(store: &dyn EngineBackend, run_id: &str) -> Result<bool, ApiE
 pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
     let state = ctx.state.clone();
     // A bearer wins; otherwise the console session (if `meerschaum-web` installed one).
-    let mut session = None;
-    let auth_headers = match state.engine_streams.browser_auth() {
-        Some(auth) if !ctx.headers.contains_key(header::AUTHORIZATION) => {
-            match auth.authorize(&state, &ctx.headers).await {
-                Some(Ok((headers, id))) => {
-                    session = Some(ConsoleSession {
-                        auth,
-                        id,
-                        cookies: cookies_of(&ctx.headers),
-                    });
-                    headers
-                }
-                Some(Err(status)) => return Ok(status.into_response()),
-                None => ctx.headers.clone(),
-            }
-        }
-        _ => ctx.headers.clone(),
-    };
-    let caller = crate::access::require_fresh(&state, &auth_headers, SCOPES).await?;
+    let auth =
+        match StreamAuth::open(&state, &ctx.headers, state.engine_streams.browser_auth()).await {
+            Ok(auth) => auth,
+            Err(rejected) => return Ok(rejected.into_response()),
+        };
+    let caller = crate::access::require_fresh(&state, auth.headers(), SCOPES).await?;
     let selected = ctx.selected_engine(&caller)?;
     let caller = selected
-        .fresh_headers(&state, &auth_headers, SCOPES)
+        .fresh_headers(&state, auth.headers(), SCOPES)
         .await?;
     let principal = caller.auth.clone();
     if !valid_run_id(&run_id) {
@@ -467,24 +381,24 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
     let deadline = Instant::now() + wait;
     while !run_known(store.as_ref(), &run_id).await? {
         selected
-            .fresh_headers(&state, &auth_headers, SCOPES)
+            .fresh_headers(&state, auth.headers(), SCOPES)
             .await?;
         if Instant::now() >= deadline {
             return Err(ApiError::new(404, format!("Run '{run_id}' was not found.")));
         }
         tokio::time::sleep(POLL).await;
     }
-    // A caller who is not an administrator follows the runs of pipes it can see (rc15); the
+    // A caller who is not an administrator follows the runs of pipes it can see; the
     // events of hidden pipes reach it anonymized.
     let caller = selected
-        .fresh_headers(&state, &auth_headers, SCOPES)
+        .fresh_headers(&state, auth.headers(), SCOPES)
         .await?;
     let filter = if selected.unrestricted(&caller) {
         None
     } else {
         loop {
             let fresh = selected
-                .fresh_headers(&state, &auth_headers, SCOPES)
+                .fresh_headers(&state, auth.headers(), SCOPES)
                 .await?;
             let mut filter = selected.filter(&state, &fresh);
             let visible =
@@ -493,7 +407,7 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
                     .map_err(api_error)?;
             if visible.is_some() {
                 selected
-                    .finish_read_headers(&state, &auth_headers, &fresh, SCOPES)
+                    .finish_read_headers(&state, auth.headers(), &fresh, SCOPES)
                     .await?;
                 break Some(filter);
             }
@@ -505,37 +419,14 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
             tokio::time::sleep(POLL).await;
         }
     };
-    // Without authentication there is no user: count the console cookie's streams, or else
-    // only the server-wide total.
-    let (key, per_user) = match (&principal, &session) {
-        (None, None) => match state
-            .engine_streams
-            .browser_auth()
-            .and_then(|auth| auth.anonymous_key(&ctx.headers))
-        {
-            Some(key) => (key, state.config.log_streams_per_user),
-            None => ("anonymous".to_string(), usize::MAX),
-        },
-        _ => (
-            slot_key(
-                principal.as_ref(),
-                session.as_ref().map(|session| session.id.as_str()),
-            ),
-            state.config.log_streams_per_user,
-        ),
-    };
-    let slot = match state
-        .engine_streams
-        .take_slot(&key, state.config.log_streams_max, per_user)
-    {
-        Ok(slot) => slot,
-        Err(why) => {
-            let mut response = (StatusCode::TOO_MANY_REQUESTS, why).into_response();
-            response
-                .headers_mut()
-                .insert(header::RETRY_AFTER, HeaderValue::from_static("5"));
-            return Ok(response);
-        }
+    let guard = match auth.into_guard(
+        state.engine_streams.slots(),
+        state.config.log_streams_max,
+        state.config.log_streams_per_user,
+        principal.as_ref(),
+    ) {
+        Ok(guard) => guard,
+        Err(rejected) => return Ok(rejected.into_response()),
     };
     let mut tail = Tail {
         state,
@@ -558,13 +449,10 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
         idle_timeout,
         gap_through: None,
         terminal: None,
-        session,
-        next_session_check: Instant::now() + SESSION_CHECK,
         done: false,
         filter,
-        auth_headers,
+        guard,
         next_access_check: Instant::now() + STATUS_CHECK,
-        _slot: slot,
     };
     tail.poll
         .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -576,33 +464,12 @@ pub async fn serve(ctx: Ctx, run_id: String) -> Result<Response, ApiError> {
     });
     // A draining server ends the stream at once: the client resumes elsewhere with
     // `Last-Event-ID`.
-    let stream = crate::lifecycle::until_drain(stream, drain);
-    let mut response = Sse::new(stream)
-        .keep_alive(KeepAlive::new().interval(HEARTBEAT).text("keep-alive"))
-        .into_response();
-    let headers = response.headers_mut();
-    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-    // nginx buffers proxied responses unless told not to.
-    headers.insert("x-accel-buffering", HeaderValue::from_static("no"));
-    Ok(response)
-}
-
-/// The console session a stream was opened with.
-struct ConsoleSession {
-    auth: Arc<dyn BrowserAuth>,
-    /// The session ID.
-    id: String,
-    /// The request's `Cookie` headers (what [`BrowserAuth::authorize`] reads), nothing else.
-    cookies: HeaderMap,
-}
-
-/// Only the `Cookie` headers of a request.
-fn cookies_of(headers: &HeaderMap) -> HeaderMap {
-    let mut cookies = HeaderMap::new();
-    for value in headers.get_all(header::COOKIE) {
-        cookies.append(header::COOKIE, value.clone());
-    }
-    cookies
+    Ok(sse::response(
+        stream,
+        drain,
+        KeepAlive::new().interval(HEARTBEAT).text("keep-alive"),
+        sse::CACHE_NO_CACHE,
+    ))
 }
 
 /// One stream's state.
@@ -641,14 +508,11 @@ struct Tail {
     gap_through: Option<i64>,
     /// The synthetic `run_closed` to send before ending.
     terminal: Option<EngineRunEvent>,
-    session: Option<ConsoleSession>,
-    next_session_check: Instant,
     done: bool,
     /// For a caller who is not an administrator: anonymizes the events of hidden pipes.
     filter: Option<crate::access::RefFilter>,
-    auth_headers: axum::http::HeaderMap,
+    guard: StreamGuard,
     next_access_check: Instant,
-    _slot: Slot,
 }
 
 impl Tail {
@@ -758,20 +622,16 @@ impl Tail {
         }
     }
 
-    /// A long-lived stream must stop when its credential or saved Pipeline access changes.
+    /// A long-lived stream must stop when its credential, console session, or saved Pipeline
+    /// access changes.
     async fn refresh_access(&mut self) -> Option<()> {
         // A console stream's bearer lives a minute: mint the next one from the session, which
-        // checks the session and its user again (an ended session or a refused user ends the
-        // stream, never an older bearer).
-        if let Some(session) = &self.session {
-            match session.auth.authorize(&self.state, &session.cookies).await {
-                Some(Ok((headers, id))) if id == session.id => self.auth_headers = headers,
-                _ => return None,
-            }
-        }
+        // checks the session, its user, and its credential binding again (an ended session or
+        // rotated credential ends the stream, never an older bearer).
+        let headers = self.guard.reauthorize(&self.state).await?.clone();
         let caller = self
             .selected
-            .fresh_headers(&self.state, &self.auth_headers, SCOPES)
+            .fresh_headers(&self.state, &headers, SCOPES)
             .await
             .ok()?;
         if self.selected.unrestricted(&caller) {
@@ -783,26 +643,17 @@ impl Tail {
             .await
             .ok()??;
         self.selected
-            .finish_read_headers(&self.state, &self.auth_headers, &caller, SCOPES)
+            .finish_read_headers(&self.state, &headers, &caller, SCOPES)
             .await
             .ok()?;
         self.filter = Some(filter);
         Some(())
     }
 
-    /// A poll: read the persisted events, check the run's record and the session. `None` ends
-    /// the stream.
+    /// A poll: read the persisted events and check the run's record. `None` ends the stream.
     async fn tick(&mut self) -> Option<()> {
         self.read_persisted().await;
         let now = Instant::now();
-        if let Some(session) = &self.session
-            && now >= self.next_session_check
-        {
-            if !session.auth.session_active(&self.state, &session.id).await {
-                return None;
-            }
-            self.next_session_check = now + SESSION_CHECK;
-        }
         if self.closed_at.is_none() && now >= self.next_status_check {
             self.next_status_check = now + STATUS_CHECK;
             let filter = RunsFilter {
@@ -965,12 +816,12 @@ mod tests {
     #[test]
     fn slots_are_bounded_and_freed() {
         let streams = EngineStreams::default();
-        let a = streams.take_slot("user:a", 2, 1).unwrap();
-        assert!(streams.take_slot("user:a", 2, 1).is_err());
-        let _b = streams.take_slot("user:b", 2, 1).unwrap();
-        assert!(streams.take_slot("user:c", 2, 1).is_err());
+        let a = streams.slots().take("user:a", 2, 1).unwrap();
+        assert!(streams.slots().take("user:a", 2, 1).is_err());
+        let _b = streams.slots().take("user:b", 2, 1).unwrap();
+        assert!(streams.slots().take("user:c", 2, 1).is_err());
         drop(a);
         assert_eq!(streams.open_streams(), 1);
-        assert!(streams.take_slot("user:a", 2, 1).is_ok());
+        assert!(streams.slots().take("user:a", 2, 1).is_ok());
     }
 }

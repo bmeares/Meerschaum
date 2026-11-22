@@ -98,7 +98,7 @@ fn api_error_str(e: &ApiError) -> String {
     }
 }
 
-/// The caller's access (rc15): over HTTP its effective permissions, teams and visibility;
+/// The caller's access: over HTTP its effective permissions, teams and visibility;
 /// over stdio (and under `--no-auth`) everything (local trust).
 pub async fn caller_access(cx: &ToolCx<'_>) -> Result<Access, ToolError> {
     match (&cx.caller.principal, cx.caller.api) {
@@ -171,7 +171,7 @@ pub fn target(pipe: &Pipe) -> String {
 }
 
 fn is_protected(t: &str) -> bool {
-    builtin().protected_tables.iter().any(|p| p == t)
+    crate::sql_guard::PROTECTED_TABLES.contains(&t)
 }
 
 /// The instance connector for `instance_keys`: the API's instance permissions over HTTP
@@ -264,7 +264,7 @@ pub async fn resolve_pipe(
         .await
         .map_err(|e| ToolError::other(api_error_str(&e)))?;
     check_protected_target(&pipe)?;
-    // Over HTTP: only the pipes the caller can see (rc15).
+    // Over HTTP: only the pipes the caller can see.
     if cx.caller.api {
         let caller = caller_access(cx).await?;
         if !caller.can_see_pipe(&pipe) {
@@ -376,7 +376,7 @@ pub async fn get_pipes(
         .map_err(|e| ToolError::other(e.to_string()))?;
     type Grouped = IndexMap<String, IndexMap<String, Vec<Pipe>>>;
     let mut grouped: Grouped = IndexMap::new();
-    // Over HTTP: only the pipes the caller can see (rc15).
+    // Over HTTP: only the pipes the caller can see.
     let caller = if cx.caller.api {
         Some(caller_access(cx).await?)
     } else {
@@ -617,7 +617,7 @@ async fn call_builtin(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, 
             )
             .await
             .map_err(|error| ToolError::permission(api_error_str(&error)))?;
-            // The pipe's sync status (rc15 C2), like a data post.
+            // The pipe's sync status, like a data post.
             crate::routes::sync_status::record_server_sync(
                 &conn,
                 &pipe,
@@ -1180,7 +1180,7 @@ async fn register_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> 
                 .await
                 .map_err(|error| ToolError::permission(api_error_str(&error)))?;
         }
-        // The new pipe is the caller's (rc15), and its SQL passes the SQL guard.
+        // The new pipe is the caller's, and its SQL passes the SQL guard.
         let stamped = access::guard::stamp_new_pipe(&caller, pipe.raw_parameters())
             .map_err(|e| ToolError::permission(e.detail_text()))?;
         access::guard::check_parameters(cx.state, &caller, &conn, &pipe, None, &stamped)
@@ -1265,7 +1265,7 @@ async fn edit_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
         meerschaum_core::value::apply_patch_maps(&old, &parameters)
     };
     if cx.caller.api {
-        // `access` and `locks` need the rights to change them; SQL passes the SQL guard (rc15).
+        // `access` and `locks` need the rights to change them; SQL passes the SQL guard.
         let caller = caller_access(cx).await?;
         new = access::guard::merge_edit(&caller, &old, new)
             .map_err(|e| ToolError::permission(e.detail_text()))?;
@@ -1294,45 +1294,44 @@ async fn edit_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
 }
 
 async fn read_sql(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
-    let query = args.get("query").map(Value::py_str).unwrap_or_default();
-    security::is_read_only_query(&query).map_err(ToolError::value)?;
-    // Protected instance tables are off-limits here too, not just to the pipe tools.
-    let stripped = security::strip_sql_noise(&query).unwrap_or_else(|_| query.clone());
-    let scan = if stripped.is_empty() {
-        &query
-    } else {
-        &stripped
+    use crate::sql_guard::{self, SqlError, SqlErrorKind, SqlPolicy};
+
+    let map_sql_err = |err: SqlError| match err.kind {
+        SqlErrorKind::InvalidQuery => ToolError::value(err.message),
+        SqlErrorKind::Forbidden => ToolError::permission(err.message),
     };
-    for word in security::words(scan) {
-        if is_protected(&word.to_lowercase()) {
-            return Err(ToolError::permission(format!(
-                "Refusing to query protected table '{word}'."
-            )));
-        }
-    }
-    // The scan above skips quoted identifiers and string literals (`"mrsm_users"`, a table named
-    // inside `query_to_xml('...')`): an API caller's SQL may not name an internal table at all.
+    let query = args.get("query").map(Value::py_str).unwrap_or_default();
     let ck = args
         .get("connector_keys")
         .map(Value::py_str)
         .unwrap_or_default();
     if cx.caller.api {
-        security::refuse_internal_tables(&query).map_err(ToolError::permission)?;
-        // Never the tables of pipes the caller cannot see, nor a connector for other teams
-        // (rc15; best effort: true isolation needs a database user per team).
+        // Never reach a connector reserved for other teams or unserved instances, nor the
+        // tables of pipes the caller cannot see (best effort: true isolation needs a
+        // database user per team).
         let caller = caller_access(cx).await?;
         // A named SQL backend must be one of the instances this API serves, even for an
         // administrator. Its own registrations determine the hidden tables, not the default's.
         connector(cx, Some(&ck))?;
         access::guard::check_connector_teams(cx.state, &caller, &ck)
             .map_err(|e| ToolError::permission(e.detail_text()))?;
-        if !caller.is_admin() {
+        let hidden = if caller.is_admin() {
+            None
+        } else {
             let index = access::pipe_index(cx.state, Some(&ck))
                 .await
                 .map_err(|e| ToolError::other(api_error_str(&e)))?;
-            crate::sql_guard::check_definition(&query, &index.hidden_targets(&caller))
-                .map_err(|e| ToolError::permission(e.replace("a SQL definition", "a query")))?;
-        }
+            Some(index.hidden_targets(&caller))
+        };
+        sql_guard::check_sql(
+            &query,
+            &SqlPolicy::ReadOnlyApiQuery {
+                hidden: hidden.as_ref(),
+            },
+        )
+        .map_err(map_sql_err)?;
+    } else {
+        sql_guard::check_sql(&query, &SqlPolicy::ReadOnlyStdioQuery).map_err(map_sql_err)?;
     }
     let limit = usize::try_from(clamp_limit(args.get("limit"))).unwrap_or(1);
     let offset =
@@ -1404,7 +1403,7 @@ async fn execute_action(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError>
     if let Err(m) = security::check_action_chain(&cx.server.config, &chain) {
         return fail(m);
     }
-    // A caller who is not an administrator (rc15): what the console offers, on the pipes it may
+    // A caller who is not an administrator: what the console offers, on the pipes it may
     // change, as for `POST /execute` and `POST /actions/{action}`.
     if let Some(caller) = remote_caller.as_ref()
         && !caller.no_auth

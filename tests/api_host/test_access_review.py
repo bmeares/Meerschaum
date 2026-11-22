@@ -2,17 +2,12 @@
 
 import json
 
-from tests.api_host._helpers import SIGN_IN, run_python, sandbox  # noqa: F401
-
-
-def _json(result):
-    assert result.returncode == 0, result.stderr[-6000:]
-    return json.loads(next(line[5:] for line in result.stdout.splitlines() if line.startswith('JSON:')))
+from tests.api_host._helpers import SIGN_IN, run_python, extract_json
 
 
 def test_unreadable_access_and_missing_pipeline_snapshots_are_not_public(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 from unittest import mock
 from meerschaum.api.dash import access
@@ -21,7 +16,7 @@ class Unreadable:
     parameters = {}  # A stale cache must not replace an unreadable registration.
     def get_parameters(self, **kw):
         raise RuntimeError('storage unavailable')
-with mock.patch.object(access, '_pipeline_registry', return_value=[]):
+with mock.patch.object(access, 'pipeline_registry', return_value=[]):
     definitions = access.visible_pipelines('sql:apihosttest', viewer=viewer,
         definitions={'private-pipeline': {'targets': []}})
 print('JSON:' + json.dumps({
@@ -41,7 +36,7 @@ print('JSON:' + json.dumps({
 
 def test_new_pipeline_validates_its_team_before_writing_and_starts_with_access(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SIGN_IN + '''
+    out = extract_json(run_python(root, plugins, SIGN_IN + '''
 import json
 from copy import deepcopy
 import meerschaum as mrsm
@@ -56,7 +51,7 @@ conn = get_api_connector()
 session = sign_in('review-owner', teams={'review-team': 'member'})
 member = mrsm.Pipe('review:src', 'member', instance=conn)
 assert member.register()[0]
-draft = {'name': 'review-invalid', 'members': [access._ref(str(conn), 'review:src', 'member', None)]}
+draft = {'name': 'review-invalid', 'members': [access.pipe_ref(str(conn), 'review:src', 'member', None)]}
 context_value.set(AttributeDict(triggered_inputs=[{'prop_id': 'pipeline-new-create.n_clicks', 'value': 1}]))
 create_pipeline(1, draft, False, {'registry': str(conn)}, {}, session, 'another-team', 'private')
 invalid_written = 'review-invalid' in list_pipelines(conn)
@@ -81,7 +76,7 @@ print('JSON:' + json.dumps({'invalid_written': invalid_written, 'first': capture
 
 def test_run_redaction_covers_mapping_keys_and_escaped_pipe_labels(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 from unittest import mock
 from meerschaum.api.dash import access, engine
@@ -109,25 +104,26 @@ print('JSON:' + json.dumps({'payload': payload, 'label': label, 'empty': empty,
 
 def test_registration_uses_the_server_lock_and_never_falls_back_on_failure(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
-import io, json
-import urllib.error
+    out = extract_json(run_python(root, plugins, '''
+import json
 from urllib.parse import parse_qs
 from unittest import mock
 from meerschaum.api import get_api_connector
-from meerschaum.api.dash import registration, execute
+from meerschaum.api.dash import registration
+from meerschaum.api.host._server_client import (
+    InMemoryTransport, ServerUnavailableError, use_transport,
+)
 requests = []
-def refused(request, **kwargs):
-    requests.append({'url': request.full_url, 'form': parse_qs(request.data.decode())})
-    return io.BytesIO(json.dumps([False, 'Registration is closed.']).encode())
-with mock.patch.object(execute, 'server_url', return_value='http://127.0.0.1:19997'), \
-     mock.patch.object(registration, '_users', return_value=[]):
-    with mock.patch('urllib.request.urlopen', side_effect=refused):
+def refused(req):
+    requests.append({'url': req.path, 'form': parse_qs((req.body or b'').decode())})
+    return (200, [False, 'Registration is closed.'])
+with mock.patch.object(registration, '_users', return_value=[]):
+    with use_transport(InMemoryTransport(handler=refused)):
         first = registration.create_first_admin('review-first', 'correct-horse-9', 'correct-horse-9')
         with mock.patch.object(registration, 'first_run', return_value=False), \
              mock.patch.object(registration, 'self_registration_open', return_value=True):
             visitor = registration.register_account('review-visitor', 'correct-horse-9', email='visitor@example.com')
-    with mock.patch('urllib.request.urlopen', side_effect=urllib.error.URLError('offline')):
+    with use_transport(InMemoryTransport(handler=lambda req: ServerUnavailableError('offline'))):
         unavailable = registration.create_first_admin('review-offline', 'correct-horse-9', 'correct-horse-9')
 print('JSON:' + json.dumps({'requests': requests, 'first': first, 'visitor': visitor,
                           'unavailable': unavailable, 'users': get_api_connector().get_users()}))
@@ -144,13 +140,13 @@ print('JSON:' + json.dumps({'requests': requests, 'first': first, 'visitor': vis
 
 def test_everyone_can_be_the_explicit_primary_team_of_a_team_member(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, SIGN_IN + '''
+    out = extract_json(run_python(root, plugins, SIGN_IN + '''
 import json
 from meerschaum.api.dash import access, users
 session = sign_in('review-primary', teams={'review-team': 'member'})
 assert users.set_user_rights('review-primary', 'editor', primary_team='Everyone')[0]
 access.forget()
-viewer = access.get_viewer(session)
+viewer = access.resolve_viewer(session)
 row = next(row for row in users.get_user_rows() if row['username'] == 'review-primary')
 print('JSON:' + json.dumps({'viewer': viewer.primary_team, 'row': row['primary_team']}))
 '''))
@@ -159,7 +155,7 @@ print('JSON:' + json.dumps({'viewer': viewer.primary_team, 'row': row['primary_t
 
 def test_everyone_managers_keep_their_management_rights_in_the_principal(sandbox):
     root, plugins = sandbox
-    out = _json(run_python(root, plugins, '''
+    out = extract_json(run_python(root, plugins, '''
 import json
 from meerschaum.api.dash import access
 manager = access.make_viewer('manager', teams={'Everyone': 'manager'})

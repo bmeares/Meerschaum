@@ -227,13 +227,25 @@ impl SqlConnector {
     /// `get_tables(mrsm_instance=self, create=create)`: ensure the instance tables (and the
     /// internal schema) exist. Returns whether they are available.
     pub async fn ensure_instance_tables(&self, create: bool) -> bool {
+        self.ensure_instance_tables_checked(create)
+            .await
+            .unwrap_or(false)
+    }
+
+    /// [`ensure_instance_tables`](Self::ensure_instance_tables) propagating lazy schema discovery
+    /// errors.
+    pub(crate) async fn ensure_instance_tables_checked(
+        &self,
+        create: bool,
+    ) -> meerschaum_connector::ConnectorResult<bool> {
+        self.ensure_schema().await?;
         if self.tables_ready() {
-            return true;
+            return Ok(true);
         }
         if !create {
-            return self
+            return Ok(self
                 .table_exists("mrsm_pipes", self.instance_schema())
-                .await;
+                .await);
         }
         // `create_schemas(conn, [conn.internal_schema])`.
         if !self.flavor.no_schema()
@@ -265,7 +277,7 @@ impl SqlConnector {
             self.ensure_unique_keys().await;
             self.mark_tables_ready();
         }
-        ok
+        Ok(ok)
     }
 
     /// `_log_temporary_tables_creation(tables, ready_to_drop, create)`.

@@ -112,3 +112,11 @@ exclude = [
     # Test sources of the extension crate are not shipped in the sdist.
     "crates/meerschaum-py/tests/**",
 ]
+
+[tool.pytest.ini_options]
+# Setting `norecursedirs` replaces pytest's defaults, so they are repeated first (`.*` keeps `.git`,
+# `.claude`, `.venv*` and the other hidden directories out of collection).
+norecursedirs = [
+    "*.egg", ".*", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}",
+    "portable", "test_root", "tests/data", "docs", "target",
+]

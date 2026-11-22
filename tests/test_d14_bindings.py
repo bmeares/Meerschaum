@@ -1,5 +1,5 @@
 """
-D14 runway parity (wave 8): the Rust implementations of the formerly Python-core paths.
+D14 runway parity: the Rust implementations of the formerly Python-core paths.
 
 Each test runs a call in Rust and compares the result with what the parity-phase Python mode
 returned (`tests/oracle/test_d14_bindings.json`: a recording of that mode, not v4.1.4 output, see

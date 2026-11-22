@@ -1,4 +1,4 @@
-//! Fail-fast first connections (D23-style polish for rc2, DECISIONS item 23).
+//! Fail-fast first connections.
 //!
 //! `sqlx` retries a refused connection until its pool acquire timeout (30 s), and a host that
 //! never answers holds the first query for as long. The first connection a driver makes in a
@@ -117,6 +117,7 @@ pub(crate) fn map_sqlx(spec: &ConnectionSpec, e: sqlx::Error, elapsed: Duration)
 }
 
 /// Map a native-driver (text) error raised while establishing the first connection.
+#[cfg(any(feature = "mssql", feature = "duckdb", feature = "oracle"))]
 pub(crate) fn map_text(spec: &ConnectionSpec, e: SqlError, elapsed: Duration) -> SqlError {
     let SqlError::Database(text) = &e else {
         return e;

@@ -72,7 +72,7 @@ pub async fn read(name: &str, vars: &Map, cx: &ToolCx<'_>) -> Result<String, Too
             )]))))
         }
         "meerschaum_connectors" => {
-            // A connector reserved for other teams is not listed (rc15).
+            // A connector reserved for other teams is not listed.
             let caller = super::tools::caller_access(cx).await?;
             let mut keys = Vec::new();
             for (typ, labels) in cx.state.connectors().iter() {

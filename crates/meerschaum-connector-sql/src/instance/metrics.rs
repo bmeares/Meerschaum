@@ -18,6 +18,7 @@ impl SqlConnector {
         bucket_width_micros: i64,
         max_groups: usize,
     ) -> ConnectorResult<Option<(Vec<MetricAggregate>, bool)>> {
+        self.ensure_schema().await?;
         let Some(pipe) = self.engine_state_pipe(&self.keys(), "engine_metrics") else {
             return Ok(None);
         };

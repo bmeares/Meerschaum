@@ -19,8 +19,9 @@ use crate::error::{Result, SqlError};
 pub(crate) trait Backend: 'static {
     type DB: Database;
     const DYNAMIC_TYPES: bool = false;
-    /// A cheap statement run before describing an empty read, for drivers whose connection
-    /// keeps a stale schema until a statement touches the database (SQLite).
+    /// A cheap statement run before describing an empty read inside a transaction, for drivers
+    /// whose connection keeps a stale schema until a statement touches the database (SQLite; its
+    /// pools run it on every checkout, see `sqlite::refresh_schema_on_acquire`).
     const SCHEMA_REFRESH: Option<&'static str> = None;
     /// Prepare every statement once per connection (`persistent(true)`, bounded by the statement
     /// cache) instead of preparing and closing it around each execution. `sqlx` 0.9.0 does not set
@@ -164,10 +165,8 @@ where
     // `sqlx` 0.9 has no uncached describe (`Executor::describe` is `offline`-only), and `prepare`
     // hands back the connection's cached statement with its old columns after a table was
     // altered or recreated. An empty read is rare, so the cache is cleared first.
+    // A SQLite pool reloads a changed schema when it hands the connection out.
     let _ = sqlx::Connection::clear_cached_statements(&mut *conn).await;
-    if let Some(refresh) = B::SCHEMA_REFRESH {
-        let _ = sqlx::Executor::execute(&mut *conn, sqlx::raw_sql(refresh)).await;
-    }
     match (&mut *conn)
         .prepare(AssertSqlSafe(marked.as_str()).into_sql_str())
         .await

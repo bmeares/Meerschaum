@@ -39,12 +39,9 @@ use meerschaum_core::value::Value;
 use crate::config::Seconds;
 use crate::startup::StartupPolicy;
 
-#[path = "supervisor_deadline.rs"]
 mod deadline;
-#[path = "supervisor_owner.rs"]
 mod owner;
 pub use deadline::ComputeDeadline;
-#[path = "supervisor_exec.rs"]
 mod exec;
 pub use exec::seal_native_command;
 pub use owner::{

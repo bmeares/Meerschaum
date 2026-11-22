@@ -52,3 +52,6 @@ meerschaum-connector-api = { workspace = true }
 bytes = "1"
 meerschaum-connector-sql = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
+
+[lints]
+workspace = true

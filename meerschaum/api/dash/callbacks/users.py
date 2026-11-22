@@ -23,14 +23,14 @@ from dash.dependencies import Input, Output, State, ALL
 from dash.exceptions import PreventUpdate
 from dash import no_update
 from meerschaum.api.dash.components import alert_from_success_tuple
-from meerschaum.api.dash import access
+from meerschaum.api.dash import access, teams as team_records
+from meerschaum.api.dash.viewer import GRID_PERMISSIONS
 from meerschaum.api.dash import team_setup
 from meerschaum.api.dash.users import (
     build_users_listing,
     build_user_detail,
     build_teams_table,
     build_team_members_editor,
-    viewer,
     get_user_rows,
     visible_teams,
     may_manage_team,
@@ -101,8 +101,8 @@ def render_users_page(
     """
     ### The user directory is not public: this callback is reachable directly via
     ### `/dash/_dash-update-component`, not only by navigating the page.
-    who = viewer(session_store_data)
-    if not who['active']:
+    who = _viewer(session_store_data)
+    if not who.active:
         return (
             html.Div(
                 [html.H5('Sign in to see the users'), dbc.Button('Sign in', href='/dash/login', color='primary')],
@@ -111,6 +111,7 @@ def render_users_page(
             HIDDEN, 1, 1, HIDDEN, True, HIDDEN, HIDDEN, HIDDEN, HIDDEN,
         )
 
+    is_admin = bool(who.no_auth or who.is_admin)
     username = _parse_username_from_pathname(pathname)
     if username:
         return (
@@ -120,11 +121,11 @@ def render_users_page(
 
     if (active_tab or 'users') == 'teams':
         try:
-            teams = visible_teams(access.list_teams(), who)
-            users_count = len(get_user_rows(teams=[])) if who['admin'] else None
+            teams = visible_teams(team_records.list_teams(), who)
+            users_count = len(get_user_rows(teams=[])) if is_admin else None
             content = build_teams_table(
                 teams, who,
-                pipe_counts=(team_pipe_counts() if who['admin'] or teams else {}),
+                pipe_counts=(team_pipe_counts() if is_admin or teams else {}),
                 users_count=users_count,
             )
         except Exception as e:
@@ -145,7 +146,7 @@ def render_users_page(
             ])
         return (
             content, HIDDEN, 1, 1, HIDDEN,
-            not who['admin'], {}, HIDDEN, (SHOWN if who['admin'] else HIDDEN), SHOWN,
+            not is_admin, {}, HIDDEN, (SHOWN if is_admin else HIDDEN), SHOWN,
         )
 
     triggered_id = getattr(dash.callback_context, 'triggered_id', None)
@@ -168,9 +169,9 @@ def render_users_page(
             'justify-content': 'center',
             'display': 'flex' if total_pages > 1 else 'none',
         },
-        not who['admin'],
+        not is_admin,
         {},
-        (SHOWN if who['admin'] else HIDDEN),
+        (SHOWN if is_admin else HIDDEN),
         HIDDEN,
         SHOWN,
     )
@@ -311,10 +312,11 @@ def open_users_dialog(add_clicks, action_clicks, *cancel_clicks_and_session):
     trigger = ctx.triggered_id
     if trigger in ('users-add-cancel', 'users-edit-cancel', 'users-password-cancel', 'users-delete-cancel'):
         return _dialog()
-    if not viewer(session_store_data)['admin']:
+    who = _viewer(session_store_data)
+    if not _is_admin(who):
         raise PreventUpdate
     try:
-        teams = access.list_teams()
+        teams = team_records.list_teams()
     except Exception:
         teams = []
     team_names = [team['name'] for team in teams]
@@ -387,10 +389,19 @@ dash_app.clientside_callback(
 )
 
 
+def _viewer(session_store_data) -> access.Viewer:
+    """Resolve the callback's viewer with the current team selection."""
+    return access.resolve_viewer(session_store_data, fresh=True)
+
+
+def _is_admin(who: access.Viewer) -> bool:
+    return bool(who.no_auth or (who.signed_in and who.is_admin))
+
+
 def _admin_or_refusal(session_store_data):
     """The viewer when they are an administrator, else the alert of a refusal."""
-    who = viewer(session_store_data)
-    if not who['admin']:
+    who = _viewer(session_store_data)
+    if not _is_admin(who):
         return None, alert_from_success_tuple((False, "Only administrators can change users."))
     return who, None
 
@@ -427,7 +438,7 @@ def submit_add_user(
     if role not in ('default', 'viewer', 'editor', 'operator', None):
         return no_update, alert_from_success_tuple((False, "Choose a role.")), no_update, no_update
     try:
-        known = set(access.team_names())
+        known = set(team_records.team_names())
     except Exception:
         known = set()
     teams = [team for team in (teams or []) if team in known]
@@ -476,7 +487,7 @@ def submit_edit_user(
         return no_update, refusal, no_update, no_update
     username = target.get('username')
     try:
-        all_teams = access.list_teams()
+        all_teams = team_records.list_teams()
     except Exception as e:
         return no_update, alert_from_success_tuple((False, f"Could not read the teams: {e}")), no_update, no_update
     rows = get_user_rows(teams=all_teams)
@@ -492,7 +503,7 @@ def submit_edit_user(
     manages = [team for team in (manages or []) if team in known]
     permissions = sorted({
         permission for group in (grids or []) for permission in (group or [])
-        if permission in access.GRID_PERMISSIONS
+        if permission in GRID_PERMISSIONS
     })
     role = role if role in ('default', 'viewer', 'editor', 'operator', 'custom') else 'default'
     if primary not in set(teams) | set(manages) | {access.EVERYONE}:
@@ -522,7 +533,7 @@ def submit_edit_user(
     demoted = current['type'] == 'admin' and user_type != 'admin'
     end_user_sessions(
         username,
-        keep_session_id=(_session_id(session_store_data) if username == who['username'] else None),
+        keep_session_id=(_session_id(session_store_data) if username == who.username else None),
         refresh_only=not demoted,
     )
     words = 'an admin' if user_type == 'admin' else (
@@ -567,7 +578,7 @@ def submit_reset_password(n_clicks, target, password, confirm, refresh, session_
         return no_update, alert_from_success_tuple((False, message)), no_update, no_update
     end_user_sessions(
         username,
-        keep_session_id=(_session_id(session_store_data) if username == who['username'] else None),
+        keep_session_id=(_session_id(session_store_data) if username == who.username else None),
     )
     return (
         False,
@@ -652,7 +663,7 @@ def _team_by_name(name: Optional[str]) -> Optional[Dict[str, Any]]:
     if not name:
         return None
     try:
-        return next((team for team in access.list_teams() if team['name'] == name), None)
+        return next((team for team in team_records.list_teams() if team['name'] == name), None)
     except Exception:
         return None
 
@@ -736,9 +747,9 @@ def open_teams_dialog(new_clicks, action_clicks, *cancel_clicks_and_session):
     trigger = ctx.triggered_id
     if trigger in ('teams-new-cancel', 'teams-rename-cancel', 'teams-delete-cancel', 'teams-members-close'):
         return _team_dialog()
-    who = viewer(session_store_data)
+    who = _viewer(session_store_data)
     if trigger == 'teams-new-button':
-        if not who['admin']:
+        if not _is_admin(who):
             raise PreventUpdate
         return _team_dialog('new')
     if not isinstance(trigger, dict) or trigger.get('type') != 'team-action':
@@ -747,7 +758,7 @@ def open_teams_dialog(new_clicks, action_clicks, *cancel_clicks_and_session):
     action = trigger.get('action')
     if team is None or action not in ('rename', 'delete', 'members'):
         raise PreventUpdate
-    if action in ('rename', 'delete') and (not who['admin'] or team['builtin']):
+    if action in ('rename', 'delete') and (not _is_admin(who) or team['builtin']):
         raise PreventUpdate
     if action == 'members':
         if not may_manage_team(who, team):
@@ -758,15 +769,14 @@ def open_teams_dialog(new_clicks, action_clicks, *cancel_clicks_and_session):
     return _team_dialog('rename', team)
 
 
-def _members_body(team: Dict[str, Any], who: Optional[Dict[str, Any]] = None) -> Any:
+def _members_body(team: Dict[str, Any], who: access.Viewer) -> Any:
+    if who.acting_team is not None or who.is_isolated:
+        return build_team_members_editor(team, [])
     from meerschaum.api import get_api_connector
     try:
         user_names = sorted(str(name) for name in (get_api_connector().get_users() or []))
     except Exception:
         user_names = []
-    ### A walled-off manager does not learn the other accounts: administrators add new members.
-    if who is not None and getattr(who.get('viewer'), 'is_isolated', False):
-        user_names = [name for name in user_names if name in team['members']]
     return build_team_members_editor(team, user_names)
 
 
@@ -795,7 +805,7 @@ def _options(values: List[str], none_label: Optional[str] = None) -> List[Dict[s
 )
 def fill_new_team(is_open, session_store_data):
     """When New team opens: the connectors and plugins to choose from, and a blank form."""
-    if not is_open or not viewer(session_store_data)['admin']:
+    if not is_open or not _is_admin(_viewer(session_store_data)):
         raise PreventUpdate
     bases = team_setup.database_bases()
     storage = [
@@ -857,10 +867,10 @@ def submit_new_team(
     """Create a team with its storage and settings (administrators)."""
     if not n_clicks:
         raise PreventUpdate
-    if not viewer(session_store_data)['admin']:
+    if not _is_admin(_viewer(session_store_data)):
         return no_update, alert_from_success_tuple((False, "Only administrators can create teams.")), no_update, no_update
     try:
-        existing = access.team_names()
+        existing = team_records.team_names()
     except Exception as e:
         return no_update, alert_from_success_tuple((False, str(e))), no_update, no_update
     valid, message = validate_team_name(name, existing)
@@ -915,7 +925,7 @@ def open_team_settings(action_clicks, cancel_clicks, session_store_data):
         return [False, no_update] + keep
     if not isinstance(trigger, dict) or trigger.get('action') != 'settings':
         raise PreventUpdate
-    if not viewer(session_store_data)['admin']:
+    if not _is_admin(_viewer(session_store_data)):
         raise PreventUpdate
     team = _team_by_name(trigger.get('index'))
     if team is None or team['builtin']:
@@ -973,7 +983,7 @@ def submit_team_settings(
     """Save a team's settings (administrators)."""
     if not n_clicks or not target or not target.get('team'):
         raise PreventUpdate
-    if not viewer(session_store_data)['admin']:
+    if not _is_admin(_viewer(session_store_data)):
         return no_update, alert_from_success_tuple((False, "Only administrators can change a team's settings.")), no_update, no_update
     team = _team_by_name(target['team'])
     if team is None or team['builtin']:
@@ -1012,7 +1022,7 @@ def submit_rename_team(n_clicks, target, new_name, refresh, session_store_data):
     """Rename a team (administrators; never Everyone). Its pipes and jobs follow the new name."""
     if not n_clicks or not target or target.get('action') != 'rename':
         raise PreventUpdate
-    if not viewer(session_store_data)['admin']:
+    if not _is_admin(_viewer(session_store_data)):
         return no_update, alert_from_success_tuple((False, "Only administrators can rename teams.")), no_update, no_update
     team = _team_by_name(target.get('team'))
     if team is None or team['builtin']:
@@ -1020,12 +1030,12 @@ def submit_rename_team(n_clicks, target, new_name, refresh, session_store_data):
     new_name = str(new_name or '').strip()
     if new_name == team['name']:
         return False, [], no_update, no_update
-    others = [name for name in access.team_names() if name != team['name']]
+    others = [name for name in team_records.team_names() if name != team['name']]
     valid, message = validate_team_name(new_name, others)
     if not valid:
         return no_update, alert_from_success_tuple((False, message)), no_update, no_update
     attributes = team_setup.get_team_attributes(team['name'])
-    success, message = access.rename_team(team['name'], new_name)
+    success, message = team_records.rename_team(team['name'], new_name)
     if not success:
         return no_update, alert_from_success_tuple((False, message)), no_update, no_update
     ### The team's Grafana organization (its saved id) keeps its dashboards under the new name.
@@ -1065,7 +1075,7 @@ def submit_delete_team(n_clicks, target, typed_name, refresh, session_store_data
     """Delete a team (administrators; never Everyone): its pipes and jobs move to Everyone."""
     if not n_clicks or not target or target.get('action') != 'delete':
         raise PreventUpdate
-    if not viewer(session_store_data)['admin']:
+    if not _is_admin(_viewer(session_store_data)):
         return no_update, alert_from_success_tuple((False, "Only administrators can delete teams.")), no_update, no_update
     team = _team_by_name(target.get('team'))
     if team is None or team['builtin']:
@@ -1073,7 +1083,7 @@ def submit_delete_team(n_clicks, target, typed_name, refresh, session_store_data
     if (typed_name or '').strip() != team['name']:
         return no_update, alert_from_success_tuple((False, "Type the team's name to delete it.")), no_update, no_update
     attributes = team_setup.get_team_attributes(team['name'])
-    success, message = access.delete_team(team['name'])
+    success, message = team_records.delete_team(team['name'])
     if not success:
         return no_update, alert_from_success_tuple((False, message)), no_update, no_update
     ### The team's Grafana organization is retired (its dashboards stay).
@@ -1106,21 +1116,26 @@ def edit_team_members(add_clicks, roles, remove_clicks, new_member, new_role, ta
     if not target or target.get('action') != 'members' or not ctx.triggered:
         raise PreventUpdate
     trigger = ctx.triggered_id
-    who = viewer(session_store_data)
+    who = _viewer(session_store_data)
     team = _team_by_name(target.get('team'))
     if team is None or not may_manage_team(who, team):
         return no_update, alert_from_success_tuple((False, "You may not change this team's members.")), no_update
-    from meerschaum.api import get_api_connector
-    users = set(str(name) for name in (get_api_connector().get_users() or []))
     if trigger == 'team-add-button':
         if not add_clicks or not new_member:
             raise PreventUpdate
+        if who.acting_team is not None:
+            full_view = 'All teams (Admin)' if who.is_real_admin else 'All teams'
+            return no_update, alert_from_success_tuple((
+                False, f"Switch to {full_view} to add members.",
+            )), no_update
+        from meerschaum.api import get_api_connector
+        users = set(str(name) for name in (get_api_connector().get_users() or []))
         if new_member not in users:
             return no_update, alert_from_success_tuple((False, f"User '{new_member}' does not exist.")), no_update
         role = 'manager' if new_role == 'manager' else 'member'
         if team['builtin'] and role != 'manager':
             raise PreventUpdate
-        success, message = access.set_team_member(team['name'], new_member, role)
+        success, message = team_records.set_team_member(team['name'], new_member, role)
     elif isinstance(trigger, dict) and trigger.get('type') == 'team-member-role':
         username = trigger.get('index')
         value = next((item['value'] for item in ctx.triggered if item.get('value')), None)
@@ -1130,16 +1145,16 @@ def edit_team_members(add_clicks, roles, remove_clicks, new_member, new_role, ta
             raise PreventUpdate
         ### Everyone's members are every user: a manager made a member is just removed.
         if team['builtin'] and value == 'member':
-            success, message = access.set_team_member(team['name'], username, None)
+            success, message = team_records.set_team_member(team['name'], username, None)
         else:
-            success, message = access.set_team_member(team['name'], username, value)
+            success, message = team_records.set_team_member(team['name'], username, value)
     elif isinstance(trigger, dict) and trigger.get('type') == 'team-member-remove':
         if not any(remove_clicks or []):
             raise PreventUpdate
         username = trigger.get('index')
         if username not in team['members']:
             raise PreventUpdate
-        success, message = access.set_team_member(team['name'], username, None)
+        success, message = team_records.set_team_member(team['name'], username, None)
     else:
         raise PreventUpdate
     access.forget()

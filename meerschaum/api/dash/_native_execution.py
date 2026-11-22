@@ -4,7 +4,7 @@ This file grants no transport/backend authority. Only a fixed authenticated Main
 may restore an action scope; normal Core object/Team rules remain unchanged.
 """
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import json
 import uuid
 
@@ -20,7 +20,7 @@ class NativeExecution:
 
 
 def _binding(session_id):
-    from meerschaum.api.dash.sessions import get_session_data
+    from meerschaum.api.dash.session_store import get_session_data
     data = get_session_data(session_id, use_cache=False)
     if not isinstance(data, dict):
         return None
@@ -32,51 +32,32 @@ def _binding(session_id):
 
 
 def _exchange(session_id, path, payload=None):
-    import urllib.parse
-    import urllib.request
-    from meerschaum.api.dash.execute import server_url
+    from meerschaum.api.host._server_client import (
+        ResponseTooLargeError, ServerHTTPError, SessionCookieAuth, get_client,
+    )
     if path == '/execute/capabilities' and payload is None:
         limit, timeout = 4096, 3
     elif path == '/mcp' and payload is not None:
         limit, timeout = 65536, 70
     else:
         raise ValueError('Only fixed native console surfaces are supported.')
-    base = server_url()
-    if not isinstance(base, str):
+    client = get_client()
+    if not client.available:
         raise ValueError('Native execution projection is unavailable.')
-    url = urllib.parse.urlsplit(base)
-    if (url.scheme not in ('http', 'https') or not url.hostname or url.username
-            or url.password or url.path not in ('', '/') or url.query or url.fragment):
-        raise ValueError('Invalid trusted Main origin.')
-
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *args, **kwargs):
-            return None
-
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-    headers = {'accept': 'application/json', 'cookie': 'mrsm-session-id=' + session_id}
-    # Preserve an explicitly presented bearer ceiling. It may refuse or narrow this
-    # same-user console request; the cookie must never replace it with broader scopes.
-    from flask import has_request_context, request as browser_request
-    if has_request_context() and 'Authorization' in browser_request.headers:
-        headers['authorization'] = browser_request.headers['Authorization']
-    data = None
-    if payload is not None:
-        data = json.dumps(payload, separators=(',', ':')).encode()
-        if len(data) > 16384:
-            raise ValueError('The typed pipe request exceeds its bound.')
-        headers['content-type'] = 'application/json'
-    request = urllib.request.Request(
-        base.rstrip('/') + path, data=data, headers=headers,
-        method='GET' if payload is None else 'POST',
-    )
-    with opener.open(request, timeout=timeout) as response:
-        if response.status != 200:
-            raise ValueError('Native execution projection was refused.')
-        body = response.read(limit + 1)
-    if len(body) > limit:
-        raise ValueError('Native execution projection exceeds its bound.')
-    return json.loads(body.decode('utf-8'))
+    try:
+        return client.request_json(
+            'GET' if payload is None else 'POST',
+            path,
+            auth=SessionCookieAuth(session_id, forward_auth_ceiling=True),
+            json_body=payload,
+            timeout=timeout,
+            max_bytes=limit,
+            max_request_bytes=(16384 if payload is not None else None),
+        )
+    except ServerHTTPError as e:
+        raise ValueError('Native execution projection was refused.') from e
+    except ResponseTooLargeError as e:
+        raise ValueError('Native execution projection exceeds its bound.') from e
 
 
 def _read(session_id):
@@ -115,15 +96,8 @@ def _validate(value, viewer):
     return value
 
 
-def _principal(viewer):
-    from meerschaum.api.dash.access import _principal as object_principal
-    return object_principal(viewer)
-
-
 def _replace(viewer, permissions, execution):
-    projected = replace(viewer, permissions=frozenset(permissions), native_execution=execution)
-    projected.principal = _principal(projected)
-    return projected
+    return viewer.narrowed(permissions=frozenset(permissions), native_execution=execution)
 
 
 def api_only(viewer):
@@ -134,8 +108,8 @@ def api_only(viewer):
 def _permissions(viewer):
     permissions = frozenset(viewer.permissions)
     if '*' in permissions:
-        from meerschaum.api.dash.access import all_permissions
-        permissions = (permissions - {'*'}) | frozenset(all_permissions())
+        import meerschaum.core.access as core_access
+        permissions = (permissions - {'*'}) | frozenset(str(name) for name in core_access.ALL_PERMISSIONS)
     return permissions
 
 

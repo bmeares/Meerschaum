@@ -2,11 +2,27 @@
 
 use super::*;
 
+/// Which router mounted the terminal handler: console routes vs private executor websocket.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum RouteKind {
+    /// `/webterm/{session_id}` and `/websocket/{session_id}` on the console router.
+    Console,
+    /// Private executor `/websocket/{session_id}` requiring signed gateway identity and leased
+    /// sessions (never interprets console session UUIDs or permits `--no-auth`).
+    Executor,
+}
+
 #[derive(Clone)]
 pub(super) struct Inner {
     pub(super) state: AppState,
     pub(super) config: WebtermConfig,
-    pub(super) executor: bool,
+    pub(super) kind: RouteKind,
+}
+
+impl Inner {
+    pub(super) fn is_executor(&self) -> bool {
+        self.kind == RouteKind::Executor
+    }
 }
 
 /// The `/webterm/{session_id}` and `/websocket/{session_id}` routes. Merge them only when the
@@ -20,7 +36,7 @@ pub fn routes(state: AppState, config: WebtermConfig) -> Router {
         .with_state(Inner {
             state,
             config,
-            executor: false,
+            kind: RouteKind::Console,
         })
 }
 
@@ -32,7 +48,7 @@ pub fn executor_routes(state: AppState, config: WebtermConfig) -> Router {
         .with_state(Inner {
             state,
             config,
-            executor: true,
+            kind: RouteKind::Executor,
         })
 }
 
@@ -113,28 +129,36 @@ pub(super) fn team_terminal_refusal(reason: &str) -> String {
 /// Who `session_id` may open a terminal as. `fresh` reads the user's identity now instead of
 /// from the access cache (a websocket, and every check of an open one).
 pub(super) async fn authorize(inner: &Inner, session_id: &str, fresh: bool) -> Access {
-    if inner.executor {
-        let Some(caller) = crate::executor::gateway::current() else {
-            return Access::Denied;
-        };
-        let name = match inner.config.sessions.username(session_id).await {
-            Ok(Some(name)) => name,
-            Ok(None) => return Access::Denied,
-            Err(_) => return Access::Unavailable,
-        };
-        return match inner.config.sessions.restricted(session_id).await {
-            Ok(restricted) => Access::Granted {
-                name,
-                mode: if restricted {
-                    TermMode::Restricted
-                } else {
-                    TermMode::Team(caller.claims.team_id.to_string())
-                },
-                team: None,
-            },
-            Err(_) => Access::Unavailable,
-        };
+    match inner.kind {
+        RouteKind::Executor => authorize_executor(&*inner.config.sessions, session_id).await,
+        RouteKind::Console => authorize_console(inner, session_id, fresh).await,
     }
+}
+
+async fn authorize_executor(sessions: &dyn SessionLookup, session_id: &str) -> Access {
+    let Some(caller) = crate::executor::gateway::current() else {
+        return Access::Denied;
+    };
+    let name = match sessions.username(session_id).await {
+        Ok(Some(name)) => name,
+        Ok(None) => return Access::Denied,
+        Err(_) => return Access::Unavailable,
+    };
+    match sessions.restricted(session_id).await {
+        Ok(restricted) => Access::Granted {
+            name,
+            mode: if restricted {
+                TermMode::Restricted
+            } else {
+                TermMode::Team(caller.claims.team_id.to_string())
+            },
+            team: None,
+        },
+        Err(_) => Access::Unavailable,
+    }
+}
+
+async fn authorize_console(inner: &Inner, session_id: &str, fresh: bool) -> Access {
     // PARITY: `is_session_authenticated` is true for everyone under `--no-auth`; the terminal is
     // named after the session then (`username or session_id`).
     if inner.state.config.no_auth {
@@ -158,7 +182,7 @@ pub(super) async fn authorize(inner: &Inner, session_id: &str, fresh: bool) -> A
 /// Who `username` may open a terminal as (the part of [`authorize`] after the session).
 pub(super) async fn authorize_user(state: &AppState, username: &str, fresh: bool) -> Access {
     let username = username.to_string();
-    // FIX (intentional v4 change, rc15 access model): v4 gave every logged-in user a shell
+    // FIX (intentional v4 change, access model): v4 gave every logged-in user a shell
     // unless `--secure`; the terminal now needs `webterm:use` (administrators, the role
     // `operator`, or the permission given), and `--secure` keeps it for administrators. v4 also
     // asked only the session store: the session's user must still be a user of the instance.
