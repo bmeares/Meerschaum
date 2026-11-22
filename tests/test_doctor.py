@@ -7,7 +7,7 @@
 `meerschaum.actions.actions['doctor']` run the same native dispatcher in-process, on a throwaway
 SQLite instance (the sqlite flavor needs no service). The binary-level behavior (shadowing
 `meerschaum` copies, unreachable servers, read-only runs) is covered by
-`crates/meerschaum-cli/tests/doctor.rs`.
+`crates/meerschaum-cli/tests/shell_cli_suite/doctor.rs`.
 
 Run with:
     PYTHONPATH=$(pwd) MRSM_ROOT_DIR=./test_root MRSM_PLUGINS_DIR=./tests/plugins \\

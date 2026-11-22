@@ -1,7 +1,7 @@
 //! Actual Main HTTP extension discovery and native confined Api invocation.
-use meerschaum_cli::executor_client::Controller;
-use meerschaum_cli::executor_jobs::Catalog;
-use meerschaum_cli::executor_registry::Registry;
+use meerschaum_cli::executor::client::Controller;
+use meerschaum_cli::executor::jobs::Catalog;
+use meerschaum_cli::executor::registry::Registry;
 use meerschaum_core::access::{Team, TeamRole};
 use meerschaum_core::config::{Config, ConfigOptions};
 use meerschaum_core::users::User;

@@ -125,7 +125,7 @@ Dependencies point down only; `meerschaum-core` is a leaf; `cli` and `py` are th
 | `meerschaum-server` | `axum` API (every v4 route + `/engine/*` + `POST /execute`), OAuth2/JWT/tokens, rate limits, route allowlists, execute policy, team execution, team-executor control (`executor/`), the API-host proxy (`web.rs`), web terminal, MCP (`/mcp` + stdio) |
 | `meerschaum-web` | web terminal page and assets (`/webterm/...`, vendored xterm.js), job-log SSE, native plugin pages (`/_mrsm/native-pages`), console sessions, Grafana team organizations |
 | `meerschaum-plugin` | native plugin SDK: `Plugin` trait, `export_plugin!`, C ABI (`mrsm_plugin_v1`, Arrow C stream), loader, discovery, single-file `.rs` plugins and their confined compilation |
-| `meerschaum-cli` | the CLI library: clap spec/argparse parity, dispatch, native actions (`src/native/`), the reedline shell (`src/shell/`), `start api`/`start mcp`/`start executor`, team executor client and process (`executor/`, `executor_*`, `server/executor/`), team sandbox enforcement (`team_*`), source fetch (`source_fetch_*`), venv accounting, engine views, self-upgrade |
+| `meerschaum-cli` | the CLI library: clap spec/argparse parity, dispatch, native actions (`src/native/`), the reedline shell (`src/shell/`), `start api`/`start mcp`/`start executor`, team executor client and process (`executor/`, `server/executor/`), team scopes, sandbox enforcement and execution (`team/`), source fetch (`source_fetch/`), venv accounting, engine views, self-upgrade |
 | `meerschaum-py` | PyO3 bindings -> `meerschaum._core`; `PARITY.md` logs every Python-vs-Rust discrepancy, `PERF.md` the boundary benchmarks |
 
 ### Python package (`meerschaum/`)

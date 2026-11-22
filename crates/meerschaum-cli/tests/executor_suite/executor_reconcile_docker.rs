@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use meerschaum_cli::dispatch::{CommandOutput, CommandSpec, Host, SystemHost};
-use meerschaum_cli::executor_registry::Registry;
+use meerschaum_cli::executor::registry::Registry;
 use meerschaum_core::Value;
 use meerschaum_core::access::Team;
 use serde_json::{Value as Json, json};
@@ -203,7 +203,7 @@ fn policy_reconciliation_refuses_foreign_endpoints_and_preserves_named_state() {
         .to_map();
     let desired = Registry::new(root.path()).reconcile(&[team]).unwrap();
     let record = desired.teams.values().next().unwrap();
-    meerschaum_cli::executor_stack::preflight(root.path(), &[], &mut fixture.host).unwrap();
+    meerschaum_cli::executor::stack::preflight(root.path(), &[], &mut fixture.host).unwrap();
     let project = fixture.project.clone();
     let network = format!("{project}-team");
     fixture.networks.push(network.clone());
@@ -250,13 +250,13 @@ fn policy_reconciliation_refuses_foreign_endpoints_and_preserves_named_state() {
     let executor = fixture.container("executor", &network, labels, Some(&volume));
     let bystander = fixture.container("bystander", &network, json!({"com.docker.compose.project": format!("another-{project}"), "com.docker.compose.service": "api"}), None);
     assert!(
-        meerschaum_cli::executor_stack::retire(root.path(), &project, &[], &mut fixture.host)
+        meerschaum_cli::executor::stack::retire(root.path(), &project, &[], &mut fixture.host)
             .is_err()
     );
     assert!(fixture.exists("container", &executor));
     assert!(fixture.exists("network", &network));
     fixture.docker(&["network", "disconnect", &network, &bystander]);
-    meerschaum_cli::executor_stack::retire(root.path(), &project, &[], &mut fixture.host).unwrap();
+    meerschaum_cli::executor::stack::retire(root.path(), &project, &[], &mut fixture.host).unwrap();
     assert!(!fixture.exists("container", &executor));
     assert!(!fixture.exists("network", &network));
     assert!(fixture.exists("container", &api));

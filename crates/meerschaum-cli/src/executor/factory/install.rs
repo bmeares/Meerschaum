@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use crate::executor::factory::image::VerifiedImage;
-use crate::executor_registry::Registration;
+use crate::executor::registry::Registration;
 
 const MAX_INSTALL: usize = 16 * 1024;
 
@@ -44,7 +44,7 @@ fn refused() -> String {
 }
 
 pub(crate) fn directory(root: &Path) -> PathBuf {
-    root.join(crate::executor_registry::DIRECTORY)
+    root.join(crate::executor::registry::DIRECTORY)
         .join("attestation")
 }
 

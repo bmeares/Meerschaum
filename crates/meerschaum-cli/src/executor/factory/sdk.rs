@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 pub(crate) const PYCACHE: &str = "sdk-pycache";
 
 pub(crate) fn bind(
-    prepared: &mut crate::executor_profiles::Prepared,
+    prepared: &mut crate::executor::profiles::Prepared,
     sdk: &Sdk,
 ) -> Result<(), String> {
     let refused =

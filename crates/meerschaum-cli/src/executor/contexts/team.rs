@@ -97,7 +97,7 @@ impl Contexts {
             .join("factory")
             .join("execution-contexts")
             .join(Uuid::new_v4().simple().to_string());
-        crate::executor_profiles::private_directory(&directory)?;
+        crate::executor::profiles::private_directory(&directory)?;
         let result = prepare(
             LaunchDirectories {
                 work: &self.work_root,

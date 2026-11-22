@@ -770,7 +770,7 @@ fn run_line_with(
                     words_of(kwargs)[0].clone()
                 }
                 Err(error) if restricted::active() => {
-                    let clean = crate::executor_jobs::LogSanitizer::default().push(&error.message);
+                    let clean = crate::executor::jobs::LogSanitizer::default().push(&error.message);
                     let clean = meerschaum_server::redact::mask_uri_passwords(&clean);
                     let message = format!(
                         "Confined plugin action metadata is unavailable: {}",

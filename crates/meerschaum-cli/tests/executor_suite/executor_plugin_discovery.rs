@@ -9,9 +9,9 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use meerschaum_cli::executor_client::Controller;
-use meerschaum_cli::executor_jobs::Catalog;
-use meerschaum_cli::executor_registry::Registry;
+use meerschaum_cli::executor::client::Controller;
+use meerschaum_cli::executor::jobs::Catalog;
+use meerschaum_cli::executor::registry::Registry;
 use meerschaum_connector_api::client::{Body, Method, RequestOptions};
 use meerschaum_core::access::{Team, TeamRole};
 use meerschaum_core::config::{Config, ConfigOptions};

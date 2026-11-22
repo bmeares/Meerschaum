@@ -36,7 +36,7 @@ The SDK imposes no async runtime. Native calls are synchronous; async applicatio
 schedule potentially blocking calls on their blocking executor.
 
 `Request` is the low-level dispatch envelope. Its `pipe()` method provides a typed Pipe
-view. Through the optional host-call ABI extension (`callbacks.rs`), a plugin calls back into
+view. Through the optional host-call ABI extension (`src/callbacks/`), a plugin calls back into
 the process during a call: `Pipe::{get_data, get_data_with, get_rowcount, get_sync_time,
 get_sync_time_with, sync, replace, clear, get_columns_types, exists, register}` on the request's Pipe
 or any Pipe from `host::pipe(keys...)`, and `host::{read_sql, exec_sql, plugin_config,

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use meerschaum_cli::native::Session;
-use meerschaum_cli::source_fetch_postgres::PostgresSources;
+use meerschaum_cli::source_fetch::postgres::PostgresSources;
 use meerschaum_connector::{DataQuery, DateBound, InstanceConnector};
 use meerschaum_connector_api::source_fetch::{self, Request};
 use meerschaum_connector_sql::SqlConnector;

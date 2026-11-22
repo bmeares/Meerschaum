@@ -1,6 +1,6 @@
 //! A strict Host operation receives only its accepted, API-served source transports.
 
-use meerschaum_cli::executor_jobs::Catalog;
+use meerschaum_cli::executor::jobs::Catalog;
 use meerschaum_core::{Map, Pipe, Value, users::User};
 use serde_json::{Value as Json, json};
 use std::path::{Path, PathBuf};

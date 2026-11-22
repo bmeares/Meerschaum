@@ -14,7 +14,7 @@ Owner: `crates/meerschaum-core/src/pipe/`; Python façade `meerschaum/core/Pipe/
 **Instance**:
 The connector that stores pipes' metadata, data and internal state (users, tokens, plugins, engine
 state). A pipe's instance is where it lives, distinct from the connector it fetches from.
-Owner: `crates/meerschaum-connector/src/traits.rs` (`InstanceConnector`).
+Owner: `crates/meerschaum-connector/src/traits/mod.rs` (`InstanceConnector`).
 _Avoid_: database, backend (for the instance role).
 
 **Connector** / **connector keys**:
@@ -91,7 +91,7 @@ Owner: `crates/meerschaum-jobs/src/job.rs`.
 
 **Daemon**:
 A job's on-disk state and its detached supervisor process.
-Owner: `crates/meerschaum-jobs/src/daemon.rs`, `supervisor.rs`.
+Owner: `crates/meerschaum-jobs/src/daemon/mod.rs`, `supervisor.rs`.
 
 **Admission gate**:
 The per-root startup gate every job passes before its worker starts: file-lock slots, jitter and
@@ -112,7 +112,7 @@ _Avoid_: executor (for this process).
 **API host**:
 The one Python process (`python -m meerschaum.api.host`) that serves `@api_plugin` routes, plugin
 MCP tools and the Dash console, proxied by the Rust server.
-Owner: `crates/meerschaum-server/src/host.rs`; Python side `meerschaum/api/host/`.
+Owner: `crates/meerschaum-server/src/host/mod.rs`; Python side `meerschaum/api/host/`.
 
 **Native**:
 Implemented in Rust. A native action is a CLI action implemented in `crates/meerschaum-cli/src/native/`;
@@ -135,14 +135,14 @@ public v4 surface (`mrsm.jobs.Executor`, `--executor-keys`); qualify every other
 | **Plugin executor type** | A job executor a plugin declares (`executor_types` in its manifest) | `crates/meerschaum-plugin/src/executor.rs`, `crates/meerschaum-cli/src/native_executors.rs` |
 | **Engine executor** | The engine's dynamic ready queue that runs planned nodes (HEFT, leases, retries), and its node runner | `crates/meerschaum-engine/src/executor.rs`, `native.rs` (`NativeExecutor`) |
 | **Team executor** | A separate process (container or remote host) running one isolated team's ordinary API, jobs and terminals under the main API's signed control | `crates/meerschaum-server/src/executor/`, `crates/meerschaum-cli/src/server/executor/` |
-| `executor` modules | The main-API side (client, job catalog, contexts, stack, factory) and executor side of team executors | `crates/meerschaum-cli/src/executor/` (crate-internal), `executor_client/`, `executor_jobs/`, `executor_*.rs` |
+| `executor` modules | The main-API side (client, job catalog, contexts, stack, factory) and executor side of team executors | `crates/meerschaum-cli/src/executor/` (`client/`, `jobs/`, `profiles.rs`, `registry.rs`, `stack/`) |
 
 ## Teams and access
 
 **Team**:
 A named group of users that owns pipes, jobs, connectors and plugins; every user is also in the
 implicit Everyone team.
-Owner: `crates/meerschaum-core/src/access.rs`.
+Owner: `crates/meerschaum-core/src/access/`.
 
 **Isolated team**:
 A team (`isolated: true`) whose members see only their teams' objects and whose code runs with
@@ -158,7 +158,7 @@ Owner: `crates/meerschaum-core/src/team_scope.rs` (`acting_team`); `meerschaum/a
 
 **Viewer**:
 Two meanings, kept apart by context: the least-privileged role preset (`Role::Viewer` in
-`crates/meerschaum-core/src/access.rs`), and the console's per-request identity of the signed-in
+`crates/meerschaum-core/src/access/`), and the console's per-request identity of the signed-in
 caller (`Viewer` in `meerschaum/api/dash/viewer.py`).
 
 **Main API**:
@@ -183,13 +183,13 @@ Owner: `crates/meerschaum-server/src/executor/environment.rs` (`Profile`).
 The Linux Landlock rules (plus a seccomp Unix-socket filter where Landlock cannot deny sockets)
 that a team process applies to itself before any team code runs.
 Owner: `crates/meerschaum-core/src/team_scope/sandbox.rs`; enforced at process start by
-`crates/meerschaum-cli/src/team_sandbox/`.
+`crates/meerschaum-cli/src/team/sandbox/`.
 
 **Team execution**:
 Running arbitrary commands (`sh`, `python`, plugin actions, terminals) for a team that may write
 plugins, only inside that team's sandboxed processes and only when the sandbox covers sockets and
 signals ([ADR 0009](docs/adr/0009-team-execution-requires-enforced-sandbox.md)).
-Owner: `crates/meerschaum-server/src/team_execution.rs`; processes in `crates/meerschaum-cli/src/team_execution.rs`.
+Owner: `crates/meerschaum-server/src/team_execution.rs`; processes in `crates/meerschaum-cli/src/team/execution.rs`.
 
 **Execute policy**:
 What a non-administrator may run through `POST /execute` and console Exec: the actions the console
@@ -200,7 +200,7 @@ Owner: `crates/meerschaum-server/src/execute_policy.rs`, `execute_access.rs`.
 **Source fetch**:
 The main API's canonical source broker: bounded, paged native SQL reads of registered pipes that
 API-only work uses instead of database credentials.
-Owner: `crates/meerschaum-server/src/routes/source_fetch.rs`, `crates/meerschaum-cli/src/source_fetch_*`.
+Owner: `crates/meerschaum-server/src/routes/source_fetch.rs`, `crates/meerschaum-cli/src/source_fetch/`.
 _Avoid_: proxy read, data relay.
 
 **Confined compiler**:

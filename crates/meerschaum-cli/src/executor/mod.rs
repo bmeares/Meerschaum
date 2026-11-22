@@ -1,11 +1,14 @@
-//! Team executor machinery that the crate uses internally: confined compilation, executor
-//! contexts, the Factory, the host API-only runtime and plugin objects served to executors.
-//! The public team-executor surfaces sit beside this directory at the crate root
-//! ([`executor_client`](crate::executor_client), [`executor_jobs`](crate::executor_jobs),
-//! [`executor_profiles`](crate::executor_profiles), [`executor_registry`](crate::executor_registry),
-//! [`executor_stack`](crate::executor_stack)), and the executor process itself is
-//! [`server::executor`](crate::server).
+//! Team executors, both sides: the main API's client, job catalog, launch profiles, executor
+//! registry and generated stack, and the machinery the crate uses internally (confined
+//! compilation, executor contexts, the Factory, the host API-only runtime and plugin objects
+//! served to executors). The executor process itself is [`server::executor`](crate::server).
 //!
+//! - [`client`]: signed main-API clients for one team's ordinary executor API.
+//! - [`jobs`]: main-owned identity, routing and the canonical catalog of delegated jobs.
+//! - [`profiles`]: preparation of API-only launches.
+//! - [`registry`]: main-API executor identities and the desired deployment shared with
+//!   `stack up`.
+//! - [`stack`]: the sibling executor services `mrsm stack up` adds.
 //! - `compiler`: the confined compiler for single-file native sources, its administrator
 //!   provisioning policy and its confined runner.
 //! - `contexts`: executor-local paths and configuration for signed, main-owned launches.
@@ -17,14 +20,19 @@
 //! - `registration`: the fixed confined connector-register operation.
 //! - `terminal_guard`: the native lifetime owner of an API-only terminal.
 
+pub mod client;
 pub(crate) mod compiler;
 pub(crate) mod contexts;
 pub(crate) mod extensions;
 pub(crate) mod factory;
 pub(crate) mod host_jobs;
 pub(crate) mod host_sources;
+pub mod jobs;
 pub mod plugin_files;
 pub mod plugin_producer;
 pub mod plugins;
+pub mod profiles;
 pub(crate) mod registration;
+pub mod registry;
+pub mod stack;
 pub(crate) mod terminal_guard;

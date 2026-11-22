@@ -1,6 +1,6 @@
 //! Actual native and pre-site SDK transport selection under mutable configuration.
 
-use meerschaum_cli::executor_profiles::{Inputs, prepare_with_runtime};
+use meerschaum_cli::executor::profiles::{Inputs, prepare_with_runtime};
 use meerschaum_core::{
     Map, Value,
     team_scope::{

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use meerschaum_cli::executor_jobs::{Catalog, JobPlacement};
+use meerschaum_cli::executor::jobs::{Catalog, JobPlacement};
 use meerschaum_connector::InstanceConnector;
 use meerschaum_core::access::{Team, TeamRole};
 use meerschaum_core::users::User;

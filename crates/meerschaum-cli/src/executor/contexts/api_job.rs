@@ -171,7 +171,7 @@ pub(super) fn prepare_api_job(job: ApiJobLaunch<'_>) -> Result<Vec<(String, Stri
         .collect::<Vec<_>>();
     let job = name.map(|name| root.join("jobs").join(name));
     let mut prepared =
-        crate::executor_profiles::prepare_with_runtime(&crate::executor_profiles::Inputs {
+        crate::executor::profiles::prepare_with_runtime(&crate::executor::profiles::Inputs {
             metadata,
             server_root: root,
             directory,
@@ -240,14 +240,14 @@ pub(super) fn prepare_api_job(job: ApiJobLaunch<'_>) -> Result<Vec<(String, Stri
         // Empty private sites support dependency-free sources; no shared Team packages or
         // interpreter are probed/copied. Only this never-launched generation is touched.
         for plugin in &grants {
-            crate::executor_profiles::private_directory(
+            crate::executor::profiles::private_directory(
                 &venvs.join(plugin).join("lib/site-packages"),
             )?;
         }
         let internal = state.join(".internal");
         let package = internal.join("plugins");
-        crate::executor_profiles::private_directory(&internal)?;
-        crate::executor_profiles::private_directory(&package)?;
+        crate::executor::profiles::private_directory(&internal)?;
+        crate::executor::profiles::private_directory(&package)?;
         write_private(&package.join("__init__.py"), "")
             .map_err(|_| "Could not prepare the inert plugin package.")?;
         for (filename, source) in sources {
@@ -274,7 +274,11 @@ pub(super) fn prepare_api_job(job: ApiJobLaunch<'_>) -> Result<Vec<(String, Stri
             }
         }
         if let Some(compiler) = compiler {
-            crate::executor_profiles::prepare_compiler(&mut prepared, compiler, compiler_deadline)?;
+            crate::executor::profiles::prepare_compiler(
+                &mut prepared,
+                compiler,
+                compiler_deadline,
+            )?;
         }
         if work_root != root {
             let secrets = std::path::Path::new("/run/secrets");

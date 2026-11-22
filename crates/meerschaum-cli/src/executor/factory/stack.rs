@@ -6,7 +6,7 @@ use meerschaum_server::executor::factory_attestation::{PRIVATE_PATH, PUBLIC_DIRE
 use serde_json::json;
 use std::path::Path;
 
-use crate::executor_registry::Desired;
+use crate::executor::registry::Desired;
 
 fn value(value: serde_json::Value) -> Result<Value, String> {
     Value::from_json_str(&value.to_string())

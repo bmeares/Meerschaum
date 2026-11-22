@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use meerschaum_cli::executor_profiles::{Inputs, Prepared, prepare};
+use meerschaum_cli::executor::profiles::{Inputs, Prepared, prepare};
 use meerschaum_core::team_scope::sandbox::{self, Mode};
 use meerschaum_core::{Map, Value};
 
@@ -22,7 +22,7 @@ fn run(prepared: &Prepared, args: &[&str], probe: bool) -> Output {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if probe {
-        command.env(meerschaum_cli::team_execution::PROBE_ENV, "1");
+        command.env(meerschaum_cli::team::execution::PROBE_ENV, "1");
     }
     let mut child = command.spawn().unwrap();
     let deadline = Instant::now() + Duration::from_secs(20);

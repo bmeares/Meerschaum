@@ -275,6 +275,40 @@ def test_test_references_catch_moved_targets_and_paths(tmp_path):
     assert guards.check_test_references(tmp_path) == []
 
 
+
+def test_test_references_catch_moved_source_files(tmp_path):
+    _suite_tree(tmp_path)
+    _write(tmp_path, 'crates/meerschaum-web/src/pages/mod.rs', '')
+    _write(tmp_path, 'docs/agents/map.md',
+           'Pages: `crates/meerschaum-web/src/pages/mod.rs` in `crates/meerschaum-web/src/pages/`; '
+           'a bare `src/lib.rs` outside a crate is not checked, nor is `crates/<crate>/src/<path>.rs`.\n')
+    _write(tmp_path, 'crates/meerschaum-web/README.md', 'See `src/pages/mod.rs`.\n')
+    assert guards.check_test_references(tmp_path) == []
+
+    _write(tmp_path, 'docs/agents/map.md',
+           'Pages: `crates/meerschaum-web/src/pages.rs`, sessions in `crates/meerschaum-web/src/sessions/`.\n')
+    _write(tmp_path, 'crates/meerschaum-web/README.md', 'See `src/pages.rs`.\n')
+    joined = '\n'.join(guards.check_test_references(tmp_path))
+    assert 'docs/agents/map.md:1: `crates/meerschaum-web/src/pages.rs`' in joined
+    assert 'docs/agents/map.md:1: `crates/meerschaum-web/src/sessions/`' in joined
+    assert 'crates/meerschaum-web/README.md:1: `src/pages.rs`' in joined
+
+    _write(tmp_path, 'tests/test_pages.py', '# Mirrors `crates/meerschaum-web/tests/pages.rs`.\n')
+    _write(tmp_path, 'crates/meerschaum-web/src/lib.rs', '//! See `crates/meerschaum-web/src/pages/mod.rs`.\n')
+    joined = '\n'.join(guards.check_test_references(tmp_path))
+    assert 'tests/test_pages.py:1: `crates/meerschaum-web/tests/pages.rs`' in joined
+    assert 'src/lib.rs' not in joined
+
+    _write(tmp_path, 'docs/agents/map.md', 'Tests: `web/tests/web_suite/pages.rs`, `web/tests/pages.rs`.\n')
+    joined = '\n'.join(guards.check_test_references(tmp_path))
+    assert 'docs/agents/map.md:1: `web/tests/pages.rs`' in joined
+    assert 'web_suite/pages.rs' not in joined
+
+    # The guard's own lists name files that moved; they are not references.
+    _write(tmp_path, 'scripts/architecture/oversize_files.json',
+           json.dumps({'crates/meerschaum-web/src/gone.rs': 1800}))
+    assert 'gone.rs' not in '\n'.join(guards.check_test_references(tmp_path))
+
 # ---------------------------------------------------------------------------
 # Rule 7: crate layering
 # ---------------------------------------------------------------------------

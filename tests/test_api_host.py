@@ -12,7 +12,7 @@ over the shared secret file), so a token from either side validates on the other
 
 Skipped when the host's dependencies (`fastapi`, `uvicorn`, `dash`, `a2wsgi`, `PyJWT`) are not
 importable. The end-to-end test through the Rust server is
-`crates/meerschaum-server/tests/host_e2e.rs`.
+`crates/meerschaum-server/tests/executors_host_suite/host_e2e.rs`.
 """
 
 import os

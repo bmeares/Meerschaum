@@ -1,7 +1,7 @@
 //! Source plugins (Cargo crates built by Meerschaum): discovery, the build stamp, rebuild on a
 //! source change, skip messages and the manifest entry. The tests run a stand-in `cargo`
 //! script that installs the prebuilt `native_demo` example where Cargo would put it, so they
-//! stay fast; `crates/meerschaum-cli/tests/native_source_plugin.rs` runs the real `cargo`.
+//! stay fast; `crates/meerschaum-cli/tests/native_plugins_suite/native_source_plugin.rs` runs the real `cargo`.
 
 use meerschaum_plugin::discovery::{self, Discovery};
 use std::{

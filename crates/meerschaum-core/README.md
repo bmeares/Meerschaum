@@ -43,7 +43,7 @@ with its project block, applies `MRSM_PATCH`, then URI connectors and file conne
 Tests must run with fresh `MRSM_ROOT_DIR` and empty `MRSM_PLUGINS_DIR`. Generate the parameter
 matrix using `scripts/parity/run.sh crates/meerschaum-core/tests/fixtures/gen_parameter_resolution.py`.
 It uses in-memory instance stubs and never connects to a database. See `PARAMETER_CALL_SITES.md`
-for the audited consumer locations and required integration changes in other crates.
+for which consumers read raw parameters and which read resolved ones.
 
 `debug::dprint!` prints debug output: a `tracing` `DEBUG` event targeted at the caller's module,
 emitted only while `debug::enabled()` (`--debug`, the shell's `debug` toggle, or a Python binding

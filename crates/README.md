@@ -34,7 +34,7 @@ Python package (D21).
 
 | Crate | Layer | Normal workspace dependencies | Notes |
 |---|---|---|---|
-| `meerschaum` | 8 | cli, connector, connector-api, connector-sql, connector-valkey, core, engine, kernel, plugin, server | all but core, kernel and connector are optional (features); `cli` (default) only for the `mrsm` binary (`src/main.rs`; the library surface never touches it) |
+| `meerschaum` | 8 | cli, connector, connector-api, connector-sql, connector-valkey, core, engine, kernel, plugin, server | all but core, kernel and connector are optional (features); `cli` (default) only for the `mrsm` binary (`crates/meerschaum/src/main.rs`; the library surface never touches it) |
 | `meerschaum-py` | 8 | cli, compose, connector, connector-api, connector-sql, connector-valkey, core, engine, jobs, kernel, plugin, server, worker | not published |
 | `meerschaum-cli` | 7 | compose, connector, connector-api, connector-sql, connector-valkey, core, engine, jobs, kernel, plugin, server, web, worker | |
 | `meerschaum-web` | 6 | connector, connector-valkey, core, kernel, server | |

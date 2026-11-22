@@ -5,9 +5,9 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use meerschaum_cli::executor_client::Controller;
-use meerschaum_cli::executor_jobs::{Catalog, DelegatingJobs};
-use meerschaum_cli::executor_registry::Registry;
+use meerschaum_cli::executor::client::Controller;
+use meerschaum_cli::executor::jobs::{Catalog, DelegatingJobs};
+use meerschaum_cli::executor::registry::Registry;
 use meerschaum_core::access::{Team, TeamRole};
 use meerschaum_core::config::{Config, ConfigOptions};
 use meerschaum_core::users::User;
@@ -80,7 +80,7 @@ fn grant_files(root: &Path) -> std::collections::BTreeSet<std::ffi::OsString> {
         .collect()
 }
 
-fn inactive(root: &Path, record: &meerschaum_cli::executor_jobs::Record) {
+fn inactive(root: &Path, record: &meerschaum_cli::executor::jobs::Record) {
     assert!(record.callback_suspended);
     let proof: serde_json::Value = serde_json::from_slice(
         &std::fs::read(
@@ -97,7 +97,7 @@ fn stored_command(root: &Path, name: &str, command: &[String]) {
     // A private fixture simulates a retained definition after command policy changed. The
     // remote definition keeps its original safe command, so admission must use main's record.
     let path = root.join("executors/catalog.json");
-    let mut records: std::collections::BTreeMap<String, meerschaum_cli::executor_jobs::Record> =
+    let mut records: std::collections::BTreeMap<String, meerschaum_cli::executor::jobs::Record> =
         serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     records.get_mut(name).unwrap().sysargs = command.to_vec();
     meerschaum_core::team_scope::write_private(&path, &serde_json::to_string(&records).unwrap())

@@ -72,7 +72,7 @@ are kept. `upgrade` prints the same plan afterwards. `prune` is in `actions::V5_
 resolves and completes subactions, but `show actions` and the top-level completion list keep v4's
 contents for the parity fixtures.
 
-### Engine surfaces (`src/native/engine_views.rs`, `src/native/sync.rs`)
+### Engine surfaces (`src/native/engine_views.rs`, `src/native/sync/`)
 
 - `plan pipes` prints the engine's plan (spec 5.3) without syncing; `show graph` draws the
   selection as a styled box-drawing tree (`src/format/graph.rs`: the engine keeps the
@@ -185,16 +185,16 @@ and a supervised Python API host selected by the manifest. MCP stdout contains p
 only. Every standard action is native (`src/native/`); Python runs only a plugin's own code,
 through the worker. `python` keeps its native interpreter launch.
 
-### Teams and team executors (`executor/`, `executor_*`, `team_*`, `source_fetch_*`, `server/executor/`)
+### Teams and team executors (`executor/`, `team/`, `source_fetch/`, `server/executor/`)
 
 Both sides of team executors live here: the main API's client, job catalog and placement
-(`executor_client/`, `executor_jobs/`, `executor_registry.rs`, `executor_stack.rs`,
-`executor_profiles.rs`), the executor process of `mrsm start executor` (`server/executor/`,
-`executor/contexts/`), the crate-internal executor machinery (`executor/`: confined compiler,
+(`executor/client/`, `executor/jobs/`, `executor/registry.rs`, `executor/stack/`,
+`executor/profiles.rs`), the executor process of `mrsm start executor` (`server/executor/`,
+`executor/contexts/`), the crate-internal executor machinery (the rest of `executor/`: confined compiler,
 Factory, host API-only runtime, plugin objects), sandbox enforcement at process start
-(`team_sandbox/`, `executor/terminal_guard.rs`, called first from `run.rs`), team execution's probe
-and shells (`team_execution.rs`), and the canonical source broker (`source_fetch_backend/`,
-`source_fetch_postgres.rs`, `source_fetch_snapshot/`). The file layout follows the module tree, and
+(`team/sandbox/`, `executor/terminal_guard.rs`, called first from `run.rs`), the server's record of team
+scopes (`team/scopes.rs`), team execution's probe and shells (`team/execution.rs`), and the canonical
+source broker (`source_fetch/`: `backend/`, `postgres.rs`, `snapshot/`). The file layout follows the module tree, and
 each directory's `mod.rs` says what its children are for. The map of the subsystem, its trust boundaries and its tests is
 `docs/agents/teams-and-executors.md`.
 

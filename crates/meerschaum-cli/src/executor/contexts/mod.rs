@@ -310,7 +310,7 @@ impl Contexts {
             return Err("The Factory control root must be outside the durable Team root.".into());
         }
         // Validate the ancestry before creating or chmodding the control directory.
-        crate::executor_profiles::private_directory(&control_root)?;
+        crate::executor::profiles::private_directory(&control_root)?;
         if std::fs::canonicalize(&control_root).ok().as_ref() != Some(&control_root) {
             return Err("The Factory control root cannot use a symbolic alias.".into());
         }
@@ -917,7 +917,7 @@ impl Contexts {
                 .and_then(|env| env.iter().find(|(key, _)| key == "MRSM_TEAM_SANDBOX"))
                 .map(|(_, path)| PathBuf::from(path))
                 .ok_or("The private runtime lost its native specification.")?;
-            let binding = crate::executor_profiles::read_compiler_binding(&spec)?;
+            let binding = crate::executor::profiles::read_compiler_binding(&spec)?;
             if binding
                 .as_ref()
                 .map(|binding| binding.manifest_sha256.as_str())

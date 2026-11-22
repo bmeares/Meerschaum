@@ -283,7 +283,7 @@ pub(super) fn team_sandbox_checks(config: &Config) -> Vec<Check> {
     // seccomp filter: a probe process applies the sandbox as a team process would), and what
     // that means for web terminals.
     let denied = if isolated {
-        let (denied, words) = crate::team_sandbox::team_sockets(mode, &root);
+        let (denied, words) = crate::team::sandbox::team_sockets(mode, &root);
         if denied {
             out.push(Check::pass("teams", "unix sockets", words));
         } else {
@@ -299,7 +299,7 @@ pub(super) fn team_sandbox_checks(config: &Config) -> Vec<Check> {
                 },
             ));
         }
-        let (refused, words) = crate::team_sandbox::terminals_words(&root, denied);
+        let (refused, words) = crate::team::sandbox::terminals_words(&root, denied);
         if refused {
             out.push(Check::warn(
                 "teams",
@@ -320,10 +320,10 @@ pub(super) fn team_sandbox_checks(config: &Config) -> Vec<Check> {
         out.push(Check::warn(
             "teams",
             "sandbox level",
-            crate::team_sandbox::filesystem_only_warning(
+            crate::team::sandbox::filesystem_only_warning(
                 support.abi(),
                 reason.as_deref(),
-                &crate::team_sandbox::sockets_of_concern(),
+                &crate::team::sandbox::sockets_of_concern(),
             ),
             "Let the server install seccomp filters, run it on Linux 7.1 or newer, run it in a \
              container or as a service without a session bus, or set \
@@ -332,7 +332,7 @@ pub(super) fn team_sandbox_checks(config: &Config) -> Vec<Check> {
     } else if isolated
         && !enforced
         && !denied
-        && let Some(socket) = crate::team_sandbox::container_socket_reachable()
+        && let Some(socket) = crate::team::sandbox::container_socket_reachable()
     {
         out.push(Check::warn(
             "teams",
@@ -356,9 +356,9 @@ pub(super) fn team_sandbox_checks(config: &Config) -> Vec<Check> {
         ));
     }
     // Per team that runs code, whether its members' commands may run here.
-    for team in crate::team_execution::code_running_teams(config) {
+    for team in crate::team::execution::code_running_teams(config) {
         let label = format!("team execution ({team})");
-        match crate::team_execution::team_status(config, &team) {
+        match crate::team::execution::team_status(config, &team) {
             Ok(()) => out.push(Check::pass(
                 "teams",
                 &label,

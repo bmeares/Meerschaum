@@ -210,7 +210,7 @@ impl HostJobs {
 
     pub(crate) fn attest_discovery(
         &self,
-        record: &crate::executor_jobs::Record,
+        record: &crate::executor::jobs::Record,
         digest: &str,
     ) -> Result<(), String> {
         metadata::attest(self, record, digest)

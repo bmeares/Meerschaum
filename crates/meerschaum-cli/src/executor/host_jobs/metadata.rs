@@ -107,10 +107,10 @@ pub(super) fn update(
 
 pub(super) fn attest(
     jobs: &HostJobs,
-    record: &crate::executor_jobs::Record,
+    record: &crate::executor::jobs::Record,
     digest: &str,
 ) -> Result<(), String> {
-    if record.placement != crate::executor_jobs::JobPlacement::HostApi
+    if record.placement != crate::executor::jobs::JobPlacement::HostApi
         || record.profile != Profile::Metadata
     {
         return Err(

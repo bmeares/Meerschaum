@@ -20,8 +20,10 @@ Stdlib-only and about a second. The rules:
  5. test-layout: every Rust test module is compiled (declared from its suite's `main.rs`), every
     single-file test binary is listed with its reason, the per-crate binary ceilings hold, and no
     test that shares a binary with other modules changes the process environment.
- 6. test-references: every `--test <name>` and `tests/<path>.rs` named by CI scripts, workflows and
-    docs exists.
+ 6. test-references: every `--test <name>`, `tests/<path>.rs` and `crates/<crate>/src/<path>.rs`
+    (or `crates/<crate>/src/<dir>/`) named by CI scripts, workflows and docs exists; a crate's own
+    docs may write `src/<path>.rs`, and Markdown may shorten the crate (`cli/tests/<path>.rs`).
+    Comments in Rust and Python code are held to the root-relative form.
  7. crate-layering: `crates/README.md`'s dependency table is the workspace graph, and every edge
     points down the documented layer order.
  8. heavy-imports: no module-level import of pandas, polars, sqlalchemy, numpy, dash, plotly or
@@ -495,7 +497,6 @@ TOTAL_INTEGRATION_TEST_CEILING = 45
 #: Every single-file test binary, and why it is not a module of its crate's suite.
 SINGLE_FILE_TEST_BINARIES: dict[str, str] = {
     'crates/meerschaum/tests/surface.rs': "the front crate's only test binary",
-    'crates/meerschaum-cli/tests/executor_container.rs': 'ignored acceptance on local Docker, run by name',
     'crates/meerschaum-cli/tests/generated_tables.rs': 'runs the Python table generators (needs python3)',
     'crates/meerschaum-cli/tests/host_api_terminals.rs': 'custom harness: also the entry point of its confined children',
     'crates/meerschaum-cli/tests/host_plugin_discovery.rs': 'custom harness: also the entry point of its supervisor and workers',
@@ -652,6 +653,12 @@ REFERENCE_GLOBS = ('scripts/**/*', '.github/**/*', '.config/*', 'docs/**/*.md', 
 _TEST_FLAG = re.compile(r'--test[ =]([A-Za-z0-9_-]+)')
 _PACKAGE_FLAG = re.compile(r'(?:-p|--package)[ =](meerschaum[\w-]*)')
 _TEST_PATH = re.compile(r'(?<![\w/.<*-])((?:crates/([\w-]+)/)?tests/([\w./-]+?)\.rs)\b')
+_SOURCE_PATH = re.compile(r'(?<![\w/.<*{$-])((?:crates/([\w-]+)/)?src/[\w./-]+?\.rs)(?![\w/])')
+_SOURCE_DIR = re.compile(r'(?<![\w/.<*{$-])(crates/[\w-]+/(?:src|tests)/[\w/-]+/)(?=[`\s),;:]|$)')
+# Source and test code is scanned only for root-relative paths: its strings are full of look-alikes.
+CODE_REFERENCE_GLOBS = ('crates/**/*.rs', 'crates/**/*.py', 'tests/**/*.py', 'meerschaum/**/*.py')
+CODE_REFERENCE_SKIP = frozenset({'tests/test_architecture_guards.py'})
+_ROOT_RUST_PATH = re.compile(r'(?<![\w/.<*{$-])(crates/meerschaum[\w-]*/(?:src|tests)/[\w./-]+?\.rs)(?![\w/])')
 _REFERENCE_SUFFIXES = {'', '.md', '.py', '.sh', '.toml', '.yaml', '.yml', '.json', '.txt'}
 
 
@@ -662,13 +669,14 @@ def _reference_files(root: Path) -> list[Path]:
         for path in root.glob(pattern):
             parts = path.parts[prefix:]
             if path.suffix in _REFERENCE_SUFFIXES and path.is_file() and path.suffix in _REFERENCE_SUFFIXES and 'target' not in parts \
-                    and 'fixtures' not in parts and not any(p.startswith('.venv') for p in parts):
+                    and 'fixtures' not in parts and not any(p.startswith('.venv') for p in parts) \
+                    and parts[:2] != ('scripts', 'architecture'):
                 files.add(path)
     return sorted(files)
 
 
 def stale_test_references(root: Path) -> dict[str, list[str]]:
-    """`file -> ["line: reference", ...]` for every reference to a test target or file that does not exist."""
+    """`file -> ["line: reference", ...]` for every reference to a test target, test file or source file that does not exist."""
     crates = _crate_dirs(root)
     targets: dict[str, set[str]] = defaultdict(set)
     for crate in crates:
@@ -676,16 +684,22 @@ def stale_test_references(root: Path) -> dict[str, list[str]]:
             targets[test_root.parent.name if test_root.name == 'main.rs' else test_root.stem].add(crate.name)
         for target in tomllib.loads((crate / 'Cargo.toml').read_text(encoding='utf-8')).get('test', []):
             targets[target['name']].add(crate.name)
+    # Docs shorten `crates/meerschaum-<name>/` to `<name>/`.
+    shorts = sorted((c.name.removeprefix('meerschaum-') for c in crates if c.name != 'meerschaum'), key=len, reverse=True)
+    short_path = re.compile(
+        r'(?<![\w/.<*{$-])((' + '|'.join(map(re.escape, shorts)) + r')/((?:src|tests)/[\w./-]+?\.rs))(?![\w/])'
+    )
     stale: dict[str, list[str]] = {}
     for path in _reference_files(root):
         try:
             text = path.read_text(encoding='utf-8')
         except UnicodeDecodeError:
             continue
-        if '--test' not in text and 'tests/' not in text:
+        if '--test' not in text and 'tests/' not in text and 'src/' not in text:
             continue
         rel = _rel(root, path)
-        own_crate = path.relative_to(root).parts[1] if rel.startswith('crates/') else None
+        parts = path.relative_to(root).parts
+        own_crate = parts[1] if parts[0] == 'crates' and len(parts) > 2 else None
         for lineno, line in enumerate(text.splitlines(), 1):
             packages = set(_PACKAGE_FLAG.findall(line))
             for match in _TEST_FLAG.finditer(line):
@@ -703,6 +717,34 @@ def stale_test_references(root: Path) -> dict[str, list[str]]:
                     )
                 if not exists:
                     stale.setdefault(rel, []).append(f'{lineno}: {full}')
+            for match in _SOURCE_PATH.finditer(line):
+                full, crate = match.groups()
+                # A bare `src/...` is a path inside the crate whose doc names it; elsewhere it is ambiguous.
+                base = root if crate else (root / 'crates' / own_crate if own_crate else None)
+                if base is not None and not (base / full).exists():
+                    stale.setdefault(rel, []).append(f'{lineno}: {full}')
+            for match in _SOURCE_DIR.finditer(line):
+                if not (root / match.group(1)).is_dir():
+                    stale.setdefault(rel, []).append(f'{lineno}: {match.group(1)}')
+            for match in short_path.finditer(line) if path.suffix == '.md' else ():
+                if not (root / 'crates' / f'meerschaum-{match.group(2)}' / match.group(3)).exists():
+                    stale.setdefault(rel, []).append(f'{lineno}: {match.group(1)}')
+    prefix = len(root.parts)
+    for pattern in CODE_REFERENCE_GLOBS:
+        for path in root.glob(pattern):
+            parts = path.parts[prefix:]
+            if _skip_dir(parts[:-1]) or 'fixtures' in parts or '/'.join(parts) in CODE_REFERENCE_SKIP:
+                continue
+            try:
+                text = path.read_text(encoding='utf-8')
+            except (UnicodeDecodeError, OSError):
+                continue
+            if 'crates/meerschaum' not in text:
+                continue
+            for lineno, line in enumerate(text.splitlines(), 1):
+                for match in _ROOT_RUST_PATH.finditer(line):
+                    if not (root / match.group(1)).exists():
+                        stale.setdefault('/'.join(parts), []).append(f'{lineno}: {match.group(1)}')
     return stale
 
 
@@ -712,7 +754,7 @@ def check_test_references(
     data_dir: Path | None = None,
     stale: dict[str, list[str]] | None = None,
 ) -> list[str]:
-    """Rule 6: `--test <name>` and `tests/<path>.rs` in scripts, workflows and docs resolve."""
+    """Rule 6: `--test <name>`, `tests/<path>.rs` and `src/<path>.rs` in scripts, workflows and docs resolve."""
     allowed = _load_ratchet(data_dir or root / DATA_DIR_NAME, 'stale_test_references')
     violations: list[str] = []
     stale = stale_test_references(root) if stale is None else stale
@@ -721,7 +763,8 @@ def check_test_references(
             continue
         violations.extend(
             f'[test-references] {rel}:{ref.split(":", 1)[0]}: `{ref.split(": ", 1)[1]}` names no test target or '
-            'file; Rust tests are suites (`--test <suite> <module>::`, `tests/<suite>/<module>.rs`)'
+            'file; Rust tests are suites (`--test <suite> <module>::`, `tests/<suite>/<module>.rs`) and a '
+            'source file that became a directory is cited by the file that now holds the item'
             for ref in refs
         )
     return violations
@@ -904,7 +947,7 @@ RATCHETS: dict[str, str] = {
                       f'{PYTHON_LINE_LIMIT} lines',
     'history_names': 'files and directories named after development history (w<N>_, rc<N>_, fx<N>, wave)',
     'print_calls': '`print(` calls per file in meerschaum/ (use warn / info / dprint)',
-    'stale_test_references': 'docs owned elsewhere that still name test files or targets that moved',
+    'stale_test_references': 'docs owned elsewhere that still name test or source files or targets that moved',
     'dash_cycle_edges': 'import edges inside a cycle of meerschaum/api/dash/',
 }
 

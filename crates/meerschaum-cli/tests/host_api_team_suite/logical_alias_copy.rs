@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::http::HeaderMap;
-use meerschaum_cli::executor_profiles::{Inputs, Prepared, prepare_with_runtime};
+use meerschaum_cli::executor::profiles::{Inputs, Prepared, prepare_with_runtime};
 use meerschaum_connector::{Connector, InstanceConnector, SyncOptions};
 use meerschaum_connector_sql::SqlConnector;
 use meerschaum_core::access::{Team, TeamRole};
@@ -58,7 +58,7 @@ async fn command(prepared: &Prepared, arguments: &[&str], probe: bool) -> Output
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         if probe {
-            command.env(meerschaum_cli::team_execution::PROBE_ENV, "1");
+            command.env(meerschaum_cli::team::execution::PROBE_ENV, "1");
         }
         let mut child = command.spawn().unwrap();
         let deadline = Instant::now() + Duration::from_secs(20);

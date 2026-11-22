@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use meerschaum_cli::native::Session;
-use meerschaum_cli::source_fetch_backend::NativeSqlSources;
+use meerschaum_cli::source_fetch::backend::NativeSqlSources;
 use meerschaum_connector::{Connector, InstanceConnector};
 use meerschaum_connector_api::APIConnector;
 use meerschaum_connector_api::source_fetch::{self, PageRequest, PageResponse, Request};

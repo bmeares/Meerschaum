@@ -985,8 +985,8 @@ mod tests {
     async fn executor_controller_updates_grants_without_stack_reconciliation_and_never_falls_back()
     {
         crate::executor::contexts::native_model_host().unwrap();
-        use crate::executor_client::Controller;
-        use crate::executor_registry::Registry;
+        use crate::executor::client::Controller;
+        use crate::executor::registry::Registry;
         use meerschaum_core::access::Team;
         let main_root = tempfile::tempdir().unwrap();
         let executor_root = tempfile::tempdir().unwrap();

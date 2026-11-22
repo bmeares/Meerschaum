@@ -35,7 +35,7 @@ area you are changing.
 
 - **The API server caches `Pipe` objects** per instance (`AppState::pipes` in
   `crates/meerschaum-server/src/state.rs`); the `APIConnector` keeps short-lived client caches of
-  attributes, existence and column types (`crates/meerschaum-connector-api/src/client/pipes.rs`).
+  attributes, existence and column types (`crates/meerschaum-connector-api/src/client/pipes/`).
   The server refuses `mrsm` connector keys on the generic routes.
 - **A data route asks the instance whether its pipe is registered on every request, never a cache**
   (`AppState::is_registered`): a stale answer would be an access-control error. On `sql` and `valkey`

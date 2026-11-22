@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use meerschaum_cli::{native::Session, source_fetch_backend::NativeSqlSources};
+use meerschaum_cli::{native::Session, source_fetch::backend::NativeSqlSources};
 use meerschaum_connector::{DataQuery, DateBound, InstanceConnector};
 use meerschaum_connector_api::source_fetch::{self, PageRequest, PageResponse, Request, Response};
 use meerschaum_connector_sql::{SqlConnector, uri::ConnectionSpec};

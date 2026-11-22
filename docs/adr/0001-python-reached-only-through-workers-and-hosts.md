@@ -13,7 +13,7 @@ pages and MCP tools stay Python.
 The language bridge is inverted. The Python `Pipe`, connectors and `get_config` are façades over
 `meerschaum._core`. Rust reaches Python-only code (plugins, `@make_connector` connectors, actions,
 hooks, `@api_plugin` routes, plugin MCP tools) only through the pooled Python worker
-(`crates/meerschaum-worker`) and the API host (`crates/meerschaum-server/src/host.rs`). Rust never
+(`crates/meerschaum-worker`) and the API host (`crates/meerschaum-server/src/host/mod.rs`). Rust never
 calls a Python implementation of something it implements itself.
 
 ## Consequences

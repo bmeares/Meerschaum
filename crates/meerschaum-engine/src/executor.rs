@@ -21,9 +21,8 @@
 //! [`crate::engine::Engine::run_loop`]. Chunk pipelining (`--chunk-pipelining`, R6) is accepted
 //! and ignored.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -42,7 +41,14 @@ use crate::plan::{Action, Bounds, ParentState, Plan, PlanOptions, PlannedNode, S
 use crate::runs::{NodeRow, NodeStatus, RunRecord, RunRow, new_run_id};
 use crate::schedule::{DurationSource, schedule};
 use crate::selection::Subgraph;
-use crate::state::{CachedState, MemoryState, StateError, StateSource, StateWriter};
+use crate::state::{CachedState, StateError, StateSource, StateWriter};
+
+mod fake;
+mod leasing;
+
+pub use fake::{FakeExecutor, FakeStep};
+pub(crate) use leasing::LeaseHold;
+pub use leasing::{LeaseSource, MemoryLeases, NoLeases, drain_lease_releases};
 
 /// Emits events for one node from inside a [`SyncExecutor`] (chunk progress).
 #[derive(Debug, Clone)]
@@ -251,110 +257,6 @@ pub trait SyncExecutor: Send + Sync + 'static {
     /// [`crate::FaultInjector`].
     fn before_cursor_advance(&self, node: &PipeRef) -> Result<(), String> {
         let _ = node;
-        Ok(())
-    }
-}
-
-/// Per-pipe leases (§5.8): an atomic acquire with a TTL, renewed while a node syncs.
-pub trait LeaseSource: Send + Sync + 'static {
-    /// Try to take the lease. `Ok(false)` when another holder has it.
-    fn acquire(
-        &self,
-        node: &PipeRef,
-        holder: &str,
-        ttl: Duration,
-    ) -> impl Future<Output = Result<bool, StateError>> + Send;
-
-    /// Extend a held lease. `Ok(false)` when the lease was lost.
-    fn renew(
-        &self,
-        node: &PipeRef,
-        holder: &str,
-        ttl: Duration,
-    ) -> impl Future<Output = Result<bool, StateError>> + Send;
-
-    /// Release a held lease (a no-op if another holder has it).
-    fn release(
-        &self,
-        node: &PipeRef,
-        holder: &str,
-    ) -> impl Future<Output = Result<(), StateError>> + Send;
-}
-
-/// In-memory leases with expiry (on tokio's clock).
-#[derive(Debug, Default)]
-pub struct MemoryLeases {
-    held: Mutex<HashMap<PipeRef, (String, tokio::time::Instant)>>,
-}
-
-impl MemoryLeases {
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<PipeRef, (String, tokio::time::Instant)>> {
-        self.held.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    /// The current holder, if the lease is live.
-    pub fn holder(&self, node: &PipeRef) -> Option<String> {
-        let now = tokio::time::Instant::now();
-        self.lock()
-            .get(node)
-            .filter(|(_, exp)| *exp > now)
-            .map(|(h, _)| h.clone())
-    }
-}
-
-impl LeaseSource for MemoryLeases {
-    async fn acquire(
-        &self,
-        node: &PipeRef,
-        holder: &str,
-        ttl: Duration,
-    ) -> Result<bool, StateError> {
-        let now = tokio::time::Instant::now();
-        let mut held = self.lock();
-        match held.get(node) {
-            Some((h, exp)) if *exp > now && h != holder => Ok(false),
-            _ => {
-                held.insert(node.clone(), (holder.to_string(), now + ttl));
-                Ok(true)
-            }
-        }
-    }
-
-    async fn renew(&self, node: &PipeRef, holder: &str, ttl: Duration) -> Result<bool, StateError> {
-        let now = tokio::time::Instant::now();
-        let mut held = self.lock();
-        match held.get_mut(node) {
-            Some((h, exp)) if h == holder => {
-                *exp = now + ttl;
-                Ok(true)
-            }
-            _ => Ok(false),
-        }
-    }
-
-    async fn release(&self, node: &PipeRef, holder: &str) -> Result<(), StateError> {
-        let mut held = self.lock();
-        if held.get(node).is_some_and(|(h, _)| h == holder) {
-            held.remove(node);
-        }
-        Ok(())
-    }
-}
-
-/// Leases that are always granted (single process, or leases disabled).
-#[derive(Debug, Default, Clone, Copy)]
-pub struct NoLeases;
-
-impl LeaseSource for NoLeases {
-    async fn acquire(&self, _: &PipeRef, _: &str, _: Duration) -> Result<bool, StateError> {
-        Ok(true)
-    }
-
-    async fn renew(&self, _: &PipeRef, _: &str, _: Duration) -> Result<bool, StateError> {
-        Ok(true)
-    }
-
-    async fn release(&self, _: &PipeRef, _: &str) -> Result<(), StateError> {
         Ok(())
     }
 }
@@ -1051,120 +953,6 @@ fn merge_results(first: SyncResult, second: SyncResult) -> SyncResult {
     };
     out.begin = first.begin.or(out.begin);
     out
-}
-
-/// Pending acquisitions and held leases of this process not handed back yet.
-static HELD_LEASES: AtomicUsize = AtomicUsize::new(0);
-
-/// Wait (up to `timeout`) until every lease a node attempt of this process took has been handed
-/// back to its instance.
-///
-/// Dropping a run (Ctrl-C in the CLI, a closed API request, a Python `KeyboardInterrupt`) drops
-/// its node attempts mid-sync; each hands its lease back in a task of its own (see
-/// `LeaseHold`). A process that is about to exit awaits this first, or the leases stay held
-/// until their TTL runs out and the next run waits for them. Counted before acquisition starts,
-/// so a backend's committed claim whose acknowledgement is still pending is waited for too.
-pub async fn drain_lease_releases(timeout: Duration) {
-    let deadline = tokio::time::Instant::now() + timeout;
-    while HELD_LEASES.load(Ordering::SeqCst) > 0 && tokio::time::Instant::now() < deadline {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-}
-
-/// An owned pending claim or held lease: released by the attempt itself, or, when the attempt
-/// is dropped before it got there (the run was cancelled), by a task spawned from [`Drop`].
-pub(crate) struct LeaseHold<L: LeaseSource> {
-    leases: Arc<L>,
-    pipe_ref: PipeRef,
-    holder: String,
-    armed: bool,
-}
-
-impl<L: LeaseSource> LeaseHold<L> {
-    /// Count a held lease or an acquisition that is about to start.
-    pub(crate) fn new(leases: Arc<L>, pipe_ref: PipeRef, holder: String) -> Self {
-        HELD_LEASES.fetch_add(1, Ordering::SeqCst);
-        LeaseHold {
-            leases,
-            pipe_ref,
-            holder,
-            armed: true,
-        }
-    }
-
-    /// Finish acquisition on an owned task before handing its guard to the caller.
-    /// Cancelling a database await need not cancel its committed write. If the caller drops
-    /// the receiver, a late successful claim drops its guard and releases only this holder.
-    /// Count before spawning so shutdown also drains the unacknowledged-acquire window.
-    pub(crate) async fn acquire(
-        leases: Arc<L>,
-        pipe_ref: PipeRef,
-        holder: String,
-        ttl: Duration,
-    ) -> Result<Option<Self>, StateError> {
-        let mut hold = Self::new(leases, pipe_ref, holder);
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        tokio::spawn(async move {
-            let acquired = hold.leases.acquire(&hold.pipe_ref, &hold.holder, ttl).await;
-            let result = match acquired {
-                Ok(true) => Ok(Some(hold)),
-                Ok(false) => {
-                    hold.disarm();
-                    Ok(None)
-                }
-                Err(error) => {
-                    hold.disarm();
-                    Err(error)
-                }
-            };
-            // An abandoned successful handoff drops its guard here, after acquisition settled.
-            let _ = sender.send(result);
-        });
-        receiver.await.map_err(|_| {
-            StateError::Other(
-                "The lease acquisition task ended before returning its result.".into(),
-            )
-        })?
-    }
-
-    /// The attempt handed the lease back itself.
-    fn disarm(&mut self) {
-        if std::mem::replace(&mut self.armed, false) {
-            HELD_LEASES.fetch_sub(1, Ordering::SeqCst);
-        }
-    }
-}
-
-/// Uncounts a lease when dropped (the release task finished, or never got to run).
-struct Uncount;
-
-impl Drop for Uncount {
-    fn drop(&mut self) {
-        HELD_LEASES.fetch_sub(1, Ordering::SeqCst);
-    }
-}
-
-impl<L: LeaseSource> Drop for LeaseHold<L> {
-    fn drop(&mut self) {
-        if !self.armed {
-            return;
-        }
-        // The count moves to the release task (or ends here when there is no runtime to run it:
-        // it is shutting down, and the TTL expires the lease).
-        let uncount = Uncount;
-        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
-            return;
-        };
-        let (leases, pipe_ref, holder) = (
-            self.leases.clone(),
-            self.pipe_ref.clone(),
-            self.holder.clone(),
-        );
-        runtime.spawn(async move {
-            let _uncount = uncount;
-            let _ = leases.release(&pipe_ref, &holder).await;
-        });
-    }
 }
 
 /// Spawn one node attempt (leases, heartbeat, the sync) on the join set.
@@ -1873,148 +1661,6 @@ pub(crate) async fn record_finished_run<S: StateWriter>(state: &S, record: &mut 
         if let Some(message) = record.run.message.as_mut() {
             message.push_str(&format!("\nwarning: cannot record the run: {e}"));
         }
-    }
-}
-
-/// One scripted attempt of the [`FakeExecutor`].
-#[derive(Debug, Clone)]
-pub struct FakeStep {
-    /// How long the sync takes.
-    pub delay: Duration,
-    /// The result.
-    pub result: SyncResult,
-    /// Ledger entries to append on success, per state instance.
-    pub ledger: Vec<(String, Option<Bound>, Option<Bound>)>,
-    /// The node's watermark after a successful sync (`None` leaves it unchanged).
-    pub watermark: Option<Option<Bound>>,
-}
-
-impl FakeStep {
-    /// A successful step.
-    pub fn ok(delay: Duration) -> FakeStep {
-        FakeStep {
-            delay,
-            result: SyncResult::new(true, "Success"),
-            ledger: Vec::new(),
-            watermark: None,
-        }
-    }
-
-    /// A failing step.
-    pub fn fail(message: &str) -> FakeStep {
-        FakeStep {
-            delay: Duration::ZERO,
-            result: SyncResult::new(false, message),
-            ledger: Vec::new(),
-            watermark: None,
-        }
-    }
-}
-
-/// An in-memory [`SyncExecutor`] for tests: scripted results per node, optional effects on a
-/// [`MemoryState`], and a record of calls and peak concurrency.
-#[derive(Debug, Default)]
-pub struct FakeExecutor {
-    scripts: Mutex<HashMap<PipeRef, VecDeque<FakeStep>>>,
-    default_delay: Duration,
-    state: Option<Arc<MemoryState>>,
-    calls: Mutex<Vec<SyncRequest>>,
-    running: AtomicUsize,
-    peak: AtomicUsize,
-}
-
-impl FakeExecutor {
-    /// Every unscripted sync succeeds after `default_delay`. Effects go to `state`, if given.
-    pub fn new(default_delay: Duration, state: Option<Arc<MemoryState>>) -> FakeExecutor {
-        FakeExecutor {
-            default_delay,
-            state,
-            ..Default::default()
-        }
-    }
-
-    /// Queue a step for a node (consumed one per attempt).
-    pub fn script(&self, node: &PipeRef, step: FakeStep) {
-        self.scripts
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .entry(node.clone())
-            .or_default()
-            .push_back(step);
-    }
-
-    /// The requests received, in call order.
-    pub fn calls(&self) -> Vec<SyncRequest> {
-        self.calls.lock().unwrap_or_else(|e| e.into_inner()).clone()
-    }
-
-    /// The nodes synced, in call order.
-    pub fn synced(&self) -> Vec<PipeRef> {
-        self.calls().into_iter().map(|c| c.pipe_ref).collect()
-    }
-
-    /// The highest number of concurrent syncs observed.
-    pub fn peak_concurrency(&self) -> usize {
-        self.peak.load(Ordering::SeqCst)
-    }
-}
-
-impl SyncExecutor for FakeExecutor {
-    async fn sync(&self, request: SyncRequest) -> SyncResult {
-        let step = self
-            .scripts
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get_mut(&request.pipe_ref)
-            .and_then(VecDeque::pop_front)
-            .unwrap_or_else(|| FakeStep::ok(self.default_delay));
-        let pipe_ref = request.pipe_ref.clone();
-        for (i, chunk) in request.chunks.iter().enumerate() {
-            request.events.emit(EventKind::ChunkStarted {
-                chunk: i,
-                begin: chunk.begin,
-                end: chunk.end,
-                source: crate::events::ChunkSource::Window,
-                rows: None,
-                total: Some(request.chunks.len()),
-            });
-        }
-        self.calls
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(request.clone());
-        let now = self.running.fetch_add(1, Ordering::SeqCst) + 1;
-        self.peak.fetch_max(now, Ordering::SeqCst);
-        tokio::time::sleep(step.delay).await;
-        self.running.fetch_sub(1, Ordering::SeqCst);
-        for (i, chunk) in request.chunks.iter().enumerate() {
-            request.events.emit(EventKind::ChunkFinished {
-                chunk: i,
-                success: step.result.success,
-                message: step.result.message.clone(),
-                source: crate::events::ChunkSource::Window,
-                rows: None,
-                inserted: 0,
-                updated: 0,
-                upserted: 0,
-                begin: chunk.begin,
-                end: chunk.end,
-                duration_ms: Some(step.delay.as_millis() as u64),
-            });
-        }
-        if step.result.success
-            && let Some(state) = &self.state
-        {
-            for (instance, begin, end) in &step.ledger {
-                let _ = state
-                    .append_ledger(instance, &pipe_ref, vec![(*begin, *end)])
-                    .await;
-            }
-            if let Some(wm) = step.watermark {
-                state.set_watermark(&pipe_ref, wm);
-            }
-        }
-        step.result
     }
 }
 

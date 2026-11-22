@@ -8,7 +8,7 @@ A synthetic plugin exercising every extension point of the Python API host (v5 d
 mount, Dash console registrations (`@dash_plugin` and a `@web_page` Dash layout), and an MCP
 tool, resource and prompt.
 
-Used by `crates/meerschaum-server/tests/host_e2e.rs` (through the Rust server) and
+Used by `crates/meerschaum-server/tests/executors_host_suite/host_e2e.rs` (through the Rust server) and
 `tests/test_api_host.py` (against the host app directly). All data is synthetic.
 """
 

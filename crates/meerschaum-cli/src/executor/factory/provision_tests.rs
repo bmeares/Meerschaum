@@ -2,7 +2,7 @@
 #![cfg(all(test, target_os = "linux"))]
 
 use crate::dispatch::{CommandSpec, Host};
-use crate::executor_registry::{Desired, Registry};
+use crate::executor::registry::{Desired, Registry};
 use meerschaum_core::access::Team;
 use meerschaum_core::{Map, Value};
 use meerschaum_server::executor::factory_artifacts as artifacts;

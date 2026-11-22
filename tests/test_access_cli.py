@@ -2,7 +2,7 @@
 The access commands (teams, users, pipe access and locks, the `copy pipes` rule) as a Python user
 of the wheel runs them (`python -m meerschaum`), against SQLite instances in a temporary root.
 
-The Rust integration tests (`crates/meerschaum-cli/tests/access_cli.rs`) drive the same commands
+The Rust integration tests (`crates/meerschaum-cli/tests/shell_cli_suite/access_cli.rs`) drive the same commands
 in process (with prompts and the editor) and through the standalone binary; these go through the
 console script path of the wheel. The data is synthetic.
 """

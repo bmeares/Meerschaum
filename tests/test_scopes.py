@@ -9,7 +9,7 @@ Test how the Python API host and web console grant and check scopes (no API serv
 - The web console's token forms grant all scopes with a literal `*`.
 
 The `edit` / `register` actions and the `/jobs/{name}/stop` route are native in Meerschaum 5
-(`crates/meerschaum-cli/src/native/{tokens,users}.rs`, `crates/meerschaum-server/tests/routes.rs`).
+(`crates/meerschaum-cli/src/native/{tokens,users}.rs`, `crates/meerschaum-server/tests/routes_access_suite/routes.rs`).
 """
 
 import json

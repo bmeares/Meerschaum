@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use meerschaum_cli::native::Session;
-use meerschaum_cli::source_fetch_backend::NativeSqlSources;
+use meerschaum_cli::source_fetch::backend::NativeSqlSources;
 use meerschaum_connector::InstanceConnector;
 use meerschaum_connector_api::source_fetch::{self, PageRequest, PageResponse, Request};
 use meerschaum_connector_sql::SqlConnector;

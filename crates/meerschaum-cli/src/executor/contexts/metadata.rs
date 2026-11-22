@@ -57,7 +57,7 @@ pub(super) fn attest(
             let spec = generation
                 .directory
                 .join(meerschaum_core::team_scope::sandbox::JOB_SPEC_FILE);
-            let raw = crate::executor_profiles::read_compiler_descriptor(&spec)?;
+            let raw = crate::executor::profiles::read_compiler_descriptor(&spec)?;
             let spec_model: meerschaum_core::team_scope::sandbox::Spec =
                 serde_json::from_slice(&raw).map_err(|_| refused())?;
             if spec_model
@@ -68,10 +68,10 @@ pub(super) fn attest(
             {
                 return Err(refused());
             }
-            let bytes = crate::executor_profiles::read_compiler_descriptor(
+            let bytes = crate::executor::profiles::read_compiler_descriptor(
                 &generation
                     .directory
-                    .join(crate::executor_profiles::COMPILER_FILE),
+                    .join(crate::executor::profiles::COMPILER_FILE),
             )?;
             let prepared: crate::executor::compiler::Prepared =
                 serde_json::from_slice(&bytes).map_err(|_| refused())?;
@@ -82,7 +82,7 @@ pub(super) fn attest(
             if meerschaum_server::executor::plugins::sha256(&bytes) != binding.prepared_sha256 {
                 return Err(refused());
             }
-            crate::executor_profiles::validate_compiler_material(
+            crate::executor::profiles::validate_compiler_material(
                 &spec_model,
                 &generation.directory,
                 &prepared,
@@ -172,7 +172,7 @@ pub(super) fn quote(
         .directory
         .join(meerschaum_core::team_scope::sandbox::JOB_SPEC_FILE);
     // Bounded, NOFOLLOW/CLOEXEC descriptor read; Spec::read is intentionally not used.
-    let raw = crate::executor_profiles::read_compiler_descriptor(&spec_path)?;
+    let raw = crate::executor::profiles::read_compiler_descriptor(&spec_path)?;
     let spec: meerschaum_core::team_scope::sandbox::Spec =
         serde_json::from_slice(&raw).map_err(|_| refused())?;
     let runtime = spec.runtime.as_ref().ok_or_else(refused)?;
@@ -209,10 +209,10 @@ pub(super) fn quote(
         &generation.directory,
     )?;
     if let Some(binding) = &compiler {
-        let bytes = crate::executor_profiles::read_compiler_descriptor(
+        let bytes = crate::executor::profiles::read_compiler_descriptor(
             &generation
                 .directory
-                .join(crate::executor_profiles::COMPILER_FILE),
+                .join(crate::executor::profiles::COMPILER_FILE),
         )?;
         if meerschaum_server::executor::plugins::sha256(&bytes) != binding.prepared_sha256 {
             return Err(refused());
@@ -222,7 +222,7 @@ pub(super) fn quote(
         if prepared.owner_deadline != request.deadline {
             return Err(refused());
         }
-        crate::executor_profiles::validate_compiler_material(
+        crate::executor::profiles::validate_compiler_material(
             &spec,
             &generation.directory,
             &prepared,

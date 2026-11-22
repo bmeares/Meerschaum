@@ -10,7 +10,7 @@ fn main() {}
 
 #[cfg(target_os = "linux")]
 mod fixture {
-    use meerschaum_cli::{executor_client::Controller, executor_jobs::Catalog};
+    use meerschaum_cli::{executor::client::Controller, executor::jobs::Catalog};
     use meerschaum_core::{Map, Value, config::ConfigOptions, users::User};
     use meerschaum_server::{
         AppState, access, auth,
@@ -442,7 +442,7 @@ mod fixture {
             for (_, record) in records {
                 assert_eq!(
                     record.placement,
-                    meerschaum_cli::executor_jobs::JobPlacement::HostApi
+                    meerschaum_cli::executor::jobs::JobPlacement::HostApi
                 );
                 assert_eq!(
                     record.profile,

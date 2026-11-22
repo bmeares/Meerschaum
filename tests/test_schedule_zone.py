@@ -5,7 +5,7 @@
 A zone abbreviation after a `starting` time, as 4.x reads it with `dateutil`: either abbreviation
 of the process's own zone (`EST` and `EDT` in `America/New_York`) is the local zone, `UTC`, `GMT`
 and `Z` are UTC, any other abbreviation is accepted with dateutil's warning and read as UTC, and
-lowercase names are an error. The grammar is `crates/meerschaum-jobs/src/schedule.rs`; the
+lowercase names are an error. The grammar is `crates/meerschaum-jobs/src/schedule/`; the
 expected values are the ones v4.1.4 returns (`crates/meerschaum-jobs/tests/fixtures/schedule.json`).
 This is the `-s` / `--schedule` end of it (`mrsm show schedules` parses the schedule the way a
 scheduled job does).
@@ -95,7 +95,7 @@ def test_lowercase_and_overlong_zone_names_are_an_error(schedule, tmp_path):
 
 
 ### The `tz <zone>` clause (v5): the schedule steps on that zone's wall clock. The expected values
-### are written by hand (v4 has no such clause); see `crates/meerschaum-jobs/tests/schedule_zone.rs`.
+### are written by hand (v4 has no such clause); see `crates/meerschaum-jobs/tests/integration/schedule_zone.rs`.
 
 @pytest.mark.parametrize('tz, schedule, fires', [
     ### `tz local` is the process's zone (`TZ`).
