@@ -303,12 +303,12 @@ gh workflow run docker-build.yaml --ref main -f publish=true -f candidate_run_id
 ```
 
 Dispatch the Docker candidate as soon as the SDK candidate succeeds and do the dev host upgrade and
-other preparation while it runs (no hosted timing is recorded yet; a cold first run is slower while
-the GHCR cache fills).
+other preparation while it runs (14 minutes with a warm GHCR cache, 21 cold).
 
-**This path has not run on GitHub yet.** Before the first release that depends on it, run one
-candidate and check the list in `docs/design/v5-build.md` "Docker publication", which also explains
-the jobs, the pins and the `DOCKER_RUNNER=self-hosted` fallback. That fallback uploads every image
+**No publish run has executed `promote` or `publish` yet.** On the first one, check the two items
+under "What the first publish run must confirm" in `docs/design/v5-build.md` "Docker publication",
+which also explains the jobs, the pins and the `DOCKER_RUNNER=self-hosted` fallback. The candidate
+packages on GHCR are public unless made private. That fallback uploads every image
 from the self-hosted host at under 1 MB/s (promoting 5.1.1 from it took 3 h 28 min for amd64 and
 2 h 06 min for arm64).
 

@@ -382,10 +382,9 @@ and rejects dependency-install requests. Any failed operation is a release block
 
 ## Docker publication
 
-**Not yet run on GitHub.** This path is implemented and unit-tested (`tests/test_ci_docker_candidate.py`,
-`tests/test_docker_buildx.py`, `tests/test_workflows_packaging.py`) but no candidate or publish run
-has executed it. Before relying on it for a release, run one candidate and check the list at the end
-of this section.
+**The candidate half has run on GitHub; the publish half has not.** Two candidate runs of 5.1.2
+passed every job (results at the end of this section). No `publish=true` run has executed
+`promote` or `publish`: the first one must confirm the two items listed there.
 
 It exists because the self-hosted host uploads at under 1 MB/s: promoting 5.1.1 from that host took
 3 h 28 min for amd64 and 2 h 06 min for arm64. Image bytes now move between registries, and the
@@ -437,28 +436,42 @@ curl -fsSL https://static.rust-lang.org/rustup/release-stable.toml           # r
 curl -fsSL https://static.rust-lang.org/rustup/archive/<version>/{x86_64,aarch64}-unknown-linux-gnu/rustup-init.sha256
 ```
 
-### What the first candidate run must confirm
+### What the first candidate runs confirmed
 
-1. The first `GITHUB_TOKEN` push creates the `candidate` and `buildcache` GHCR packages linked to the
-   repository, and `executors` (self-hosted) and `promote` (hosted) can pull them with `packages: read`.
-2. `buildx build --push --metadata-file` writes `containerimage.digest` and
-   `containerimage.config.digest`, and with `--provenance=false` the digest is one image manifest
-   (`record` refuses an index).
-3. The registry cache export succeeds (`image-manifest=true`); a second run shows cache hits for the
-   OS, dependency and compiler-snapshot stages, with layer digests unchanged.
-4. Disk: the `df -h /` lines around the `full` build on both hosted architectures (about 20 GB of
-   headroom is needed).
-5. The image user is `1000:1000` (the receipt enforces it).
-6. arm64 builds and smokes natively on `ubuntu-24.04-arm` within the 300-minute timeout, including
-   the native Factory manifest check.
-7. On the self-hosted daemon, `docker image inspect <repo@digest>` returns an `Id` equal to the
-   config or manifest digest.
-8. In a publish run, the Docker Hub tag's digest equals the candidate digest, then `--merge` and
-   the platform check pass.
-9. The pinned `rustup-init` and toolchain install; the toolchain directory name equals
-   `settings.toml`'s `default_toolchain`; files under `/home/meerschaum` stay user-owned; and
-   `docker image inspect -f '{{json .RootFS.Layers}}'` shows the `mrsm` layer shared by `full`, `rust`
-   and `rust-full`, and the compiler layer shared by `full` and `rust-full`.
+Two runs of the same 5.1.2 commit and SDK candidate, the second against the cache the first filled:
+
+| | Cold cache | Warm cache |
+|---|---|---|
+| Whole run | 21 min | 14 min |
+| `buildx` job (amd64 / arm64) | 9.5 / 10 min | 4 / 3 min |
+| "Build Docker images" step (amd64 / arm64) | 6.5 / 8 min | 1.7 / 2.2 min |
+| `executors` (self-hosted) | 11 min | 9 min |
+
+- **Packages.** The first `GITHUB_TOKEN` push created the `candidate` and `buildcache` packages, and
+  `executors` pulled the `full` digest with `packages: read`. Both packages were created **public**:
+  anyone can pull a candidate tag (`<version>-<group>-<arch>-<run>-<attempt>`) before the release.
+  Make them private in the package settings if that matters; nothing in the workflow depends on
+  anonymous access.
+- **Digests.** `--metadata-file` wrote both digests, each a single OCI image manifest, and the
+  receipts carry them. On the self-hosted daemon the pulled image's `Id` equals the receipt's config
+  digest, and its user is `1000:1000`.
+- **Cache.** Every cache export succeeded. The warm run reused every layer: all four images on both
+  architectures have identical layer digests in the two runs. The image digests still differ (one
+  `history[].created` timestamp in the config), so a receipt names the images of its own run only.
+  Both runs used the same SDK; reuse of the OS, dependency and compiler layers across two versions
+  is first measured at the next release.
+- **Shared layers** (amd64, compressed): the `mrsm` layer (44 MB) is in `full`, `rust` and
+  `rust-full`, the compiler layer (228 MB) in `full` and `rust-full`, and the Python base layer
+  (52 MB) in `slim` and `full`: 1,022 MB of distinct layers for 1,398 MB of images.
+- **Disk.** At least 100 GB free after the builds on both hosted architectures.
+- **arm64** builds and smokes natively, including the native Factory manifest check, and the pinned
+  `rustup-init` and toolchain install on both.
+
+### What the first publish run must confirm
+
+1. `promote` (hosted) pulls the staged digests with `packages: read`.
+2. The Docker Hub tag's digest equals the candidate digest, then `--merge` and the platform check
+   pass.
 
 ## Crate names on crates.io (§15)
 
