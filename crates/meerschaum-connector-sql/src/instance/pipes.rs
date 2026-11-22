@@ -681,15 +681,22 @@ impl SqlConnector {
                 if vals.is_empty() {
                     continue;
                 }
-                let none = next(&mut binds, SqlParam::Text("None".into()));
+                // An inclusive list without the NULL sentinel already excludes NULL.
+                // Leave the column bare so the registry's key index can serve the filter.
+                let column = if matches!(*col, "connector_keys" | "metric_key")
+                    && op == "IN"
+                    && !vals.iter().any(|value| value == "None")
+                {
+                    format!("{table}.{col}")
+                } else {
+                    let none = next(&mut binds, SqlParam::Text("None".into()));
+                    format!("coalesce({table}.{col}, {none})")
+                };
                 let ps: Vec<String> = vals
                     .into_iter()
                     .map(|v| next(&mut binds, SqlParam::Text(v)))
                     .collect();
-                wheres.push(format!(
-                    "coalesce({table}.{col}, {none}) {op} ({})",
-                    ps.join(", ")
-                ));
+                wheres.push(format!("{column} {op} ({})", ps.join(", ")));
             }
         }
         // Meerschaum's internal pipes (saved Pipelines' registry pipes, ...) stay out of

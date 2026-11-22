@@ -23,7 +23,7 @@ use meerschaum_core::{Map, Value};
 use meerschaum_kernel::Frame;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyTuple};
+use pyo3::types::{PyDict, PyInt, PyList, PyString, PyTuple};
 
 use crate::convert::{PyCtx, core_to_py, py_to_core};
 use crate::pandas_bridge::{
@@ -180,15 +180,13 @@ fn settings_from_py(py: Python<'_>, flavor: Flavor) -> InstanceSettings {
 }
 
 /// The connector attributes from the Python connector's `__dict__`-like mapping
-/// ([`ConnectorAttributes::from_attribute_map`], an invalid `port` refused). An attribute other than the
-/// connection keys counts only when it is a string or an integer: the connector's other
-/// attributes are Python objects, not connection parameters.
+/// ([`ConnectorAttributes::from_attribute_map`]). Convert option keys and values with Python
+/// `str()`. An attribute outside the connection keys counts only when it is a string or an integer.
 pub(crate) fn attributes_from_py(
     label: &str,
     attrs: &Bound<'_, PyDict>,
 ) -> PyResult<ConnectorAttributes> {
-    const CONNECTION_KEYS: [&str; 12] = [
-        "label",
+    const CONNECTION_KEYS: [&str; 11] = [
         "flavor",
         "uri",
         "host",
@@ -203,14 +201,32 @@ pub(crate) fn attributes_from_py(
     ];
     let mut map = Map::new();
     for (k, v) in attrs.iter() {
+        if v.is_none() {
+            continue;
+        }
         let key: String = k.str()?.extract()?;
-        if !CONNECTION_KEYS.contains(&key.as_str())
-            && !(v.is_instance_of::<pyo3::types::PyString>()
-                || v.is_instance_of::<pyo3::types::PyInt>())
+        if key == "label"
+            || !(CONNECTION_KEYS.contains(&key.as_str())
+                || v.is_instance_of::<PyString>()
+                || v.is_instance_of::<PyInt>())
         {
             continue;
         }
-        map.insert(key, py_to_core(&v)?);
+        let value = if key == "options"
+            && let Ok(options) = v.cast::<PyDict>()
+        {
+            Value::Map(
+                options
+                    .iter()
+                    .map(|(key, value)| {
+                        Ok((key.str()?.extract()?, Value::Str(value.str()?.extract()?)))
+                    })
+                    .collect::<PyResult<Map>>()?,
+            )
+        } else {
+            Value::Str(v.str()?.extract()?)
+        };
+        map.insert(key, value);
     }
     ConnectorAttributes::from_attribute_map(label, &map, InvalidPort::Reject)
         .map_err(|e| PyValueError::new_err(e.to_string()))

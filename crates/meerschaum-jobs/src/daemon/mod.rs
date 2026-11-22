@@ -1472,6 +1472,18 @@ impl Daemon {
     pub fn pause(&mut self, timeout: Option<Seconds>, interval: Option<Seconds>) -> SuccessTuple {
         self.forget_detached();
         let _ = self.remove_blocking_stdin_file();
+        let timeout = self.get_timeout_seconds(timeout);
+        let interval = self.get_check_timeout_interval_seconds(interval);
+        let begin = Instant::now();
+        // The PID file may still name the supervisor at the startup gate. It records `began`
+        // only after replacing that PID with the worker's. Keep the supervisor able to stop the job.
+        let ready = |daemon: &Self| {
+            let times = daemon.timestamps();
+            times.launched.is_none() || times.current_began().is_some() || times.is_completed()
+        };
+        if !ready(self) && !self.wait_until(timeout, interval, ready) {
+            return SuccessTuple::fail(self.timeout_msg("pause", timeout));
+        }
         let Some(pid) = self.process() else {
             return SuccessTuple::fail(format!(
                 "Daemon '{}' is not running and cannot be paused.",
@@ -1488,8 +1500,6 @@ impl Daemon {
                 self.daemon_id
             ));
         }
-        let timeout = self.get_timeout_seconds(timeout);
-        let interval = self.get_check_timeout_interval_seconds(interval);
         if !timeout.is_truthy() {
             let state = process::proc_state(pid);
             let success = matches!(state, ProcState::Stopped | ProcState::Gone);
@@ -1499,7 +1509,6 @@ impl Daemon {
             }
             return SuccessTuple::fail(format!("Failed to suspend daemon '{}'.", self.daemon_id));
         }
-        let begin = Instant::now();
         while begin.elapsed() < timeout.duration() {
             match process::proc_state(pid) {
                 ProcState::Stopped => {

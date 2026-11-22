@@ -195,37 +195,27 @@ def check_last_admin(
 # Who is asking.
 ########################################################################################
 
-def _viewer_fields(who: Any) -> Tuple[access.Viewer, Optional[str], bool, bool]:
-    """Return `(viewer, username, is_admin, sees_all)` for a `Viewer` (or legacy dict)."""
-    if isinstance(who, access.Viewer):
-        is_admin = bool(who.no_auth or (who.signed_in and who.is_admin))
-        return who, who.username, is_admin, is_admin
-    if isinstance(who, dict):
-        viewer_obj = who.get('viewer')
-        if not isinstance(viewer_obj, access.Viewer):
-            viewer_obj = access.ANONYMOUS
-        is_admin = bool(who.get('admin') or viewer_obj.is_admin or viewer_obj.no_auth)
-        sees_all = bool(is_admin or who.get('sees_all'))
-        username = who.get('username') if 'username' in who else viewer_obj.username
-        return viewer_obj, username, is_admin, sees_all
-    return access.ANONYMOUS, None, False, False
+def _viewer_fields(who: Optional[access.Viewer]) -> Tuple[access.Viewer, Optional[str], bool]:
+    """Return the effective viewer, username, and administrator status."""
+    viewer = who if isinstance(who, access.Viewer) else access.ANONYMOUS
+    return viewer, viewer.username, bool(viewer.no_auth or (viewer.signed_in and viewer.is_admin))
 
 
 def visible_user_rows(
     rows: List[Dict[str, Any]],
-    who: Any,
+    who: Optional[access.Viewer],
     teams: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """
-    The users a viewer may see: every user for administrators and managers of Everyone, else
-    themselves and the members of their teams (other than Everyone).
+    The users a viewer may see: every user for administrators and managers of Everyone
+    in the full view, else themselves and the members of their effective teams.
     """
-    viewer_obj, username, is_admin, sees_all = _viewer_fields(who)
-    if is_admin or sees_all:
+    viewer_obj, username, is_admin = _viewer_fields(who)
+    if is_admin:
         return list(rows)
     if not username:
         return []
-    if username in team_records.everyone_managers(teams or []):
+    if viewer_obj.acting_team is None and username in team_records.everyone_managers(teams or []):
         return list(rows)
     viewer_teams = set(viewer_obj.own_teams)
     return [
@@ -234,20 +224,24 @@ def visible_user_rows(
     ]
 
 
-def email_visible(who: Any, row: Dict[str, Any]) -> bool:
+def email_visible(who: Optional[access.Viewer], row: Dict[str, Any]) -> bool:
     """Whether the viewer may see this user's email address."""
-    viewer_obj, _, _, _ = _viewer_fields(who)
+    viewer_obj, _, _ = _viewer_fields(who)
     return access.can_see_email(viewer_obj, row['username'], list(row.get('teams', {})))
 
 
-def sees_any_email(who: Any, teams: Optional[List[Dict[str, Any]]] = None) -> bool:
+def sees_any_email(who: Optional[access.Viewer], teams: Optional[List[Dict[str, Any]]] = None) -> bool:
     """Whether the Email column has anything for this viewer: administrators and managers."""
-    viewer_obj, username, is_admin, _ = _viewer_fields(who)
+    viewer_obj, username, is_admin = _viewer_fields(who)
     if is_admin:
         return True
     if viewer_obj.managed_teams:
         return True
-    return bool(username) and username in team_records.everyone_managers(teams or [])
+    return (
+        viewer_obj.acting_team is None
+        and bool(username)
+        and username in team_records.everyone_managers(teams or [])
+    )
 
 
 ########################################################################################
@@ -458,9 +452,11 @@ def team_job_count(team: str) -> int:
         return 0
 
 
-def visible_teams(teams: List[Dict[str, Any]], who: Any) -> List[Dict[str, Any]]:
-    """The teams a viewer sees: every team for administrators, else Everyone and their own."""
-    viewer_obj, username, is_admin, _ = _viewer_fields(who)
+def visible_teams(teams: List[Dict[str, Any]], who: access.Viewer) -> List[Dict[str, Any]]:
+    """List the acting team, or the teams visible to the viewer in the full view."""
+    viewer_obj, username, is_admin = _viewer_fields(who)
+    if viewer_obj.acting_team is not None:
+        return [team for team in teams if team['name'] == viewer_obj.acting_team]
     if is_admin:
         return list(teams)
     ### A walled-off viewer is not in Everyone: they see their own teams only.
@@ -471,9 +467,11 @@ def visible_teams(teams: List[Dict[str, Any]], who: Any) -> List[Dict[str, Any]]
     ]
 
 
-def may_manage_team(who: Any, team: Dict[str, Any]) -> bool:
+def may_manage_team(who: access.Viewer, team: Dict[str, Any]) -> bool:
     """Whether the viewer may change the team's members: administrators and its managers."""
-    _, username, is_admin, _ = _viewer_fields(who)
+    viewer_obj, username, is_admin = _viewer_fields(who)
+    if viewer_obj.acting_team is not None:
+        return viewer_obj.manages(team['name'])
     if is_admin:
         return True
     return team['members'].get(username or '') == 'manager'
@@ -578,18 +576,15 @@ def build_user_row_menu(username: str) -> Any:
 
 def build_users_table(
     rows: List[Dict[str, Any]],
-    admin: bool = False,
-    me: Optional[str] = None,
-    who: Optional[Dict[str, Any]] = None,
-    show_email: Optional[bool] = None,
+    who: access.Viewer,
+    show_email: bool,
 ) -> Any:
     """
     The users as a table: User, then for administrators Type and Role; Teams; Email (for
     administrators and team managers, each address only where they may see it); and the
     administrators' menu.
     """
-    who = who or {'admin': admin, 'username': me, 'viewer': access.ANONYMOUS}
-    show_email = admin if show_email is None else show_email
+    who, me, admin = _viewer_fields(who)
     header = [html.Th('User')]
     if admin:
         header += [html.Th('Type'), html.Th('Role')]
@@ -662,13 +657,13 @@ def get_users_cards(
 def build_users_listing(
     search_term: Optional[str],
     page: int = 1,
-    viewer_info: Any = None,
+    viewer_info: Optional[access.Viewer] = None,
 ) -> Tuple[Any, int, int]:
     """
     Build the users table for a viewer (everyone, or the users they may see) and return it
     along with the total page count and total user count.
     """
-    viewer_obj, username, is_admin, _ = _viewer_fields(viewer_info)
+    viewer, _, _ = _viewer_fields(viewer_info)
     try:
         teams = team_records.list_teams()
     except Exception:
@@ -693,9 +688,7 @@ def build_users_listing(
     return (
         build_users_table(
             page_rows,
-            admin=is_admin,
-            me=username,
-            who=viewer_obj if isinstance(viewer_info, access.Viewer) else viewer_info,
+            who=viewer,
             show_email=show_email,
         ),
         total_pages,
@@ -777,11 +770,11 @@ def _build_user_card(
     )
 
 
-def build_user_detail(username: str, viewer_info: Any = None) -> Any:
+def build_user_detail(username: str, viewer_info: Optional[access.Viewer] = None) -> Any:
     """
     Build the detail view for a single user (shareable URL): only a user the viewer may see.
     """
-    _, viewer_username, is_admin, _ = _viewer_fields(viewer_info)
+    _, viewer_username, is_admin = _viewer_fields(viewer_info)
     back_button = dbc.Button(
         '← Users',
         href='/dash/users',
@@ -821,7 +814,7 @@ def build_user_detail(username: str, viewer_info: Any = None) -> Any:
 
 def build_teams_table(
     teams: List[Dict[str, Any]],
-    who: Any,
+    who: access.Viewer,
     pipe_counts: Optional[Dict[Optional[str], int]] = None,
     users_count: Optional[int] = None,
 ) -> Any:
@@ -829,7 +822,7 @@ def build_teams_table(
     The teams: Team, Members, Managers and Pipes, with each team's `⋮` menu (Members for its
     managers and administrators; Rename and Delete for administrators, never for Everyone).
     """
-    _, _, is_admin, _ = _viewer_fields(who)
+    _, _, is_admin = _viewer_fields(who)
     pipe_counts = pipe_counts or {}
     header = [html.Th('Team'), html.Th('Members'), html.Th('Managers'), html.Th('Pipes'),
               html.Th(html.Span('Actions', className='visually-hidden'))]
@@ -957,6 +950,12 @@ def build_team_members_editor(team: Dict[str, Any], user_names: List[str]) -> An
         ], id={'type': 'team-member-row', 'index': username}))
     listed = set(team['members'])
     candidates = [name for name in user_names if name not in listed]
+    table = dbc.Table(
+        [html.Tbody(rows)], size='sm', class_name='console-table team-members-table',
+        id='team-members-table',
+    ) if rows else None
+    if not candidates:
+        return html.Div([table])
     add_row = html.Div(
         [
             dcc.Dropdown(
@@ -982,10 +981,6 @@ def build_team_members_editor(team: Dict[str, Any], user_names: List[str]) -> An
         ],
         className='team-add-row',
     )
-    table = dbc.Table(
-        [html.Tbody(rows)], size='sm', class_name='console-table team-members-table',
-        id='team-members-table',
-    ) if rows else None
     return html.Div([table, add_row])
 
 

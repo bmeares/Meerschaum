@@ -2,7 +2,11 @@
 //! worker), then paused, resumed, stopped, killed, fed input and deleted.
 
 use crate::common;
+use std::ffi::OsStr;
 use std::fs;
+use std::os::unix::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use indexmap::IndexMap;
@@ -541,20 +545,67 @@ fn a_worker_records_its_laps_and_the_job_reports_its_health() {
     assert!(!path.exists());
 }
 
-/// A context whose supervisor starts `delay` late (a shell sleeps, then runs it): what a job
-/// looks like between `start()` returning and its supervisor's first step.
-fn delayed_supervisor(ctx: &mut meerschaum_jobs::JobsContext, delay: &str) {
-    let supervisor = ctx.launcher.supervisor[0].clone();
-    ctx.launcher.supervisor = vec![
-        "/bin/sh".into(),
-        "-c".into(),
-        format!("sleep {delay}; exec \"$0\" \"$@\""),
-        supervisor,
-    ];
+/// Capture the detached launch's exact supervisor arguments before it begins. The test can
+/// change the job's files, then run that launch as a child it owns and wait for it to return.
+struct HeldSupervisor {
+    command: Vec<String>,
+    arguments: PathBuf,
+}
+
+impl HeldSupervisor {
+    fn install(ctx: &mut meerschaum_jobs::JobsContext, root: &Path) -> Self {
+        let arguments = root.join("supervisor-arguments");
+        let command = std::mem::replace(
+            &mut ctx.launcher.supervisor,
+            vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                r#"file="$1"; shift
+printf '%s\0' "$@" > "$file.pending" && exec mv "$file.pending" "$file""#
+                    .into(),
+                "record-supervisor-arguments".into(),
+                arguments.to_str().unwrap().into(),
+            ],
+        );
+        Self { command, arguments }
+    }
+
+    fn wait_for_launch(&self) {
+        assert!(
+            common::wait_for(20.0, || self.arguments.is_file()),
+            "the launcher did not record the supervisor arguments"
+        );
+    }
+
+    fn run(self) {
+        let encoded = fs::read(self.arguments).unwrap();
+        let args = encoded
+            .strip_suffix(b"\0")
+            .expect("a complete supervisor argument record")
+            .split(|byte| *byte == 0)
+            .map(OsStr::from_bytes);
+        let mut child = Command::new(&self.command[0])
+            .args(&self.command[1..])
+            .args(args)
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .spawn()
+            .unwrap();
+        let mut status = None;
+        if !common::wait_for(20.0, || {
+            status = child.try_wait().unwrap();
+            status.is_some()
+        }) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("the supervisor did not finish the captured launch");
+        }
+        assert!(status.unwrap().success(), "{status:?}");
+    }
 }
 
 /// The log subfiles of job `name` under `root`.
-fn log_files(root: &std::path::Path, name: &str) -> Vec<String> {
+fn log_files(root: &Path, name: &str) -> Vec<String> {
     fs::read_dir(root.join("logs"))
         .map(|d| {
             d.flatten()
@@ -571,7 +622,7 @@ fn log_files(root: &std::path::Path, name: &str) -> Vec<String> {
 fn a_job_deleted_before_its_supervisor_starts_stays_deleted() {
     let dir = tempfile::tempdir().unwrap();
     let mut ctx = common::sh_context(dir.path());
-    delayed_supervisor(&mut ctx, "0.6");
+    let supervisor = HeldSupervisor::install(&mut ctx, dir.path());
     let marker = dir.path().join("ran");
     let mut job = sh_job(
         &ctx,
@@ -580,9 +631,10 @@ fn a_job_deleted_before_its_supervisor_starts_stays_deleted() {
         JobOptions::default(),
     );
     assert!(job.start().success);
+    supervisor.wait_for_launch();
     // What a delete that did not see the starting supervisor leaves behind.
     assert!(job.daemon().cleanup(false).success);
-    std::thread::sleep(std::time::Duration::from_millis(2500));
+    supervisor.run();
     assert!(!dir.path().join("jobs/ghost").exists(), "the job came back");
     assert!(!marker.exists(), "the deleted job ran");
     assert_eq!(log_files(dir.path(), "ghost"), Vec::<String>::new());
@@ -594,7 +646,7 @@ fn a_job_deleted_before_its_supervisor_starts_stays_deleted() {
 fn a_superseded_launch_does_not_run() {
     let dir = tempfile::tempdir().unwrap();
     let mut ctx = common::sh_context(dir.path());
-    delayed_supervisor(&mut ctx, "0.6");
+    let supervisor = HeldSupervisor::install(&mut ctx, dir.path());
     let marker = dir.path().join("ran");
     let mut job = sh_job(
         &ctx,
@@ -603,6 +655,7 @@ fn a_superseded_launch_does_not_run() {
         JobOptions::default(),
     );
     assert!(job.start().success);
+    supervisor.wait_for_launch();
     let props_path = dir.path().join("jobs/twice/properties.json");
     let mut props = Value::from_json_str(&fs::read_to_string(&props_path).unwrap())
         .unwrap()
@@ -614,11 +667,18 @@ fn a_superseded_launch_does_not_run() {
     assert!(process.get("launch_id").and_then(Value::as_str).is_some());
     process.insert("launch_id".into(), Value::Str("newer".into()));
     assert!(meerschaum_jobs::properties::write_properties(&props_path, &props).success);
-    std::thread::sleep(std::time::Duration::from_millis(2500));
+    supervisor.run();
     assert!(!marker.exists(), "the superseded launch ran");
     assert!(dir.path().join("jobs/twice").exists());
     assert!(!dir.path().join("jobs/twice/process.pid").exists());
     let props = Value::from_json_str(&fs::read_to_string(&props_path).unwrap()).unwrap();
+    assert_eq!(
+        props
+            .get("process")
+            .and_then(|process| process.get("launch_id"))
+            .and_then(Value::as_str),
+        Some("newer")
+    );
     assert!(props.get("result").is_none(), "{props:?}");
 }
 

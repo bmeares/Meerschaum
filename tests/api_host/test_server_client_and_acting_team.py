@@ -405,9 +405,8 @@ print('JSON:' + json.dumps(out))
 
 def test_users_page_list_and_changes_follow_the_acting_team(sandbox):
     """
-    Like Pipes and Connectors, Users & Teams is the acting team's view: an administrator acting
-    as a team sees that team's users and may not add users (no dialog, a refused submit) until
-    they switch back to All teams, where both work.
+    The Team switcher narrows the Users & Teams page and its callbacks to the selected
+    team's members. The administrator's stored roles apply again in All teams (Admin).
     """
     root, plugins = sandbox
     out = extract_json(run_python(root, plugins, SIGN_IN + '''
@@ -417,17 +416,22 @@ from dash._callback_context import context_value
 from dash._utils import AttributeDict
 from meerschaum.api.dash import build_dash_app
 build_dash_app()
-from meerschaum.api.dash import components
+from meerschaum.api.dash import components, teams
 from meerschaum.api.dash.callbacks import users as users_cb
 
-admin = sign_in('ua-admin', user_type='admin')
+admin = sign_in('ua-admin', user_type='admin', teams={'ua-other': 'manager'})
 sign_in('ua-member', teams={'ua-team': 'member'})
 sign_in('ua-outsider', teams={'ua-other': 'member'})
-context_value.set(AttributeDict(**{'triggered_inputs': [{'prop_id': 'users-add-button.n_clicks', 'value': 1}]}))
+assert teams.set_team_member('Everyone', 'ua-admin', 'manager')[0]
+
+def trigger(prop, value=1):
+    context_value.set(AttributeDict(triggered_inputs=[{'prop_id': prop, 'value': value}]))
 
 def view(acting_team, username):
     with components.console_nav_context('/dash/users', admin['session-id'], acting_team=acting_team):
+        trigger('users-add-button.n_clicks')
         listed = str(users_cb.render_users_page('/dash/users', None, 1, None, 'users', admin)[0])
+        listed_teams = str(users_cb.render_users_page('/dash/teams', None, 1, None, 'teams', admin)[0])
         try:
             users_cb.open_users_dialog(1, [], None, None, None, None, admin)
             dialog = True
@@ -439,13 +443,49 @@ def view(acting_team, username):
     return {
         'member': 'ua-member' in listed,
         'outsider': 'ua-outsider' in listed,
+        'teams': [name for name in ('Everyone', 'ua-team', 'ua-other') if name in listed_teams],
         'dialog': dialog,
         'added': 'Added' in str(added[2]),
     }
 
-print('JSON:' + json.dumps({'acting': view('ua-team', 'ua-new-1'), 'all': view(None, 'ua-new-2')}))
+def change_role(team, username):
+    trigger(json.dumps({'type': 'team-member-role', 'index': username}) + '.value', 'manager')
+    return users_cb.edit_team_members(
+        0, ['manager'], [], None, None, {'action': 'members', 'team': team}, 0, admin,
+    )[1]
+
+acting = view('ua-team', 'ua-new-1')
+everyone = view('Everyone', 'ua-new-2')
+all_teams = view(None, 'ua-new-3')
+
+with components.console_nav_context('/dash/teams', admin['session-id'], acting_team='ua-team'):
+    trigger(json.dumps({'type': 'team-action', 'action': 'members', 'index': 'ua-team'}) + '.n_clicks')
+    dialog = users_cb.open_teams_dialog(0, [1], admin)
+    acting['outsider_in_editor'] = 'ua-outsider' in str(dialog)
+    acting['edit_member'] = not change_role('ua-team', 'ua-member')
+    acting['edit_other_team_refused'] = 'may not change' in str(change_role('ua-other', 'ua-outsider'))
+    trigger('team-add-button.n_clicks')
+    result = users_cb.edit_team_members(
+        1, [], [], 'ua-outsider', 'member', {'action': 'members', 'team': 'ua-team'}, 0, admin,
+    )
+    acting['add_outsider_refused'] = bool(result[1])
+
+members = {team['name']: team['members'] for team in teams.list_teams()}
+assert members['ua-team'] == {'ua-member': 'manager'}
+assert members['ua-other'] == {'ua-admin': 'manager', 'ua-outsider': 'member'}
+print('JSON:' + json.dumps({'acting': acting, 'everyone': everyone, 'all': all_teams}))
 '''))
     assert out == {
-        'acting': {'member': True, 'outsider': False, 'dialog': False, 'added': False},
-        'all': {'member': True, 'outsider': True, 'dialog': True, 'added': True},
+        'acting': {
+            'member': True, 'outsider': False, 'teams': ['ua-team'], 'dialog': False, 'added': False,
+            'outsider_in_editor': False, 'edit_member': True, 'edit_other_team_refused': True,
+            'add_outsider_refused': True,
+        },
+        'everyone': {
+            'member': False, 'outsider': False, 'teams': ['Everyone'], 'dialog': False, 'added': False,
+        },
+        'all': {
+            'member': True, 'outsider': True, 'teams': ['Everyone', 'ua-team', 'ua-other'],
+            'dialog': True, 'added': True,
+        },
     }

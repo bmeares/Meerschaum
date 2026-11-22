@@ -279,10 +279,17 @@ fn a_job_stopped_while_waiting_never_runs() {
             .get("process")
             .is_some_and(|p| p.get("began").is_none())
     );
+    let paused = waiter.pause(Some(meerschaum_jobs::Seconds::Int(0)));
+    let waiting_status = waiter.status();
+    if waiting_status == Status::Paused {
+        assert!(waiter.resume(None).success);
+    }
     let stopped = waiter.stop(Some(meerschaum_jobs::Seconds::Int(10)));
     assert!(stopped.success, "{stopped}");
     assert!(common::wait_for(10.0, || waiter.status() == Status::Stopped));
     assert!(!marker.exists(), "the worker ran although it was stopped");
+    assert!(!paused.success, "the waiting supervisor was paused");
+    assert_eq!(waiting_status, Status::Running);
     let result = waiter.result();
     assert!(result.success, "{result:?}");
     assert!(

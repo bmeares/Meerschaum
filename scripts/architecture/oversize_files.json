@@ -18,7 +18,7 @@
  "meerschaum/api/dash/pipe_detail.py": 1050,
  "meerschaum/api/dash/pipes.py": 1648,
  "meerschaum/api/dash/pipes_table.py": 1387,
- "meerschaum/api/dash/users.py": 1197,
+ "meerschaum/api/dash/users.py": 1192,
  "meerschaum/connectors/sql/_native.py": 1767,
  "meerschaum/connectors/sql/_sql.py": 1816,
  "meerschaum/core/Pipe/_attributes.py": 1347,

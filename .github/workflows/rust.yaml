@@ -160,6 +160,9 @@ jobs:
       group: mrsm-rust-test
       cancel-in-progress: false
     timeout-minutes: 75
+    env:
+      # The runner owns this per-runner daemon, outside the supervised test tree.
+      SCCACHE_IDLE_TIMEOUT: '0'
     steps:
       - uses: actions/checkout@v7
         with: { clean: false, persist-credentials: false, ref: '${{ github.sha }}' }
@@ -183,7 +186,15 @@ jobs:
         env:
           MRSM_NO_AUTO_INSTALL: '1'
         # Live Valkey coverage runs below against owned fixtures, never an ambient service.
-        run: env -u MRSM_VALKEY_TEST_URL -u MRSM_VALKEY_FIRST_USER_TEST_URL -u MRSM_TEST_VALKEY_URI scripts/rust/ci.sh test
+        run: |
+          test_env="$(scripts/rust/ci.sh env)"
+          eval "$test_env"
+          # Connect to the existing daemon or start it before adopting test descendants.
+          if [[ "${RUSTC_WRAPPER:-}" == */sccache ]] && ! "$RUSTC_WRAPPER" --zero-stats; then
+            export MRSM_CI_SCCACHE=0 RUSTC_WRAPPER=''
+          fi
+          exec env -u MRSM_VALKEY_TEST_URL -u MRSM_VALKEY_FIRST_USER_TEST_URL -u MRSM_TEST_VALKEY_URI \
+            -u TMUX -u TMUX_PANE python3 scripts/ci/reap_test_processes.py scripts/rust/ci.sh test
       - name: Native account regressions on isolated server databases
         id: native_backend_checks
         if: ${{ needs.changes.outputs.full == 'true' }}

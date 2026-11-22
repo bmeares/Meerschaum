@@ -1,7 +1,4 @@
-//! Whether a pipe is registered is asked of the instance on every request, for that pipe's keys
-//! alone: the work of a data read does not grow with the number of registered pipes, and the
-//! answer is as fresh as the instance (a pipe another process deletes or registers is seen at the
-//! next request).
+//! Data and CSV routes read a pipe's current registration and parameters from the instance.
 
 use std::sync::Arc;
 
@@ -10,6 +7,7 @@ use axum::Router;
 use axum::http::StatusCode;
 use meerschaum_connector::{InstanceConnector, SyncOptions, pipe_ops};
 use meerschaum_connector_sql::SqlConnector;
+use meerschaum_connector_sql::driver::SqlParam;
 use meerschaum_connector_valkey::{MemoryBackend, ValkeyConnector};
 use meerschaum_core::{Map, Pipe, Value};
 use meerschaum_kernel::enforce::{PipeInput, pipe_enforce_dtypes};
@@ -109,39 +107,41 @@ async fn data_read(s: &Served, metric: &str) -> (StatusCode, Vec<String>) {
     (r.status, log)
 }
 
-/// The statements of a warm data read (after one read has populated the server's caches).
-async fn warm_data_read(s: &Served, metric: &str) -> Vec<String> {
-    let (status, _) = data_read(s, metric).await;
-    assert_eq!(status, StatusCode::OK);
-    let (status, log) = data_read(s, metric).await;
-    assert_eq!(status, StatusCode::OK, "{log:#?}");
-    log
-}
-
-/// The part of a statement that filters rows (between `WHERE` and `ORDER BY`).
-fn filter_of(statement: &str) -> &str {
-    let filter = statement.split_once("WHERE").map_or("", |(_, rest)| rest);
-    filter
-        .split_once("ORDER BY")
-        .map_or(filter, |(head, _)| head)
-}
-
 #[tokio::test]
-async fn a_data_read_runs_the_same_statements_however_many_pipes_are_registered() {
-    let small = served().await;
-    register(small.conn.as_ref(), "target").await;
-    let alone = warm_data_read(&small, "target").await;
-
-    let large = served().await;
-    register(large.conn.as_ref(), "target").await;
-    register_fillers(&large.conn, 60).await;
-    let crowded = warm_data_read(&large, "target").await;
-    assert_eq!(alone.len(), crowded.len(), "{alone:#?}\n{crowded:#?}");
-    // Every read of the pipes table names the pipe: none lists the whole catalog.
-    for statement in crowded.iter().filter(|s| s.contains("FROM mrsm_pipes")) {
+async fn a_cold_sqlite_data_read_searches_the_registration_index() {
+    let s = served().await;
+    register(s.conn.as_ref(), "target").await;
+    register_fillers(&s.conn, 60).await;
+    let (status, log) = data_read(&s, "target").await;
+    assert_eq!(status, StatusCode::OK, "{log:#?}");
+    let catalog_reads: Vec<_> = log
+        .iter()
+        .filter(|s| s.contains("FROM mrsm_pipes"))
+        .collect();
+    // The session-table guard checks the named pipe before the read handler.
+    let [sessions, lookup] = catalog_reads.as_slice() else {
+        panic!("Expected two keyed registration reads: {log:#?}");
+    };
+    let params = [
+        SqlParam::Text(SOURCE.into()),
+        SqlParam::Text("target".into()),
+        SqlParam::Text("None".into()),
+        SqlParam::Text("mrsm".into()),
+    ];
+    for (query, binds) in [(sessions, &params[..2]), (lookup, &params[..])] {
+        let plan = s
+            .conn
+            .read_params(&format!("EXPLAIN QUERY PLAN {query}"), binds)
+            .await
+            .unwrap();
+        let details = pipe_ops::frame_to_docs(&plan)
+            .into_iter()
+            .filter_map(|row| row.get("detail").map(KValue::py_str))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(
-            filter_of(statement).contains("metric_key"),
-            "a catalog read: {statement}"
+            details.contains("SEARCH mrsm_pipes USING INDEX uq_mrsm_pipes_keys"),
+            "{details}"
         );
     }
 }
@@ -194,6 +194,57 @@ async fn a_pipe_another_process_registers_is_registered_at_the_next_read() {
     assert_eq!(data_read(&s, "target").await.0, StatusCode::OK);
     let r = get(&s.app, &format!("/pipes/{SOURCE}/target/None/csv")).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+}
+
+#[tokio::test]
+async fn both_read_routes_use_another_connections_edits_and_replacements() {
+    let s = served().await;
+    register(s.conn.as_ref(), "target").await;
+    let other = SqlConnector::from_uri("lookup_other", &s.uri)
+        .await
+        .unwrap();
+    for suffix in ["data", "csv"] {
+        let r = get(&s.app, &format!("/pipes/{SOURCE}/target/None/{suffix}")).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+        assert!(r.text().contains("value"), "{}", r.text());
+    }
+
+    let mut pipe = pipe(&other, "target");
+    for (step, target, marker) in [
+        ("edit", "new_lookup_target", "edited_value"),
+        ("replace", "replacement_lookup_target", "replacement_value"),
+    ] {
+        assert!(
+            other
+                .exec(&format!("CREATE TABLE {target} ({marker} INTEGER)"))
+                .await
+                .is_some()
+        );
+        assert!(
+            other
+                .exec(&format!("INSERT INTO {target} VALUES (42)"))
+                .await
+                .is_some()
+        );
+        let parameters: Value =
+            serde_json::from_value(serde_json::json!({"target": target})).unwrap();
+        if step == "edit" {
+            pipe.set_parameters(parameters.to_map());
+            let result = other.edit_pipe(&pipe, false).await;
+            assert!(result.success, "{result}");
+        } else {
+            let result = other.delete_pipe(&pipe).await;
+            assert!(result.success, "{result}");
+            pipe.set_parameters(parameters.to_map());
+            let result = other.register_pipe(&pipe).await;
+            assert!(result.success, "{result}");
+        }
+        for suffix in ["data", "csv"] {
+            let r = get(&s.app, &format!("/pipes/{SOURCE}/target/None/{suffix}")).await;
+            assert_eq!(r.status, StatusCode::OK, "{step}/{suffix}: {}", r.text());
+            assert!(r.text().contains(marker), "{step}/{suffix}: {}", r.text());
+        }
+    }
 }
 
 #[tokio::test]

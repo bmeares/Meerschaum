@@ -30,6 +30,34 @@ fn data_args(ctx: &Ctx) -> Result<DataArgs, ApiError> {
     })
 }
 
+/// Use the same current registration for access checks, date bounds and the data read.
+async fn visible_registration(
+    ctx: &Ctx,
+    access: &Access,
+    ck: &str,
+    mk: &str,
+    lk: &str,
+    missing: &'static str,
+) -> Result<(Arc<dyn InstanceConnector>, Arc<PipeHandle>), ApiError> {
+    let ik = ctx.instance_keys();
+    let conn = ctx.state.get_api_connector(ik.as_deref())?;
+    let pipe = ctx.state.pipe_from_path(&conn, ck, mk, Some(lk))?;
+    let index = visibility_index(ctx, access).await?;
+    let registered = ctx
+        .state
+        .registered_pipe(&conn, &pipe, ik.as_deref())
+        .await?;
+    check_pipe_visibility(
+        access,
+        &conn,
+        registered.as_ref().map_or(&pipe, |h| &h.pipe),
+        index.as_deref(),
+    )?;
+    let h = registered.ok_or_else(|| ApiError::new(409, missing))?;
+    refuse_protected_read(&h.pipe)?;
+    Ok((conn, h))
+}
+
 pub(super) async fn get_pipe_data(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
     let original = crate::executor::pipe_operation::ReadRequest::capture(&ctx, PIPES_READ).await?;
     let access = original.initial().clone();
@@ -39,18 +67,18 @@ pub(super) async fn get_pipe_data(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiRes
     let double_precision = q.int("double_precision", 15)?;
     let geometry_format = q.str_or("geometry_format", "wkb_hex");
     let args = data_args(&ctx)?;
-    let ik = ctx.instance_keys();
-    let (conn, h) = visible(&ctx, &access, &ck, &mk, &lk, false).await?;
+    let (conn, h) = visible_registration(
+        &ctx,
+        &access,
+        &ck,
+        &mk,
+        &lk,
+        "Pipe must be registered with the datetime column specified.",
+    )
+    .await?;
     let defaults = &ctx.state.config.pipe_defaults;
     let begin = pipe_methods::parse_date_bound(&conn, &h.pipe, q.get("begin"), defaults).await?;
     let end = pipe_methods::parse_date_bound(&conn, &h.pipe, q.get("end"), defaults).await?;
-    if !ctx.state.is_registered(&h.pipe, ik.as_deref()).await? {
-        return Err(ApiError::new(
-            409,
-            "Pipe must be registered with the datetime column specified.",
-        ));
-    }
-    refuse_protected_read(&h.pipe)?;
     let query = DataQuery {
         select_columns: nonempty(args.select_columns),
         omit_columns: nonempty(args.omit_columns),
@@ -140,6 +168,9 @@ fn doc_value(v: &meerschaum_kernel::Value) -> Value {
 
 fn refuse_protected_read(pipe: &Pipe) -> Result<(), ApiError> {
     let t = target(pipe);
+    if crate::web::session_target(&t) {
+        return Err(ApiError::new(403, "The session table is internal."));
+    }
     if meerschaum_connector_api::routes::PROTECTED_TARGETS.contains(&t.as_str()) {
         return Err(ApiError::new(
             409,
@@ -196,12 +227,8 @@ pub(super) async fn get_pipe_csv(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResu
     let access = original.initial().clone();
     let q = &ctx.query;
     let params = parse_params(q.get("params"))?;
-    let ik = ctx.instance_keys();
-    let (conn, h) = visible(&ctx, &access, &ck, &mk, &lk, false).await?;
-    refuse_protected_read(&h.pipe)?;
-    if !ctx.state.is_registered(&h.pipe, ik.as_deref()).await? {
-        return Err(ApiError::new(409, "Pipe must be registered."));
-    }
+    let (conn, h) =
+        visible_registration(&ctx, &access, &ck, &mk, &lk, "Pipe must be registered.").await?;
     let defaults = &ctx.state.config.pipe_defaults;
     let mut begin =
         pipe_methods::parse_date_bound(&conn, &h.pipe, q.get("begin"), defaults).await?;

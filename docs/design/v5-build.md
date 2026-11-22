@@ -261,6 +261,8 @@ scripts/rust/ci.sh parity         # reference harness (below)
 CI also sets `CARGO_INCREMENTAL=0`, which only changes how workspace crates are cached, not the results.
 On a self-hosted runner `ci.sh` also turns on sccache and nextest (see "CI: what runs when"); to try them locally:
 `MRSM_CI_ACCEL=1 scripts/rust/ci.sh test` (installs the pinned tools under `$MRSM_CI_CACHE`, default `~/.cache/mrsm-ci`).
+Nextest runs at most two tests from the API host and team executor suites at once. The Rust test
+step reaps its own detached children on exit or cancellation and fails if any survive a completed run.
 
 ## Disk on the self-hosted runner
 
@@ -382,9 +384,8 @@ and rejects dependency-install requests. Any failed operation is a release block
 
 ## Docker publication
 
-**The candidate half has run on GitHub; the publish half has not.** Two candidate runs of 5.1.2
-passed every job (results at the end of this section). No `publish=true` run has executed
-`promote` or `publish`: the first one must confirm the two items listed there.
+Two candidate runs of 5.1.2 passed every gate (results at the end of this section). Rehearse the
+first publication through this workflow to verify GitHub's registry access and the Docker Hub copy.
 
 It exists because the self-hosted host uploads at under 1 MB/s: promoting 5.1.1 from that host took
 3 h 28 min for amd64 and 2 h 06 min for arm64. Image bytes now move between registries, and the
@@ -404,17 +405,21 @@ self-hosted host only downloads.
    and runs the installed Team executor suite; its receipt is `docker-executors-amd64`. It pushes
    nothing.
 
-Publish with the same SDK run plus `publish=true image_run_id=DOCKER_RUN_ID`:
+Rehearse with the same SDK run plus `rehearse=true image_run_id=DOCKER_RUN_ID`. With publication
+authorized, use `publish=true` in place of `rehearse=true`:
 
 3. `promote` (hosted, per architecture) verifies the sealed SDK again, fetches both receipts from
    the candidate run, checks that the digests are still staged, then copies exactly those digests to
    `bmeares/meerschaum:<version>-<group>-<arch>` registry to registry
    (`imagetools create --prefer-index=false`) and checks digest, config, platform, revision and user.
-4. `publish` (hosted) runs `buildx.sh --merge` and checks every multi-architecture tag's platforms.
+4. `publish` (hosted) assembles indexes from the receipt digests on Docker Hub and checks that
+   every platform points to the exact tested manifest. With `publish=true`, it moves release
+   aliases only after every versioned index passes. Rehearsals write tags with a
+   `-check-<run>-<attempt>` suffix and stop after verifying the indexes.
 
 Publication never rebuilds. A missing staged digest stops it (exit code 2): dispatch a new candidate
 run, which reruns every gate, and publish that one. Only `buildx` may write packages; the Docker Hub
-secrets appear only in the publish-gated jobs. Repository variable `DOCKER_RUNNER=self-hosted` moves
+secrets appear only in the promotion and index jobs. Repository variable `DOCKER_RUNNER=self-hosted` moves
 `buildx` back to the self-hosted runners (persistent per-architecture builders limited to 16 CPUs,
 64 GiB and a 100 GB cache; arm64 under QEMU; no registry cache). That fallback still stages on GHCR,
 so it uploads every image from the slow host.
@@ -467,11 +472,12 @@ Two runs of the same 5.1.2 commit and SDK candidate, the second against the cach
 - **arm64** builds and smokes natively, including the native Factory manifest check, and the pinned
   `rustup-init` and toolchain install on both.
 
-### What the first publish run must confirm
+### What the first rehearsal must confirm
 
-1. `promote` (hosted) pulls the staged digests with `packages: read`.
-2. The Docker Hub tag's digest equals the candidate digest, then `--merge` and the platform check
-   pass.
+1. `promote` reads the staged digests with `packages: read`. If the GHCR candidate and build cache
+   packages were made private, confirm the candidate's `executors` job can read its image too.
+2. Docker Hub's temporary architecture tags serve the candidate digests, and the temporary indexes
+   reference the tested manifests for every release platform.
 
 ## Crate names on crates.io (§15)
 

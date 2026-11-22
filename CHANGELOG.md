@@ -12,7 +12,7 @@ Maintenance release: leaner Docker images that share layers, stricter SQL checks
 
 - **Non-administrator SQL is checked more strictly.** Through the API and MCP, a query or pipe definition from a caller who is not an administrator is now refused when any SQL dialect would read it as more than one statement or as a write: a `;` inside a dollar-quoted string (`$$a;b$$`), or a mutating keyword after `#` or after `--` with no space. Administrators and local `mrsm` commands are unaffected.
 - **Docker images run as UID and GID 1000.** This was already the default; images built by the release workflow no longer inherit the build host's IDs.
-- **A connector whose `port` is not a number is refused.** A `sql` connector with a `port` such as `abc` or `true` used to connect to another port without saying so (the flavor's default, or port 1). Connecting now fails with `Invalid port 'abc'.`, as in Meerschaum 4.
+- **A standalone SQL `port` must be an integer.** Values like `abc`, `true` and `5432.0` are refused. When you supply a connection URI, Meerschaum uses the port from that URI.
 
 #### Highlights & Fixes
 
@@ -35,19 +35,20 @@ Maintenance release: leaner Docker images that share layers, stricter SQL checks
   A refused new window no longer blocks later ones, panes on API-only hosts get `TERM`, and a closed session tells the browser to stop instead of reconnecting.
 
 - **The Users page follows the acting team.**  
-  An administrator viewing the console as a team sees and manages that team's users only; switch back to `Everyone` to manage all users.
+  The Users & Teams page follows the selected team. Choose **All teams (Admin)** to return to global administration.
 
 - **One console permission check.**  
   An isolated team member's permissions are computed in one place, so the result no longer depends on which console page loaded first.
 
-- **Reading a pipe through the API stays fast as the instance grows.**  
-  Each data request confirmed its pipe was registered by reading the instance's whole list of pipes. On `sql` and `valkey` instances it now reads that one pipe: with 2,000 pipes on SQLite, the check takes 3.6 ms per request instead of 108 ms.
+- **Faster API reads on large SQL instances.** Data and CSV requests look up the requested pipe's registration by key. The registration check took 3.6 ms per request with 2,000 pipes on SQLite, down from 108 ms.
 
 - **In-place syncs stay on the pipe's instance.**  
   A pipe whose source is the engine's home database but whose instance is another database no longer runs its sync inside the source database.
 
 - **Remote actions report their result on a busy host.**  
   An action sent to an API instance (`mrsm api main show version`, `APIConnector.do_action()`) or a job watched in the console could end with `No result available.` although the job had succeeded: its log stream read the result before the job's supervisor had saved it. The stream now waits up to two seconds for the result, and the client reads the saved result when an older server sends none.
+
+- **Pausing a job waits for its worker.** If you pause a job while it is starting, its supervisor stays active and can still stop the job when the executor exits.
 
 - **SQLite and GeoPackage reads see a column a sync just added.**  
   After a sync added a column, the next read on another pooled connection could return it named `"column"`, quotes included, so the column looked missing. Pooled connections now reload a changed table layout before they are used.

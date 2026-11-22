@@ -11,7 +11,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-fn session_target(target: &str) -> bool {
+pub(crate) fn session_target(target: &str) -> bool {
     target
         .rsplit('.')
         .next()

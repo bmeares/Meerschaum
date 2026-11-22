@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use indexmap::IndexMap;
-use meerschaum_connector::{InstanceConnector, PipesKeysQuery};
+use meerschaum_connector::{InstanceConnector, PipeId, PipeKeysEntry, PipesKeysQuery};
 use meerschaum_core::{Map, Pipe, Value};
 
 use crate::auth;
@@ -401,6 +401,50 @@ impl AppState {
             .map_err(|e| ApiError::exception("Failed to build a pipe", e))
     }
 
+    /// Build an unhydrated handle for a generic pipe route.
+    pub(crate) fn pipe_from_path(
+        &self,
+        conn: &Arc<dyn InstanceConnector>,
+        connector_keys: &str,
+        metric_key: &str,
+        location_key: Option<&str>,
+    ) -> Result<Pipe, ApiError> {
+        check_pipe_connector_keys(connector_keys)?;
+        let location_key = normalize_location(location_key);
+        self.build_pipe(
+            conn,
+            connector_keys,
+            metric_key,
+            location_key.as_deref(),
+            None,
+        )
+    }
+
+    async fn registered_handle(
+        &self,
+        conn: &Arc<dyn InstanceConnector>,
+        identity: Option<PipeId>,
+        entry: &PipeKeysEntry,
+        location_key: Option<&str>,
+    ) -> Result<Arc<PipeHandle>, ApiError> {
+        let params = value_to_parameters(entry.extra.as_ref());
+        let needs_hydration = params.is_none();
+        let mut pipe = self.build_pipe(
+            conn,
+            &entry.connector_keys,
+            &entry.metric_key,
+            location_key,
+            params,
+        )?;
+        if needs_hydration {
+            hydrate(conn, &mut pipe).await?;
+        }
+        if let Some(identity) = identity {
+            pipe.set_registration_id(Some(identity.to_string()));
+        }
+        Ok(Arc::new(PipeHandle::new(pipe)))
+    }
+
     /// `pipes(instance_keys, refresh)`: the shared pipes dictionary.
     pub async fn pipes(
         &self,
@@ -425,32 +469,14 @@ impl AppState {
         let mut dict = PipesDict::new();
         for (identity, entry) in keys {
             let lk = normalize_location(entry.location_key.as_deref());
-            let params = match &entry.extra {
-                Some(Value::Map(m)) => Some(m.clone()),
-                Some(Value::Str(s)) => match Value::from_json_str(s) {
-                    Ok(Value::Map(m)) => Some(m),
-                    _ => None,
-                },
-                _ => None,
-            };
-            let mut pipe = self.build_pipe(
-                &conn,
-                &entry.connector_keys,
-                &entry.metric_key,
-                lk.as_deref(),
-                params.clone(),
-            )?;
-            if params.is_none() {
-                hydrate(&conn, &mut pipe).await?;
-            }
-            if let Some(identity) = identity {
-                pipe.set_registration_id(Some(identity.to_string()));
-            }
+            let handle = self
+                .registered_handle(&conn, identity, &entry, lk.as_deref())
+                .await?;
             dict.entry(entry.connector_keys.clone())
                 .or_default()
                 .entry(entry.metric_key.clone())
                 .or_default()
-                .insert(lk, Arc::new(PipeHandle::new(pipe)));
+                .insert(lk, handle);
         }
         let dict = Arc::new(dict);
         let mut guard = self.pipes.lock().await;
@@ -480,21 +506,17 @@ impl AppState {
     ) -> Result<Arc<PipeHandle>, ApiError> {
         let location_key = normalize_location(location_key);
         let conn = self.get_api_connector(instance_keys)?;
-        if let Some((status, detail)) =
-            meerschaum_connector_api::routes::refuse_mrsm_connector(connector_keys)
-        {
-            // PARITY: `api/__init__.py:270`.
-            return Err(ApiError::new(status, detail));
-        }
-        let dict = self.pipes(instance_keys, false).await?;
-        if !refresh
-            && let Some(h) = dict
+        check_pipe_connector_keys(connector_keys)?;
+        if !refresh {
+            let dict = self.pipes(instance_keys, false).await?;
+            if let Some(h) = dict
                 .get(connector_keys)
                 .and_then(|m| m.get(metric_key))
                 .and_then(|l| l.get(&location_key))
-            && h.created.elapsed().as_secs_f64() < self.config.attributes_cache_seconds
-        {
-            return Ok(h.clone());
+                && h.created.elapsed().as_secs_f64() < self.config.attributes_cache_seconds
+            {
+                return Ok(h.clone());
+            }
         }
         let mut pipe = self.build_pipe(
             &conn,
@@ -509,35 +531,70 @@ impl AppState {
 
     /// `is_pipe_registered(pipe, pipes(instance_keys, refresh=True))`: whether the instance
     /// lists the pipe's keys now.
-    ///
-    /// On a SQL or Valkey instance the listing is asked for the pipe's connector and metric keys
-    /// alone (the same `registered_pipes` read, filtered), so the cost does not grow with the
-    /// catalog; the location is matched here exactly as the full catalog would match it. Other
-    /// instances (API, plugins) define their own filters, so they list the whole catalog.
     pub async fn is_registered(
         &self,
         pipe: &Pipe,
         instance_keys: Option<&str>,
     ) -> Result<bool, ApiError> {
-        let lk = pipe.location_key().map(String::from);
         let conn = self.get_api_connector(instance_keys)?;
+        Ok(self
+            .registered_pipe(&conn, pipe, instance_keys)
+            .await?
+            .is_some())
+    }
+
+    /// Read the current registration, with the parameters and identity from the same lookup.
+    /// SQL and Valkey can filter catalog results by connector and metric; Valkey still loads
+    /// the catalog before filtering. Match the location with the same rules as the full catalog.
+    pub(crate) async fn registered_pipe(
+        &self,
+        conn: &Arc<dyn InstanceConnector>,
+        pipe: &Pipe,
+        instance_keys: Option<&str>,
+    ) -> Result<Option<Arc<PipeHandle>>, ApiError> {
+        let location_key = pipe.location_key().map(String::from);
         let Some(query) = keyed_registration_query(conn.as_ref(), pipe) else {
             let dict = self.pipes(instance_keys, true).await?;
             return Ok(dict
                 .get(pipe.connector_keys())
                 .and_then(|m| m.get(pipe.metric_key()))
-                .is_some_and(|l| l.contains_key(&lk)));
+                .and_then(|l| l.get(&location_key))
+                .cloned());
         };
         let entries = conn
             .registered_pipes(&query)
             .await
             .map_err(|e| ApiError::exception("Failed to fetch pipes' keys", e))?;
-        Ok(entries.iter().any(|(_, entry)| {
+        let entry = entries.into_iter().rev().find(|(_, entry)| {
             entry.connector_keys == pipe.connector_keys()
                 && entry.metric_key == pipe.metric_key()
-                && normalize_location(entry.location_key.as_deref()) == lk
-        }))
+                && normalize_location(entry.location_key.as_deref()) == location_key
+        });
+        let handle = match entry {
+            Some((identity, entry)) => Some(
+                self.registered_handle(conn, identity, &entry, location_key.as_deref())
+                    .await?,
+            ),
+            None => None,
+        };
+        if !Arc::ptr_eq(conn, &self.get_api_connector(instance_keys)?) {
+            return Err(ApiError::new(
+                503,
+                "The selected instance changed while loading its pipe catalog.",
+            ));
+        }
+        Ok(handle)
     }
+}
+
+fn check_pipe_connector_keys(connector_keys: &str) -> Result<(), ApiError> {
+    if let Some((status, detail)) =
+        meerschaum_connector_api::routes::refuse_mrsm_connector(connector_keys)
+    {
+        // PARITY: `api/__init__.py:270`.
+        return Err(ApiError::new(status, detail));
+    }
+    Ok(())
 }
 
 /// The keys query that lists exactly the registrations `pipe`'s connector and metric keys name
@@ -583,9 +640,13 @@ pub async fn hydrate(conn: &Arc<dyn InstanceConnector>, pipe: &mut Pipe) -> Resu
 
 /// The `parameters` of an attributes document (a dict, or a JSON string from some instances).
 pub fn parameters_of(attrs: &Map) -> Option<Map> {
-    match attrs.get("parameters")? {
-        Value::Map(m) => Some(m.clone()),
-        Value::Str(s) => match Value::from_json_str(s) {
+    value_to_parameters(attrs.get("parameters"))
+}
+
+fn value_to_parameters(value: Option<&Value>) -> Option<Map> {
+    match value {
+        Some(Value::Map(m)) => Some(m.clone()),
+        Some(Value::Str(s)) => match Value::from_json_str(s) {
             Ok(Value::Map(m)) => Some(m),
             _ => None,
         },

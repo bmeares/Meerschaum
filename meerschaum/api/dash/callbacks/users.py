@@ -390,10 +390,7 @@ dash_app.clientside_callback(
 
 
 def _viewer(session_store_data) -> access.Viewer:
-    """
-    The fresh viewer of a callback, narrowed to the acting team like every page's: an administrator
-    acting as a team may not change users or teams until they switch back to All teams.
-    """
+    """Resolve the callback's viewer with the current team selection."""
     return access.resolve_viewer(session_store_data, fresh=True)
 
 
@@ -772,16 +769,14 @@ def open_teams_dialog(new_clicks, action_clicks, *cancel_clicks_and_session):
     return _team_dialog('rename', team)
 
 
-def _members_body(team: Dict[str, Any], who: Any = None) -> Any:
+def _members_body(team: Dict[str, Any], who: access.Viewer) -> Any:
+    if who.acting_team is not None or who.is_isolated:
+        return build_team_members_editor(team, [])
     from meerschaum.api import get_api_connector
     try:
         user_names = sorted(str(name) for name in (get_api_connector().get_users() or []))
     except Exception:
         user_names = []
-    ### A walled-off manager does not learn the other accounts: administrators add new members.
-    viewer_obj = who if isinstance(who, access.Viewer) else (who.get('viewer') if isinstance(who, dict) else None)
-    if viewer_obj is not None and getattr(viewer_obj, 'is_isolated', False):
-        user_names = [name for name in user_names if name in team['members']]
     return build_team_members_editor(team, user_names)
 
 
@@ -1125,11 +1120,16 @@ def edit_team_members(add_clicks, roles, remove_clicks, new_member, new_role, ta
     team = _team_by_name(target.get('team'))
     if team is None or not may_manage_team(who, team):
         return no_update, alert_from_success_tuple((False, "You may not change this team's members.")), no_update
-    from meerschaum.api import get_api_connector
-    users = set(str(name) for name in (get_api_connector().get_users() or []))
     if trigger == 'team-add-button':
         if not add_clicks or not new_member:
             raise PreventUpdate
+        if who.acting_team is not None:
+            full_view = 'All teams (Admin)' if who.is_real_admin else 'All teams'
+            return no_update, alert_from_success_tuple((
+                False, f"Switch to {full_view} to add members.",
+            )), no_update
+        from meerschaum.api import get_api_connector
+        users = set(str(name) for name in (get_api_connector().get_users() or []))
         if new_member not in users:
             return no_update, alert_from_success_tuple((False, f"User '{new_member}' does not exist.")), no_update
         role = 'manager' if new_role == 'manager' else 'member'

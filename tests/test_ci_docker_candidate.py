@@ -96,9 +96,11 @@ def staged(tmp_path, monkeypatch):
     return receipts, record, registry, user
 
 
-def test_publication_copies_the_tested_digests_without_a_build(staged, monkeypatch):
+@pytest.mark.parametrize('rehearsal', [False, True])
+def test_publication_copies_the_tested_digests_without_a_build(staged, monkeypatch, rehearsal):
     receipts, record, registry, _ = staged
     calls = []
+    monkeypatch.setenv('GITHUB_RUN_ATTEMPT', '2')
 
     def run(args, **kwargs):
         calls.append(args)
@@ -108,14 +110,69 @@ def test_publication_copies_the_tested_digests_without_a_build(staged, monkeypat
     monkeypatch.setattr(docker.subprocess, 'run', run)
     monkeypatch.setattr(docker, 'registry_digest', lambda tag: next(
         e['digest'] for e in record['images'].values() if registry[tag] is not None and e['config'] == registry[tag]['config']))
-    docker.promote(receipts, 'linux/amd64', '123')
+    docker.promote(receipts, 'linux/amd64', '123', rehearsal=rehearsal)
+    suffix = '-check-456-2' if rehearsal else ''
     assert len(calls) == len(docker.GROUPS)
     for group in docker.GROUPS:
         assert ['docker', 'buildx', 'imagetools', 'create', '--prefer-index=false',
-                '-t', f'bmeares/meerschaum:5.0.0rc25-{group}-amd64',
+                '-t', f'bmeares/meerschaum:5.0.0rc25-{group}-amd64{suffix}',
                 f'{REPOSITORY}@{record["images"][group]["digest"]}'] in calls
     flat = ' '.join(' '.join(c) for c in calls)
     assert 'latest' not in flat and ' push' not in flat and 'buildx build' not in flat
+
+
+@pytest.mark.parametrize('mode', ['stable', 'prerelease', 'rehearsal', 'mismatch'])
+def test_indexes_use_exact_receipts_before_publishing_aliases(staged, monkeypatch, tmp_path, mode):
+    _, record, _, _ = staged
+    release = '5.0.0rc25' if mode == 'prerelease' else '5.1.2'
+    monkeypatch.setattr(docker, 'version', lambda: release)
+    monkeypatch.setenv('GITHUB_RUN_ATTEMPT', '2')
+    platforms = ['linux/amd64']
+    if mode != 'prerelease':
+        platforms.append('linux/arm64')
+
+    def fetch(run_id, platform, sdk_run, output):
+        assert (run_id, sdk_run) == ('456', '123')
+        if platform == 'linux/amd64':
+            return record
+        return {'images': {group: {'digest': _digest(10 + int(entry['digest'][-1]))}
+                           for group, entry in record['images'].items()}}
+
+    calls, manifests = [], {}
+
+    def run(args, **kwargs):
+        calls.append(args)
+        if len(calls) > len(docker.GROUPS):
+            # Every alias points to an immutable, already verified index.
+            assert args[-1] in manifests
+            return
+        sources = args[6:]
+        descriptors = [
+            {'platform': {'os': 'linux', 'architecture': p.split('/')[1]}, 'digest': source.split('@')[1]}
+            for p, source in zip(platforms, sources, strict=True)
+        ]
+        if mode == 'mismatch' and len(calls) == len(docker.GROUPS):
+            descriptors[0]['digest'] = _digest(999)
+        manifests[f'{docker.IMAGE}@{_digest(20 + len(calls))}'] = {'manifests': descriptors}
+
+    monkeypatch.setattr(docker, 'fetch_images', fetch)
+    monkeypatch.setattr(docker.subprocess, 'run', run)
+    monkeypatch.setattr(docker, 'registry_digest', lambda tag: _digest(20 + len(calls)))
+    monkeypatch.setattr(docker, 'command', lambda *args: manifests[args[-1]])
+    if mode == 'mismatch':
+        with pytest.raises(ValueError, match='tested platform digests'):
+            docker.publish_indexes(tmp_path, platforms, '123', '456')
+        assert len(calls) == len(docker.GROUPS)
+        return
+    docker.publish_indexes(tmp_path, platforms, '123', '456', rehearsal=mode == 'rehearsal')
+    suffix = '-check-456-2' if mode == 'rehearsal' else ''
+    assert [args[5] for args in calls[:len(docker.GROUPS)]] == [
+        f'{docker.IMAGE}:{release}-{group}{suffix}' for group in docker.GROUPS
+    ]
+    aliases = {arg for args in calls[len(docker.GROUPS):] for arg in args[4:-1] if arg != '-t'}
+    expected = {'stable': [*docker.GROUPS, f'{release}-api', release, 'latest', 'api'],
+                'prerelease': [f'{release}-api'], 'rehearsal': []}
+    assert aliases == {f'{docker.IMAGE}:{alias}' for alias in expected[mode]}
 
 
 def test_one_missing_digest_prevents_every_registry_mutation(staged, monkeypatch):

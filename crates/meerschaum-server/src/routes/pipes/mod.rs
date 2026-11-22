@@ -243,23 +243,43 @@ async fn authorize_catalog(
     Ok(result)
 }
 
-/// Whether `access` may see the registered pipe `ck|mk|lk` of the request's instance (an
-/// unregistered pipe has the default access): decided on the instance's pipes as of at most
-/// [`access::INDEX_TTL`] ago.
-async fn sees(
+/// Administrators need no catalog index for access checks.
+async fn visibility_index(
     ctx: &Ctx,
     access: &Access,
-    ck: &str,
-    mk: &str,
-    lk: Option<&str>,
-) -> Result<bool, ApiError> {
+) -> Result<Option<Arc<access::PipeIndex>>, ApiError> {
     if access.is_admin() {
-        return Ok(true);
+        return Ok(None);
     }
-    let index = access::pipe_index(&ctx.state, ctx.instance_keys().as_deref()).await?;
-    Ok(index
-        .get(ck, mk, lk)
-        .is_none_or(|p| access.can_see_indexed(p)))
+    access::pipe_index(&ctx.state, ctx.instance_keys().as_deref())
+        .await
+        .map(Some)
+}
+
+/// Check the pipe's own access and the instance's index of protected resources.
+fn check_pipe_visibility(
+    access: &Access,
+    conn: &Arc<dyn InstanceConnector>,
+    pipe: &Pipe,
+    index: Option<&access::PipeIndex>,
+) -> Result<(), ApiError> {
+    if !access.can_see_pipe(pipe) {
+        return Err(access::hidden_pipe(pipe));
+    }
+    if let Some(index) = index {
+        let indexed = index.get(
+            pipe.connector_keys(),
+            pipe.metric_key(),
+            pipe.location_key(),
+        );
+        if indexed.is_some_and(|p| !access.can_see_indexed(p))
+            || access::guard::check_pipe_target(conn.as_ref(), pipe, &index.hidden_targets(access))
+                .is_err()
+        {
+            return Err(access::hidden_pipe(pipe));
+        }
+    }
+    Ok(())
 }
 
 /// [`handle`] for a pipe `access` can see (else the `404` of a pipe that does not exist).
@@ -271,20 +291,9 @@ async fn visible(
     lk: &str,
     refresh: bool,
 ) -> Result<(Arc<dyn InstanceConnector>, Arc<PipeHandle>), ApiError> {
-    let location = normalize_location(Some(lk));
-    let visible = sees(ctx, access, ck, mk, location.as_deref()).await?;
+    let index = visibility_index(ctx, access).await?;
     let (conn, h) = handle(ctx, ck, mk, lk, refresh).await?;
-    if !visible || !access.can_see_pipe(&h.pipe) {
-        return Err(access::hidden_pipe(&h.pipe));
-    }
-    if !access.is_admin() {
-        let index = access::pipe_index(&ctx.state, ctx.instance_keys().as_deref()).await?;
-        if access::guard::check_pipe_target(conn.as_ref(), &h.pipe, &index.hidden_targets(access))
-            .is_err()
-        {
-            return Err(access::hidden_pipe(&h.pipe));
-        }
-    }
+    check_pipe_visibility(access, &conn, &h.pipe, index.as_deref())?;
     Ok((conn, h))
 }
 

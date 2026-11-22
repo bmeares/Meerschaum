@@ -291,13 +291,15 @@ pass `--prerelease` (and not `--latest`). Do not `git push origin --tags` (it wo
 
 ## 5.7 Docker **[needs explicit user authorization, separate from 5.4 to 5.6]**
 
-Use the same clean release commit for both dispatches. The SDK candidate must have
+Use the same clean release commit for the Docker runs. The SDK candidate must have
 passed every full gate before Docker consumes its sealed wheel and CLI. Local
 `buildx.sh` builds still default to source for development.
 
 ```bash
 # The candidate run uses no Docker Hub credentials (it stages on GHCR with the workflow token).
 gh workflow run docker-build.yaml --ref main -f candidate_run_id=SDK_RUN_ID -f size_gate=enforce
+# With authorization to write temporary Docker Hub tags, rehearse the first promotion.
+gh workflow run docker-build.yaml --ref main -f rehearse=true -f candidate_run_id=SDK_RUN_ID -f image_run_id=DOCKER_RUN_ID
 # After the Docker candidate passes, and publication is authorized:
 gh workflow run docker-build.yaml --ref main -f publish=true -f candidate_run_id=SDK_RUN_ID -f image_run_id=DOCKER_RUN_ID -f size_gate=enforce
 ```
@@ -305,12 +307,9 @@ gh workflow run docker-build.yaml --ref main -f publish=true -f candidate_run_id
 Dispatch the Docker candidate as soon as the SDK candidate succeeds and do the dev host upgrade and
 other preparation while it runs (14 minutes with a warm GHCR cache, 21 cold).
 
-**No publish run has executed `promote` or `publish` yet.** On the first one, check the two items
-under "What the first publish run must confirm" in `docs/design/v5-build.md` "Docker publication",
-which also explains the jobs, the pins and the `DOCKER_RUNNER=self-hosted` fallback. The candidate
-packages on GHCR are public unless made private. That fallback uploads every image
-from the self-hosted host at under 1 MB/s (promoting 5.1.1 from it took 3 h 28 min for amd64 and
-2 h 06 min for arm64).
+Before the first publication through this workflow, require a successful rehearsal. Rehearsal tags
+end in `-check-<run>-<attempt>`. See `docs/design/v5-build.md` "Docker publication" for GHCR access,
+the verification steps and the self-hosted fallback.
 
 The candidate run builds each architecture on hosted runners, pushes it to the GHCR staging
 repository (`ghcr.io/<owner>/<repo>/candidate`), runs every smoke, size gate and the facade smoke on

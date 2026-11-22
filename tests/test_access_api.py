@@ -63,6 +63,44 @@ def _conn(server, username: str, password: str):
     )
 
 
+def test_data_and_csv_reads_see_metadata_edited_outside_the_api(server):
+    from tests.console.conftest import USERNAME, PASSWORD
+    conn = _conn(server, USERNAME, PASSWORD)
+    key = f'p{uuid.uuid4().hex[:8]}'
+    local = mrsm.get_connector(
+        'sql', f'local_{key}', flavor='sqlite', database=str(server.root / 'w7console.db'),
+    )
+    first, updated = f'initial_{key}', f'updated_{key}'
+    pipe = mrsm.Pipe('fixture', key, instance=local, parameters={'target': first})
+    uri = f'/pipes/fixture/{key}/None'
+
+    try:
+        local.exec(f'CREATE TABLE {first} (initial_value INTEGER)')
+        local.exec(f'INSERT INTO {first} VALUES (17)')
+        local.exec(f'CREATE TABLE {updated} (external_value INTEGER)')
+        local.exec(f'INSERT INTO {updated} VALUES (42)')
+        success, message = pipe.register()
+        assert success, message
+        for route in ('data', 'csv'):
+            response = conn.get(f'{uri}/{route}')
+            assert response.status_code == 200, response.text
+            assert 'initial_value' in response.text
+
+        pipe.parameters = {'target': updated}
+        success, message = pipe.edit()
+        assert success, message
+        for route in ('data', 'csv'):
+            response = conn.get(f'{uri}/{route}')
+            assert response.status_code == 200, response.text
+            assert 'external_value' in response.text
+            assert '42' in response.text
+    finally:
+        if pipe.get_id() is not None:
+            pipe.delete()
+        for target in (first, updated):
+            local.exec(f'DROP TABLE IF EXISTS {target}')
+
+
 ### A pipe the caller cannot see answers like a missing one (`404`), which the façade reports.
 @pytest.mark.filterwarnings('ignore:.*Failed to load attributes')
 def test_teams_access_locks_and_roles_through_an_api_instance(server):

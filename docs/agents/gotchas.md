@@ -37,10 +37,10 @@ area you are changing.
   `crates/meerschaum-server/src/state.rs`); the `APIConnector` keeps short-lived client caches of
   attributes, existence and column types (`crates/meerschaum-connector-api/src/client/pipes/`).
   The server refuses `mrsm` connector keys on the generic routes.
-- **A data route asks the instance whether its pipe is registered on every request, never a cache**
-  (`AppState::is_registered`): a stale answer would be an access-control error. On `sql` and `valkey`
-  instances the check reads only that pipe's keys, so its cost does not grow with the catalog; `api`
-  and plugin instances, and keys that a keys query reads as syntax, still check the whole catalog.
+- **Data and CSV routes read the registration on every request** (`AppState::registered_pipe`).
+  They use its current parameters for authorization, date bounds and the data read. SQL can use
+  the catalog index for ordinary connector and metric keys. Valkey still reads the catalog before
+  filtering. API and plugin instances, and keys interpreted as filter syntax, use a fresh catalog.
 
 ## Jobs
 

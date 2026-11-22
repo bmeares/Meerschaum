@@ -5,7 +5,8 @@ A candidate run pushes each architecture's images to the GHCR staging repository
 digests (`record`); the amd64 `full` image is pulled by digest on the native Docker runner for the
 installed Team executor suite (`executors`). Publication fetches both receipts from that successful
 run (`fetch`), checks them against a freshly verified sealed SDK and the staging registry (`check`),
-and copies exactly those digests to Docker Hub registry to registry (`promote`): nothing is rebuilt.
+copies the digests to Docker Hub (`promote`), and verifies the resulting multi-platform indexes
+before moving release aliases (`index`). A rehearsal writes only run-specific tags.
 """
 from __future__ import annotations
 
@@ -296,14 +297,15 @@ def check_publication(receipts: Path, platform: str, sdk_run: str, sdk: Path | N
 
 
 def promote(receipts: Path, platform: str, sdk_run: str, *, dry_run: bool = False,
-            sdk: Path | None = None) -> None:
+            sdk: Path | None = None, rehearsal: bool = False) -> None:
     """Copy the tested digests to the architecture tags of the public repository, registry to registry."""
     # Validate the whole catalog before the first registry mutation.
     record = check_publication(receipts, platform, sdk_run, sdk=sdk)
     arch = platform.split('/')[1]
+    suffix = rehearsal_suffix(rehearsal)
     for group in GROUPS:
         entry = record['images'][group]
-        tag = f'{IMAGE}:{record["version"]}-{group}-{arch}'
+        tag = f'{IMAGE}:{record["version"]}-{group}-{arch}{suffix}'
         # One source manifest is copied as it is (no index around it), so the tag serves the tested digest.
         args = ['docker', 'buildx', 'imagetools', 'create', '--prefer-index=false', '-t', tag,
                 f'{record["repository"]}@{entry["digest"]}']
@@ -316,10 +318,61 @@ def promote(receipts: Path, platform: str, sdk_run: str, *, dry_run: bool = Fals
         check_registry_image(tag, entry, platform, record['source']['commit'])
 
 
+def rehearsal_suffix(rehearsal: bool) -> str:
+    if not rehearsal:
+        return ''
+    run, attempt = (os.environ[key] for key in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT'))
+    if not run.isdecimal() or not attempt.isdecimal():
+        raise ValueError('Rehearsal requires a numeric Actions run and attempt.')
+    return f'-check-{run}-{attempt}'
+
+
+def publish_indexes(output: Path, platforms: list[str], sdk_run: str, image_run: str,
+                    *, rehearsal: bool = False) -> None:
+    """Build versioned indexes from the receipts, then move aliases to the verified indexes."""
+    if not platforms or len(set(platforms)) != len(platforms) or not set(platforms) <= TARGETS.keys():
+        raise ValueError('Invalid Docker publication platforms.')
+    records = {p: fetch_images(image_run, p, sdk_run, output / p.split('/')[1]) for p in platforms}
+    ver = version()
+    suffix = rehearsal_suffix(rehearsal)
+    indexes = {}
+    for group in GROUPS:
+        expected = {platform: record['images'][group]['digest'] for platform, record in records.items()}
+        tag = f'{IMAGE}:{ver}-{group}{suffix}'
+        sources = [f'{IMAGE}@{digest}' for digest in expected.values()]
+        subprocess.run(['docker', 'buildx', 'imagetools', 'create', '-t', tag, *sources], check=True)
+        digest = registry_digest(tag)
+        manifest = command('docker', 'buildx', 'imagetools', 'inspect', '--raw', f'{IMAGE}@{digest}')
+        descriptors = manifest.get('manifests', [])
+        actual = {
+            f'{entry["platform"]["os"]}/{entry["platform"]["architecture"]}': entry['digest']
+            for entry in descriptors
+        }
+        if len(descriptors) != len(expected) or actual != expected:
+            raise ValueError(f'{tag} does not contain exactly the tested platform digests.')
+        indexes[group] = digest
+    if rehearsal:
+        return
+
+    # The release matrix has two platforms for stable releases and only amd64 for prereleases.
+    stable = len(platforms) == len(TARGETS)
+    for group, digest in indexes.items():
+        aliases = [group] if stable else []
+        if group == 'full':
+            aliases.append(f'{ver}-api')
+            if stable:
+                aliases.extend((ver, 'latest', 'api'))
+        if aliases:
+            tags = [arg for alias in aliases for arg in ('-t', f'{IMAGE}:{alias}')]
+            subprocess.run(['docker', 'buildx', 'imagetools', 'create', *tags, f'{IMAGE}@{digest}'], check=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('sdk', 'record', 'executors', 'fetch', 'check', 'promote'))
-    parser.add_argument('--platform', choices=tuple(TARGETS), required=True)
+    parser.add_argument('command', choices=('sdk', 'record', 'executors', 'fetch', 'check', 'promote', 'index'))
+    platform = parser.add_mutually_exclusive_group(required=True)
+    platform.add_argument('--platform', choices=tuple(TARGETS))
+    platform.add_argument('--platforms')
     parser.add_argument('--sdk-run-id', required=True)
     parser.add_argument('--image-run-id')
     parser.add_argument('--output', type=Path)
@@ -329,7 +382,14 @@ def main() -> None:
     parser.add_argument('--metadata-dir', type=Path)
     parser.add_argument('--repository')
     parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--rehearsal', action='store_true')
     args = parser.parse_args()
+    if (args.command == 'index') != bool(args.platforms):
+        parser.error('Use --platforms for index and --platform for the other commands.')
+    if args.dry_run and args.command != 'promote':
+        parser.error('--dry-run is available for promote.')
+    if args.rehearsal and args.command not in ('promote', 'index'):
+        parser.error('--rehearsal is available for promote and index.')
     try:
         if args.command == 'sdk':
             prepare_sdk(args.sdk_run_id, args.platform, args.output)
@@ -341,8 +401,12 @@ def main() -> None:
             fetch_images(args.image_run_id, args.platform, args.sdk_run_id, args.output)
         elif args.command == 'check':
             check_publication(args.receipts, args.platform, args.sdk_run_id, sdk=args.sdk)
+        elif args.command == 'index':
+            publish_indexes(args.output, args.platforms.split(','), args.sdk_run_id, args.image_run_id,
+                            rehearsal=args.rehearsal)
         else:
-            promote(args.receipts, args.platform, args.sdk_run_id, dry_run=args.dry_run, sdk=args.sdk)
+            promote(args.receipts, args.platform, args.sdk_run_id, dry_run=args.dry_run, sdk=args.sdk,
+                    rehearsal=args.rehearsal)
     except MissingImages as error:
         parser.exit(2, str(error) + '\n')
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as error:

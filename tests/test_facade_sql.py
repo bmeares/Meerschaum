@@ -32,6 +32,39 @@ def test_rust_connector_is_built_lazily_and_not_pickled(conn):
     pickle.dumps(pipe)
 
 
+def test_sql_option_values_use_python_string_conversion(conn):
+    rendered = []
+
+    class OptionValue(dict):
+        def __str__(self):
+            rendered.append(True)
+            return 'option text'
+
+    conn.options = {'application_name': OptionValue()}
+    assert conn.value('SELECT 1') == 1
+    assert rendered
+
+
+def test_a_sql_uri_overrides_an_invalid_standalone_port(tmp_path):
+    conn = mrsm.get_connector(
+        'sql', 'facade_' + uuid.uuid4().hex,
+        uri=f'sqlite:///{(tmp_path / "uri.db").as_posix()}', port='invalid',
+    )
+    assert conn.port == 'invalid'
+    assert conn.value('SELECT 1') == 1
+
+
+@pytest.mark.parametrize('port', [5432.0, 5432.5, True, 'invalid'])
+def test_sql_connector_rejects_non_integer_ports_when_used(port):
+    conn = mrsm.get_connector(
+        'sql', 'facade_' + uuid.uuid4().hex, flavor='postgresql',
+        host='localhost', port=port, username='test', password='unused', database='test',
+    )
+    with pytest.raises(RuntimeError, match='Invalid port') as exc:
+        conn._core_connector(discover_schema=False)
+    assert f"Invalid port '{port}'." in str(exc.value)
+
+
 def test_pipe_index_names_come_from_the_core(conn):
     pipe = mrsm.Pipe(
         'facade', 'index_names', instance=conn, columns={'datetime': 'dt'},

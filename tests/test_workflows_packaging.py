@@ -183,7 +183,7 @@ def test_candidates_are_staged_on_ghcr_and_recorded_by_digest(docker_build):
     assert 'ghcr.io/${GITHUB_REPOSITORY,,}' in registry
     assert 'candidates=$repository/candidate' in registry and 'cache=$repository/buildcache' in registry
     buildx = jobs['buildx']
-    assert buildx['if'] == '${{ !inputs.publish }}', 'a publication never builds'
+    assert buildx['if'] == '${{ !inputs.publish && !inputs.rehearse }}'
     build = _step(buildx, 'Build Docker images')['run']
     assert '--candidate "$CANDIDATES" --metadata-dir "$IMAGE_RECEIPT_DIR/metadata"' in build
     assert 'if [ "$SELF_HOSTED" != true ]; then args+=(--cache-ref "$BUILD_CACHE"); fi' in build
@@ -206,6 +206,7 @@ def test_candidates_are_staged_on_ghcr_and_recorded_by_digest(docker_build):
 
     promote = jobs['promote']
     assert promote['runs-on'] == 'ubuntu-latest' and 'inputs.publish' in promote['if']
+    assert 'inputs.rehearse' in promote['if']
     text = _job_text(promote)
     assert text.index('docker_candidate.py sdk') < text.index('docker_candidate.py fetch') \
         < text.index('docker_candidate.py check') < text.index('docker_candidate.py promote')
@@ -216,8 +217,8 @@ def test_candidates_are_staged_on_ghcr_and_recorded_by_digest(docker_build):
     assert publish['runs-on'] == 'ubuntu-latest' and 'inputs.publish' in publish['if']
     assert publish['env']['EXPECTED_PLATFORMS'] == '${{ needs.metadata.outputs.platforms }}'
     runs = '\n'.join(str(s.get('run', '')) for s in publish['steps'])
-    assert 'buildx.sh --merge' in runs
-    assert 'platforms == expected' in runs
+    assert 'docker_candidate.py index' in runs and '--rehearsal' in runs
+    assert '--platforms "$EXPECTED_PLATFORMS"' in runs and '--image-run-id "$IMAGE_RUN"' in runs
 
 
 def test_the_self_hosted_host_uploads_no_image_layers(docker_build):

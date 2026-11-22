@@ -91,7 +91,7 @@ pub struct ConnectorAttributes {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InvalidPort {
     /// Refuse the attributes (`Invalid port '<value>'.`). Connecting does this: v4 builds the
-    /// engine URL with `int(port)`, so such a connector never connects there either.
+    /// engine URL with `str(port)` and SQLAlchemy parses that text as an integer.
     Reject,
     /// Leave the port unset. Describing a configured connector without connecting does this:
     /// v4's `SQLConnector.__init__` keeps any port and only creating the engine reads it.
@@ -106,9 +106,9 @@ impl ConnectorAttributes {
     /// - Null values are absent; `label` is the `label` argument, never an attribute.
     /// - `flavor`, `uri`, `host`, `username`, `password`, `database` and `schema` are `str(value)`;
     ///   an unknown flavor is an error.
-    /// - `port` is an integer, a float (truncated, as `int(port)` does) or integer text
-    ///   (surrounding whitespace, a sign and `_` separators allowed) from 0 to 65535; anything
-    ///   else follows `invalid_port`.
+    /// - A `uri` supplies the port, ignoring any standalone `port`. Otherwise `port` is an
+    ///   integer or integer text (surrounding whitespace, a sign and `_` separators allowed)
+    ///   from 0 to 65535; anything else follows `invalid_port`.
     /// - `options` is a mapping (values as `str()`) or query-string text.
     /// - `pool_size` and `max_overflow` are `int(value)` when that is a non-negative integer, and
     ///   otherwise absent (the configured default applies).
@@ -126,6 +126,7 @@ impl ConnectorAttributes {
             label: Some(label.to_string()),
             ..Default::default()
         };
+        let has_uri = attrs.get("uri").is_some_and(|uri| !uri.is_null());
         for (key, value) in attrs {
             if value.is_null() {
                 continue;
@@ -141,11 +142,13 @@ impl ConnectorAttributes {
                 }
                 "uri" => out.uri = Some(py_str(value)),
                 "host" => out.host = Some(py_str(value)),
-                "port" => {
+                // PARITY: an explicit URI bypasses assembly of the URL from standalone
+                // attributes (`_create_engine.py:103-109`). The port in the URI is parsed later.
+                "port" if !has_uri => {
+                    // PARITY: v4 interpolates `str(port)` into the URL (`_create_engine.py:106`).
+                    // SQLAlchemy parses that text, so even a whole-number float is invalid.
                     let port = match value {
                         Value::Int(i) => Some(*i),
-                        // `int(5432.0)` is 5432 in v4; only float text (`'5432.0'`) is refused.
-                        Value::Float(f) if f.is_finite() => Some(f.trunc() as i64),
                         Value::Str(s) => parse_py_int(s),
                         _ => None,
                     }
@@ -161,6 +164,7 @@ impl ConnectorAttributes {
                         }
                     };
                 }
+                "port" => {}
                 "username" => out.username = Some(py_str(value)),
                 "password" => out.password = Some(py_str(value)),
                 "database" => out.database = Some(py_str(value)),
@@ -955,11 +959,6 @@ mod tests {
                 port_of(Some(Value::Str("5_432".into())), policy).unwrap(),
                 Some(5432)
             );
-            // A float is truncated, as `int(port)` does: a port written `5432.0` keeps working.
-            assert_eq!(
-                port_of(Some(Value::Float(5432.0)), policy).unwrap(),
-                Some(5432)
-            );
             // Missing or null: the flavor's default applies later.
             assert_eq!(port_of(None, policy).unwrap(), None);
             assert_eq!(port_of(Some(Value::Null), policy).unwrap(), None);
@@ -968,6 +967,8 @@ mod tests {
         for (value, text) in [
             (Value::Str("abc".into()), "abc"),
             (Value::Str("5432.0".into()), "5432.0"),
+            (Value::Float(5432.0), "5432.0"),
+            (Value::Float(5432.5), "5432.5"),
             (Value::Bool(true), "True"),
             (Value::Int(70000), "70000"),
             (Value::Int(-1), "-1"),
@@ -977,6 +978,27 @@ mod tests {
             assert_eq!(err.to_string(), format!("Invalid port '{text}'."));
             assert_eq!(port_of(Some(value), ignore).unwrap(), None);
         }
+    }
+
+    #[test]
+    fn attribute_map_uses_the_uri_port_instead_of_an_invalid_standalone_port() {
+        let mut attrs = pg_attrs(Some(Value::Str("invalid".into())));
+        attrs.insert(
+            "uri".into(),
+            Value::Str("postgresql://localhost:5433/example".into()),
+        );
+        let attributes =
+            ConnectorAttributes::from_attribute_map("x", &attrs, InvalidPort::Reject).unwrap();
+        let spec = ConnectionSpec::from_attributes(&attributes).unwrap();
+        assert_eq!(spec.port, Some(5433));
+
+        attrs.insert(
+            "uri".into(),
+            Value::Str("postgresql://localhost:invalid/example".into()),
+        );
+        let attributes =
+            ConnectorAttributes::from_attribute_map("x", &attrs, InvalidPort::Reject).unwrap();
+        assert!(ConnectionSpec::from_attributes(&attributes).is_err());
     }
 
     #[test]

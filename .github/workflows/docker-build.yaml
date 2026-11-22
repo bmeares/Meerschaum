@@ -11,10 +11,9 @@ name: buildx
 #     by digest. The `docker-candidate-<arch>` receipt records those digests.
 #   - `executors` (self-hosted, amd64) pulls the tested `full` digest and runs the installed Team
 #     executor suite (the one step that compiles Rust); its receipt is `docker-executors-amd64`.
-#   - A publish run (`publish=true` with the SDK run and that candidate run) copies exactly the tested
-#     digests from GHCR to Docker Hub registry to registry on hosted runners (`promote`), then joins the
-#     selected architectures into the multi-architecture tags (`publish`). Nothing is rebuilt.
-#     Prereleases only get version-qualified tags; floating tags remain unchanged.
+#   - Promotion copies the tested digests from GHCR to Docker Hub. The publish job verifies each
+#     multi-platform index against the receipts before moving release aliases. Rehearsals write
+#     run-specific tags only. Prereleases receive version-qualified tags only.
 # The repository variable DOCKER_RUNNER=self-hosted moves `buildx` back to the self-hosted Linux
 # runners (persistent per-architecture BuildKit caches, arm64 under QEMU); it still stages the
 # candidates on GHCR, so it uploads every image from that host.
@@ -28,6 +27,10 @@ on:
     inputs:
       publish:
         description: 'Publish the images to DockerHub.'
+        type: boolean
+        default: false
+      rehearse:
+        description: 'Copy to temporary Docker Hub tags and verify the indexes without moving release tags.'
         type: boolean
         default: false
       candidate_run_id:
@@ -80,12 +83,16 @@ jobs:
       - name: Verify publication inputs
         env:
           PUBLISH: ${{ inputs.publish }}
+          REHEARSE: ${{ inputs.rehearse }}
           SDK_RUN: ${{ inputs.candidate_run_id }}
           IMAGE_RUN: ${{ inputs.image_run_id }}
           V4_ONLY: ${{ inputs.v4_only }}
           SIZE_GATE: ${{ inputs.size_gate }}
         run: |
-          if [ "$PUBLISH" = true ]; then
+          if [ "$PUBLISH" = true ] || [ "$REHEARSE" = true ]; then
+            [ "$PUBLISH" != "$REHEARSE" ] || {
+              echo 'Choose publication or rehearsal.' >&2; exit 1;
+            }
             [ -n "$SDK_RUN" ] && [ -n "$IMAGE_RUN" ] && [ "$V4_ONLY" != true ] && [ "$SIZE_GATE" = enforce ] || {
               echo 'Publication requires a sealed SDK run, a tested image run and all enforced gates.' >&2; exit 1;
             }
@@ -103,7 +110,7 @@ jobs:
   buildx:
     name: buildx (${{ matrix.arch }})
     needs: metadata
-    if: ${{ !inputs.publish }}
+    if: ${{ !inputs.publish && !inputs.rehearse }}
     runs-on: ${{ vars.DOCKER_RUNNER == 'self-hosted' && fromJSON('["self-hosted","Linux","X64"]') || (matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04') }}
     # Pushes the candidates and the build cache to GHCR; nothing else needs write access.
     permissions:
@@ -294,7 +301,7 @@ jobs:
   executors:
     name: installed Team executors (amd64)
     needs: [metadata, buildx]
-    if: ${{ !inputs.publish && inputs.candidate_run_id != '' && !inputs.v4_only && inputs.size_gate == 'enforce' && contains(needs.metadata.outputs.platforms, 'linux/amd64') }}
+    if: ${{ !inputs.publish && !inputs.rehearse && inputs.candidate_run_id != '' && !inputs.v4_only && inputs.size_gate == 'enforce' && contains(needs.metadata.outputs.platforms, 'linux/amd64') }}
     runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
@@ -362,7 +369,7 @@ jobs:
   promote:
     name: promote (${{ matrix.arch }})
     needs: metadata
-    if: ${{ inputs.publish }}
+    if: ${{ inputs.publish || inputs.rehearse }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -373,6 +380,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       SDK_RUN: ${{ inputs.candidate_run_id }}
       IMAGE_RUN: ${{ inputs.image_run_id }}
+      REHEARSE: ${{ inputs.rehearse }}
       DOCKER_DEFAULT_PLATFORM: ${{ matrix.platform }}
     strategy:
       fail-fast: false
@@ -411,26 +419,31 @@ jobs:
         run: python3 scripts/ci/docker_candidate.py check --sdk-run-id "$SDK_RUN" --platform "$DOCKER_DEFAULT_PLATFORM" --sdk "$SDK_ARTIFACT_DIR" --receipts "$RECEIPTS"
 
       - name: Login to DockerHub
-        if: inputs.publish
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Publish this architecture's tested images without rebuilding
-        if: inputs.publish
-        run: python3 scripts/ci/docker_candidate.py promote --sdk-run-id "$SDK_RUN" --platform "$DOCKER_DEFAULT_PLATFORM" --sdk "$SDK_ARTIFACT_DIR" --receipts "$RECEIPTS"
+        run: |
+          args=()
+          if [ "$REHEARSE" = true ]; then args+=(--rehearsal); fi
+          python3 scripts/ci/docker_candidate.py promote --sdk-run-id "$SDK_RUN" --platform "$DOCKER_DEFAULT_PLATFORM" \
+            --sdk "$SDK_ARTIFACT_DIR" --receipts "$RECEIPTS" "${args[@]}"
 
-  # Joins the architectures' images into the published tags. Runs only for a publish, and only when
-  # every architecture's tested digests were copied.
+  # Create and verify indexes from the candidate digests copied by every successful promote job.
+  # Rehearsals write run-specific tags only. Publication moves aliases after verification.
   publish:
     name: publish (multi-architecture tags)
     needs: [metadata, promote]
-    if: ${{ inputs.publish }}
+    if: ${{ inputs.publish || inputs.rehearse }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      PYTHON_BIN: python3
+      GH_TOKEN: ${{ github.token }}
+      SDK_RUN: ${{ inputs.candidate_run_id }}
+      IMAGE_RUN: ${{ inputs.image_run_id }}
+      REHEARSE: ${{ inputs.rehearse }}
       EXPECTED_PLATFORMS: ${{ needs.metadata.outputs.platforms }}
     steps:
       - name: Checkout code
@@ -453,29 +466,9 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Create the multi-architecture tags
-        run: ./scripts/docker/buildx.sh --merge ${{ inputs.v4_only && '--v4-only' || '' }}
-
-      - name: Check the published platforms
-        env:
-          V4_ONLY: ${{ inputs.v4_only }}
+      - name: Verify the multi-architecture tags against the candidate receipts
         run: |
-          version="$(python3 scripts/check_packaging.py --version)"
-          groups="minimal full"
-          if [ "$V4_ONLY" != true ]; then groups="$groups slim rust rust-full"; fi
-          for group in $groups; do
-            docker buildx imagetools inspect --raw "bmeares/meerschaum:$version-$group" > manifest.json
-            python3 - <<'PY'
-          import json, os
-          with open('manifest.json') as stream:
-              manifest = json.load(stream)
-          platforms = {
-              p['os'] + '/' + p['architecture']
-              for m in manifest['manifests']
-              if (p := m.get('platform', {})).get('os') == 'linux'
-          }
-          expected = set(os.environ['EXPECTED_PLATFORMS'].split(','))
-          assert platforms == expected, (platforms, expected)
-          print('Verified platforms:', ', '.join(sorted(platforms)))
-          PY
-          done
+          args=()
+          if [ "$REHEARSE" = true ]; then args+=(--rehearsal); fi
+          python3 scripts/ci/docker_candidate.py index --sdk-run-id "$SDK_RUN" --image-run-id "$IMAGE_RUN" \
+            --platforms "$EXPECTED_PLATFORMS" --output "$RUNNER_TEMP/mrsm-receipts" "${args[@]}"
