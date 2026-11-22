@@ -13907,6 +13907,9 @@ Maintenance release: leaner Docker images that share layers, stricter SQL checks
 - **In-place syncs stay on the pipe's instance.**  
   A pipe whose source is the engine's home database but whose instance is another database no longer runs its sync inside the source database.
 
+- **Remote actions report their result on a busy host.**  
+  An action sent to an API instance (`mrsm api main show version`, `APIConnector.do_action()`) or a job watched in the console could end with `No result available.` although the job had succeeded: its log stream read the result before the job's supervisor had saved it. The stream now waits up to two seconds for the result, and the client reads the saved result when an older server sends none.
+
 - **SQLite and GeoPackage reads see a column a sync just added.**  
   After a sync added a column, the next read on another pooled connection could return it named `"column"`, quotes included, so the column looked missing. Pooled connections now reload a changed table layout before they are used.
 

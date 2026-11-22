@@ -122,7 +122,10 @@ impl APIConnector {
         // without any (or before the monitor connected) closes it silently, so read the result
         // from the job like v4 does (`job.result`).
         let streamed = result.lock().ok().and_then(|r| r.clone());
-        let fetched = match streamed {
+        // A server up to 5.1.1 may report a job that stopped before its result was saved as
+        // having none (`Job.result`'s v4 text): read the saved result instead.
+        let unrecorded = |r: &SuccessTuple| !r.success && r.message == "No result available.";
+        let fetched = match streamed.clone().filter(|r| !unrecorded(r)) {
             Some(r) => Some(r),
             None => {
                 // The supervisor saves the result a moment after the job's last output, so a
@@ -152,6 +155,7 @@ impl APIConnector {
         };
         let _ = self.delete_job(&name).await;
         fetched
+            .or(streamed)
             .unwrap_or_else(|| SuccessTuple::fail(format!("Job '{name}' did not report a result.")))
     }
 }

@@ -530,7 +530,7 @@ impl Job {
                 .get_job_metadata(&self.name)
                 .get("result")
                 .and_then(success_tuple_from_value)
-                .unwrap_or_else(|| SuccessTuple::fail("No result available."));
+                .unwrap_or_else(|| SuccessTuple::fail(NO_RESULT_MESSAGE));
         }
         // PARITY: Python falls back to the in-process `_results` registry, which only holds
         // results of daemons run in the same process; for other processes it is empty.
@@ -538,7 +538,7 @@ impl Job {
             .properties()
             .get("result")
             .and_then(success_tuple_from_value)
-            .unwrap_or_else(|| SuccessTuple::fail("No result available."))
+            .unwrap_or_else(|| SuccessTuple::fail(NO_RESULT_MESSAGE))
     }
 
     /// `sysargs`.
@@ -860,6 +860,27 @@ impl MonitorSource for Job {
     }
 }
 
+/// The result of a job that has recorded none (v4's text).
+pub const NO_RESULT_MESSAGE: &str = "No result available.";
+
+/// How long [`monitor_log_stream`] waits for a job that has just stopped to record its result.
+const RESULT_SETTLE: Duration = Duration::from_secs(2);
+
+/// The result of a job that has just stopped. The supervisor records it a moment after the worker
+/// exits, so a job seen as stopped may have none yet: it is read again for up to
+/// [`RESULT_SETTLE`] before "no result" is reported (a follower takes the first answer as final).
+fn settled_result(src: &mut dyn MonitorSource) -> SuccessTuple {
+    let deadline = Instant::now() + RESULT_SETTLE;
+    loop {
+        let result = src.result();
+        let recorded = result.success || result.message != NO_RESULT_MESSAGE;
+        if recorded || Instant::now() >= deadline {
+            return result;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
 /// What [`monitor_log_stream`] needs from a job: its rotating log, status, result and stdin.
 ///
 /// [`Job`] implements it for local jobs; the `systemd` executor implements it over the service's
@@ -989,7 +1010,7 @@ pub fn monitor_log_stream(
                 continue;
             }
             if emitted_text || !opts.wait_if_stopped {
-                let result = src.result();
+                let result = settled_result(src);
                 if let Some(on_stop) = opts.on_stop.as_mut() {
                     on_stop(&result);
                 }
@@ -1229,6 +1250,83 @@ mod tests {
             },
         );
         assert_eq!(events.into_inner(), ["first line", "final line", "stopped"]);
+    }
+
+    /// A stopped job with one logged line whose result is recorded only at the `ready`th read.
+    struct LateResult {
+        log: std::path::PathBuf,
+        reads: usize,
+        ready: usize,
+    }
+
+    impl MonitorSource for LateResult {
+        fn rotating_log(&mut self) -> Option<RotatingFile> {
+            RotatingFile::new(&self.log, Default::default()).ok()
+        }
+        fn lines_to_show(&mut self) -> i64 {
+            0
+        }
+        fn timestamp_format(&self) -> String {
+            String::new()
+        }
+        fn refresh_seconds(&self) -> Seconds {
+            Seconds::Int(1)
+        }
+        fn status(&mut self) -> Status {
+            Status::Stopped
+        }
+        fn result(&mut self) -> SuccessTuple {
+            self.reads += 1;
+            if self.reads >= self.ready {
+                SuccessTuple::ok("Success")
+            } else {
+                SuccessTuple::fail(NO_RESULT_MESSAGE)
+            }
+        }
+        fn is_blocking_on_stdin(&mut self) -> bool {
+            false
+        }
+        fn write_stdin(&mut self, _data: &str) -> std::io::Result<()> {
+            unreachable!("the fixture never requests input")
+        }
+    }
+
+    fn reported_result(ready: usize) -> (SuccessTuple, Duration) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut job = LateResult {
+            log: dir.path().join("job.log"),
+            reads: 0,
+            ready,
+        };
+        job.rotating_log().unwrap().write("a line\n").unwrap();
+        let mut reported = None;
+        let started = Instant::now();
+        monitor_log_stream(
+            &mut job,
+            |_| MonitorControl::Continue,
+            MonitorOptions {
+                stop_on_exit: true,
+                on_stop: Some(Box::new(|result| reported = Some(result.clone()))),
+                ..Default::default()
+            },
+        );
+        (reported.expect("on_stop ran"), started.elapsed())
+    }
+
+    #[test]
+    fn a_result_recorded_just_after_the_job_stops_is_the_one_reported() {
+        let (result, _) = reported_result(4);
+        assert!(result.success, "{}", result.message);
+        assert_eq!(result.message, "Success");
+    }
+
+    #[test]
+    fn a_job_that_never_records_a_result_reports_none_after_a_bounded_wait() {
+        let (result, waited) = reported_result(usize::MAX);
+        assert!(!result.success);
+        assert_eq!(result.message, NO_RESULT_MESSAGE);
+        assert!(waited >= RESULT_SETTLE, "{waited:?}");
+        assert!(waited < RESULT_SETTLE * 3, "{waited:?}");
     }
 
     #[test]
