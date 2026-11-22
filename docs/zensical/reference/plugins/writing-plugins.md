@@ -46,10 +46,10 @@ To create your plugin, follow these steps:
 
     Your plugin will be run from a virtual environment and therefore may not be able to import packages that aren't declared.
 
-    These packagess will be installed into the plugin's virtual environment at installation or with `mrsm install required <plugins>`.
+    These packages will be installed into the plugin's virtual environment at installation or with `mrsm install required <plugins>`.
 
     !!! tip "Depend on other plugins"
-        Dependencies that start with `plugin:` are Meerschaum plugins. To require a plugin from another repository, add add the repository's keys after the plugin name (e.g. `plugin:foo@api:bar`).
+        Dependencies that start with `plugin:` are Meerschaum plugins. To require a plugin from another repository, add the repository's keys after the plugin name (e.g. `plugin:foo@api:bar`).
 
     ```python
     required = ['rich>=9.8.0', 'polars', 'plugin:foo']
@@ -917,7 +917,12 @@ Actions, hooks, API endpoints, and web pages defined in submodules belong to the
 
 ### Plugins of an Isolated Team
 
-On an API server shared by several teams, a plugin of an [isolated team](/reference/api-instance/teams/#team-scoped-workers) runs in that team's own Python workers and jobs, whose configuration holds only the team's connectors and the settings of the team's plugins (`plugins:<name>`). `mrsm.get_connector()` raises `PermissionError` for another connector, `get_config('meerschaum', 'connectors')` leaves them out, and the server's connector variables are not in `os.environ`. A plugin that uses only its team's connectors needs no change. On Linux its processes also run in the team's [filesystem sandbox](/reference/api-instance/teams/#the-filesystem-sandbox): the plugin's virtual environment there is the team's own copy of the server's, so what the plugin installs at run time is installed for that team only, and the plugin cannot change files that the server or other teams load (the plugins directory, the server's virtual environments, compiled bytecode next to shared source).
+On a shared API server, an [isolated team](/reference/api-instance/teams/#team-scoped-workers)'s plugin runs in its own worker pool and Linux [filesystem sandbox](/reference/api-instance/teams/#the-filesystem-sandbox):
+
+- **Team-only config:** Only that team's connectors and `plugins:<name>` settings are loaded (`mrsm.get_connector()` raises `PermissionError` for other connectors, and server env secrets are stripped).
+- **Per-team venvs:** Runtime `pip` installs stay inside the team's own venv copy; shared plugins and server directories are read-only.
+
+Plugins that use only their own team's connectors need no code changes.
 
 ### Package Management
 

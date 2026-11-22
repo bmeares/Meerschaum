@@ -472,12 +472,13 @@ Two runs of the same 5.1.2 commit and SDK candidate, the second against the cach
 - **arm64** builds and smokes natively, including the native Factory manifest check, and the pinned
   `rustup-init` and toolchain install on both.
 
-### What the first rehearsal must confirm
+### What the first rehearsal and publish confirmed
 
-1. `promote` reads the staged digests with `packages: read`. If the GHCR candidate and build cache
-   packages were made private, confirm the candidate's `executors` job can read its image too.
-2. Docker Hub's temporary architecture tags serve the candidate digests, and the temporary indexes
-   reference the tested manifests for every release platform.
+Confirmed on `v5.1.2` (`93015f5f`, SDK run `45048246322`, Docker candidate `45053779525`):
+
+- **Hosted rehearsal (`rehearse=true`, run `45055564988`, ~2.5 min total):** `promote (amd64)` (1m15s) and `promote (arm64)` (1m41s) read the staged GHCR digests with `packages: read`, copied them registry-to-registry to Docker Hub's `-check-*` architecture tags without rebuilding, and `publish` (41s) verified the multi-arch indexes against the tested receipts.
+- **Hosted publication (`publish=true`, run `45055882594`, ~2 min total):** `promote (amd64)` (1m3s), `promote (arm64)` (1m0s), and `publish` (56s) promoted all versioned and floating release aliases (`latest`, `full`, `slim`, `minimal`, `rust`, `rust-full`, `api`) after digest verification — down from 5 h 34 min on the self-hosted runner for 5.1.1.
+- **Note on GHCR package visibility:** If the `candidate` and `buildcache` GHCR packages are switched from public to private in GitHub package settings, confirm on the next candidate run that `executors` and `promote` still pull with `packages: read`.
 
 ## Crate names on crates.io (§15)
 

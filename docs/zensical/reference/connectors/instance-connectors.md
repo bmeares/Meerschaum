@@ -423,12 +423,7 @@ You may use the built-in method [`pipe.filter_existing()`](https://docs.meerscha
     The values of the `pipe.columns` dictionary are immutable indices to be used for upserts. You may improve performance by indexing these columns after an initial sync (i.e. `#!python pipe.exists() is False`).
 
 !!! info "Which DataFrame `sync_pipe()` receives"
-    `df` is a DataFrame of the `meerschaum:dataframe` library of the process that runs the sync
-    (Polars for a new root, pandas for a root created before 5.0.0rc15; `MRSM_DATAFRAME`
-    overrides it, see [DataFrame library](/reference/pipes/reading/#dataframe-library)). A
-    connector that needs one library can convert:
-    `meerschaum.utils.dataframe.to_pandas(df)` or `meerschaum.utils.dataframe.to_polars(df)`
-    return a frame unchanged when it is already of that library.
+    `df` uses the process's configured `meerschaum:dataframe` library (Polars on fresh v5 roots, pandas on upgraded v4 roots; override with `MRSM_DATAFRAME`—see [DataFrame library](/reference/pipes/reading/#dataframe-library)). Convert when needed with `meerschaum.utils.dataframe.to_pandas(df)` or `to_polars(df)` (no-op if already that type).
 
 ??? example "`#!python def sync_pipe():`"
     ```python

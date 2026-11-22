@@ -406,16 +406,13 @@ rollups and sources that restate history. See [Replacing a window](/reference/pi
 
 ## `hypertable`
 
-On **TimescaleDB**, the target table is created as a hypertable by default. Set `hypertable` to `False` to create a plain table instead.
+Controls TimescaleDB hypertables and [native range partitioning](/reference/connectors/sql-connectors/#native-range-partitioning) on **PostgreSQL / PostGIS**, **MySQL / MariaDB**, and **MSSQL** (defaults to `True` for pipes with a [`datetime`](#the-datetime-index) column; set `False` for a plain table).
 
-On **PostgreSQL / PostGIS**, **MySQL / MariaDB**, and **MSSQL**, `hypertable` controls [native range partitioning](/reference/connectors/sql-connectors/#native-range-partitioning) and also **defaults to `True`** (so a pipe with a [`datetime`](#the-datetime-index) column partitions its target table by range on that column. Set `hypertable` to `False` to opt out (a plain table). Requires a `datetime` column; ignored on flavors without native range partitioning (e.g. SQLite, DuckDB, Oracle). Only newly created tables are affected) a pre-existing plain table is not retroactively partitioned (use `partition pipes` to rebuild it).
-
-The partition width is the pipe's chunk interval ([`verify.chunk_minutes`](#verifychunk_minutes) and its aliases, default 43200 (30 days), and partition boundaries are epoch-aligned) the same datetime always maps to the same partition regardless of insert order, and verification chunks (`get_chunk_bounds(align=True)`) coincide with partition edges.
-
-`verify.chunk_minutes` is the **authoritative** partition width: editing it does not retroactively reshape an existing table, and changing it for a populated table can produce misaligned, overlapping partitions. To change an existing table's width, run the `partition pipes` action (or [`Pipe.repartition()`](https://docs.meerschaum.io/meerschaum.html#Pipe.repartition)), which rebuilds the table at the new width:
+- Only affects newly created tables; use `mrsm partition pipes` (or `pipe.repartition()`) to partition or resize an existing table.
+- Partition width follows [`verify.chunk_minutes`](#verifychunk_minutes) (default `43200`, 30 days) on epoch-aligned boundaries:
 
 ```bash
-# Rebuild the table to 7-day partitions.
+# Rebuild an existing table with 7-day partitions.
 mrsm partition pipes -i sql:main -m weather --chunk-minutes 10080
 ```
 
@@ -520,47 +517,28 @@ Toggle whether a pipe will coerce mixed integer and float values into the `numer
 
 ## `null_indices`
 
-Toggle whether a pipe will allow null indices (default `True`). Set this to `False` for a performance improvement in situations where null index values are not expected.
+Allow `NULL` values in index columns (default `True`). Set `False` for faster upserts when index columns are guaranteed non-null.
 
-With `null_indices` on, a row whose index columns are `NULL` is matched like any other key: an
-[`upsert`](#upsert) updates it in place instead of inserting it again. The unique key of an
-upsert pipe is the usual one over its index columns, so Meerschaum 4.1 can still upsert into a
-table that 5.0 created.
+With `null_indices: true`, rows with `NULL` keys match in place during [`upsert`](#upsert) across every SQL flavor:
 
-- **PostgreSQL 15 and later** (TimescaleDB and PostGIS included): new tables declare that unique
-  constraint `UNIQUE NULLS NOT DISTINCT`, so `NULL` keys are equal for every upsert.
-- **SQLite, older PostgreSQL, and tables created before 5.0.0rc15**: the unique key treats
-  `NULL`s as distinct, so the upsert matches the rows that have a `NULL` key itself: it updates
-  the ones that exist and inserts the others. Older tables need no rebuild.
-- **MySQL and MariaDB** match the keys with `<=>`.
-- **MSSQL and Oracle** `MERGE` on a `COALESCE(...)` comparison.
-
-On MySQL, MariaDB and SQLite, a batch that repeats a key keeps its last row (as
-`ON DUPLICATE KEY UPDATE` does). Where the unique key treats `NULL`s as distinct (on MySQL,
-MariaDB and PostgreSQL 14 or older), two processes that upsert the same new `NULL` key at the same
-moment can both insert it.
+- **PostgreSQL 15+** (TimescaleDB / PostGIS): declares `UNIQUE NULLS NOT DISTINCT` on new tables.
+- **SQLite, older PostgreSQL, and legacy tables:** matches `NULL` keys during upsert without requiring a table rebuild.
+- **MySQL / MariaDB** use `<=>`; **MSSQL / Oracle** match via `COALESCE(...)` in `MERGE`.
 
 ### Null-like strings
 
-In a column declared with a text dtype (`dtypes: {name: string}`) and in a text index column
-(`columns`), the strings `'None'`, `'NA'`, `'nan'`, `'NaT'`, `'NaTz'`, `''` and `'<NA>'` are
-values: they are written as text, and `params={'code': 'NA'}` matches the text `NA` (Namibia's
-country code, a station named `None`). Only real nulls (`None`, `NaN`, `pd.NA`, `NaT`) are `NULL`.
-Python `None` matches nulls and `'_None'` matches non-nulls on every column. Other columns keep
-the older rule, where those strings mean `NULL`. Oracle stores `''` as `NULL`, so there `''` is a
-null in every column (`params={'code': ''}` matches `NULL`). On Valkey instances a document's key
-is made of the text of its index values, so a `NULL` index value and the text `'None'` (or
-`'nan'`, `'<NA>'`) in the same index column are the same document there.
+In declared text columns (`dtypes: {code: string}`) and text index columns, literal strings like `'None'`, `'NA'`, `'nan'`, `''`, and `'<NA>'` are stored and queried as text—so `params={'code': 'NA'}` matches `'NA'` (for example, Namibia's country code).
+
+- Use Python `None` to match SQL `NULL`, and `'_None'` to match non-nulls.
+- **Exceptions:** Oracle treats `''` as `NULL`; Valkey index keys stringify values so `NULL` and `'None'` share a key.
 
 ---------------
 
 ## `parents`
 
-Associate a pipe with its upstream pipes via the `parents` (or `parent`) key. For example, syncing a SQL pipe with a defined `parent` allows for changing the data type of the `datetime` column between integer and timestamp values. The complement to `parents` is `children` (`child`).
+Declare upstream pipes with `parents` / `parent` (or downstream pipes with `children` / `child`). The [Syncing Engine](/reference/pipelines/) uses these edges—along with implicit `{{ Pipe() }}` references in `sql`—to sync ancestors first and cap children at their parents' watermarks.
 
-Set `parents` to a list of keys (`connector`, `metric`, `location`, etc.) or a string for the `Pipe` constructor.
-
-`parents` and `children` are the **graph edges** of the [Syncing Engine](/reference/pipelines/): with `sync pipes --parents` / `--children` (or `pipe.sync(parents=True)`, or `mrsm.Pipeline`) the engine syncs a pipe's ancestors or descendants in dependency order and never syncs a child past its parents' watermark. `{{ Pipe() }}` references in a pipe's `sql` are edges too, without declaring anything. An entry may carry `lookback_<unit>` / `lookahead_<unit>` (`seconds`, `minutes`, `hours`, `days`, `weeks`) and an `axis` to say how far a parent change reaches into the child, see [Windows for edges](/reference/pipelines/#windows-for-edges-lookback-and-lookahead). `reference` / `references` are **not** edges.
+Entries accept a pipe-key dict, a `Pipe(...)` string, and optional `lookback_<unit>` / `lookahead_<unit>` windows ([Windows for edges](/reference/pipelines/#windows-for-edges-lookback-and-lookahead)). Note that `reference` only inherits parameters and never creates a data edge.
 
 ??? example
     The `parent` key corresponds to the constructor for the parent pipe.
@@ -808,11 +786,9 @@ On PostgreSQL-family instances, [`upsert_changed_only`](#upsert_changed_only) sk
 
 ## `upsert_changed_only`
 
-Set `upsert_changed_only` to `true` (default `false`) to make an [`upsert`](#upsert) skip the rows whose values would not change. It has an effect only together with `upsert: true` on the PostgreSQL family of instance flavors: PostgreSQL, PostGIS, TimescaleDB, TimescaleDB-HA and Citus. Every other flavor ignores it (MySQL and MariaDB already leave identical rows alone).
+Set `upsert_changed_only: true` (default `false`) alongside [`upsert: true`](#upsert) on PostgreSQL-family instances (PostgreSQL, PostGIS, TimescaleDB, Citus) to skip rewriting rows whose values have not changed (`WHERE ... IS DISTINCT FROM ...`).
 
-An upsert normally rewrites every row whose key already exists, even when the incoming values are identical. With `upsert_changed_only`, the update runs only for rows whose value columns differ (`ON CONFLICT ... DO UPDATE ... WHERE (stored values) IS DISTINCT FROM (new values)`). New rows are inserted and changed rows updated as before.
-
-This matters for a pipe that re-reads an overlapping window on every sync, for example a SQL pipe with a large `fetch:backtrack_minutes` on a short schedule: rewriting the same rows each time produces WAL, dead tuples and autovacuum work without changing any data. A row the guard skips is still row-locked by the upsert, which writes a small WAL record and dirties the page, so the saving is in row versions, dead tuples and index churn, not in locks; concurrent writers on the same keys still wait as before. It helps most for SQL pipes synced in place (the source is on the same instance). A sync of a DataFrame already drops identical rows before writing, unless `check_existing` is off.
+This avoids dead tuples and vacuum churn on frequent in-place SQL syncs with large backtrack windows. Other flavors ignore it (MySQL/MariaDB already skip identical rows).
 
 === "Python"
 
@@ -840,23 +816,15 @@ This matters for a pipe that re-reads an overlapping window on every sync, for e
       backtrack_minutes: 1440
     ```
 
-Values are compared as follows:
+The sync count (`Upserted N rows.`) reports only inserted and changed rows (a no-op sync reports `0` and succeeds).
 
-- Numbers compare by value (`1.50` and `1.5` are the same), and `NULL` equals `NULL`.
-- `json` columns compare by their text, so a change in formatting or key order counts as a change; `jsonb` columns compare by value.
-- PostGIS `geometry` and `geography` compare exactly, including the SRID.
-- Types without a plain equality compare by their text form.
-- A text column under a nondeterministic collation (for example a case-insensitive ICU collation) follows that collation, so a change it treats as equal is skipped.
+!!! warning "Opt-in behavior"
+    Because unchanged rows are not rewritten, `UPDATE` triggers and logical replication streams will not fire for them.
 
-Rows with `NULL` index values (see [`null_indices`](#null_indices)) are handled the same way: unchanged ones are skipped.
-
-The sync message (`Upserted N rows.`) counts the rows actually written, inserted plus changed. A sync that changes nothing reports 0 rows and is still a success.
-
-!!! warning
-    The parameter is opt-in because unchanged rows are no longer written. An `UPDATE` trigger, or an "updated at" column that one maintains, does not fire for them, and consumers that expect a change for every synced row (for example logical replication) see fewer events.
-
-!!! note
-    On TimescaleDB, an upsert into a compressed chunk still decompresses the affected data to check the keys. `upsert_changed_only` does not avoid that cost.
+??? note "Comparison rules & TimescaleDB details"
+    - Numbers compare by value (`1.50 == 1.5`), `NULL` equals `NULL`, `jsonb` compares by value, `json` compares by text, and PostGIS geometry includes SRID.
+    - Rows with `NULL` keys ([`null_indices`](#null_indices)) follow the same change check.
+    - Skipped rows are still row-locked during `ON CONFLICT`; on TimescaleDB, compressed chunks still decompress to check keys.
 
 ---------------
 

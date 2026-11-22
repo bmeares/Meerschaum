@@ -177,17 +177,16 @@ Below are the supported top-level keys in a Compose file. Note that all keys are
   Govern the behavior of the syncing process. See **The `sync` Key** section below.
 - **`jobs`**
   If provided, `compose up` will start the defined jobs. See **The `jobs` Key** below.
-- **`project_name`** (default derived from the file path)
-  The tag given to all pipes in this project. Conventional `mrsm-compose.yaml` and `mrsm-compose.yml` files default to their containing directory's name. Other files default to their filename without the final `.yaml` or `.yml` suffix: `/projects/acme/metrics.yaml` becomes `metrics`. Each included file derives its own name. Explicit names (including effective environment values) take precedence. Set `project_name` explicitly to preserve an older directory-based identity for a custom-named file. Every project in a composition must have a unique name.
-- **`root_dir`** (default `./root/`)
-  A path to the root directory; see [`MRSM_ROOT_DIR`](/reference/environment/#mrsm_root_dir).
-- **`plugins_dir`** (default `./plugins/`)
-  Either a path or list of paths to the plugins directories. A value of `null` will include the current environment plugins directories in the project. See [`MRSM_PLUGINS_DIR`](/reference/environment/#mrsm_plugins_dir).
-- **`plugins`**
-  A list of plugins expected to be in the plugins directory. Missing plugins will be [installed from `api:mrsm`](/reference/plugins/repositories/#installing-plugins).
-  To install from a custom repository, append `@api:<label>` to the plugins' names or set the configuration variable `meerschaum:default_repository`.
-- **`config`**
-  Configuration keys to be patched on top of your host configuration, see [`MRSM_CONFIG`](/reference/environment/#mrsm_config). The project's commands get it as `MRSM_CONFIG`; its jobs get it in an owner-only file in the job's directory instead (`MRSM_CONFIG_FILE`), so neither `/proc/<pid>/environ` of a job nor its `systemd` unit holds the credentials in it. `compose up` rewrites the file when the block changes and `compose down` removes it with the job.
+- **`project_name`** (optional)  
+  Tag applied to all pipes in this project. Defaults to the folder name for `mrsm-compose.yaml`/`mrsm-compose.yml`, or the filename stem for custom files (e.g., `metrics.yaml` → `metrics`). Every project in an `include:` tree must have a unique name.
+- **`root_dir`** (default `./root/`)  
+  Path to the root directory; see [`MRSM_ROOT_DIR`](/reference/environment/#mrsm_root_dir).
+- **`plugins_dir`** (default `./plugins/`)  
+  Path or list of paths to plugins directories (`null` includes the host's plugins directories). See [`MRSM_PLUGINS_DIR`](/reference/environment/#mrsm_plugins_dir).
+- **`plugins`**  
+  Plugins to ensure are installed (from `api:mrsm` by default, or append `@api:<label>` for a custom repository).
+- **`config`**  
+  Configuration overrides layered on top of host config ([`MRSM_CONFIG`](/reference/environment/#mrsm_config)). Compose jobs receive this via an owner-only file (`MRSM_CONFIG_FILE`) in the job directory instead of `/proc/<pid>/environ` or `systemd` unit files.
 - **`environment`**
   Additional environment variables to pass to subprocesses.
 - **`include`**
@@ -273,9 +272,7 @@ Keys under the parent key `sync` are the following:
 
 ### The `jobs` Key
 
-Keys under `jobs` are the names of jobs to be run with `compose up`. If defined, these jobs override the default syncing jobs: `compose up` registers the project's pipes and starts these jobs without syncing the pipes first (run `mrsm compose up --presync` to force a sync pass).
-
-Set `jobs: {}` for a project which defines pipes but starts no jobs, for example when a job of another project syncs them (one job may name [Pipelines](/reference/pipelines/compose/) saved by several projects). `compose up` then registers the pipes, removes the jobs the project started earlier, and starts nothing. Leaving `jobs` out (or empty without the braces) keeps the default syncing jobs.
+Define custom jobs under `jobs` to override the default per-instance syncing jobs (`compose up` registers pipes and starts these jobs; add `--presync` to run an initial sync first). Set `jobs: {}` to register pipes without starting any jobs.
 
 !!! example "Example jobs"
     ```yaml
@@ -286,15 +283,12 @@ Set `jobs: {}` for a project which defines pipes but starts no jobs, for example
       echo: "echo 'Hello, World!'"
     ```
 
-`compose up` only replaces jobs which belong to the project, and it checks every job it would start before it changes anything: if one of the names belongs to another project's job, `up` stops with the list of names before a pipe is registered or synced. A job started by Compose records its project's name, so it stays replaceable after you edit its command. Jobs started before that stamp existed are recognized two other ways: by the `-t <project_name>` tag Compose appends to job commands which set no tags of their own, and by running the exact command the project would start. A job under a configured name which proves none of these is refused rather than clobbered, with the caveat that two projects sharing a root directory and configuring the same job name with the same command cannot be told apart until each has started its own job.
-
-On a host with `systemd`, Compose starts its jobs as `systemd` user services, whatever the project's `root_dir`, so they come back after a reboot without a unit of your own. A project's units are named after it (`mrsm-<project_name>.<job>.service`, for example `mrsm-weather.weather-sync-_sql:main_.service`) and carry the project's root, plugins directory and environment; `compose ps` and `show jobs` list only the current root's units. Jobs that earlier versions ran as `local` daemons move to `systemd` on the next `compose up`: Compose stops the old process first and keeps its logs. Set `meerschaum:executor: local` under the project's `config:` to keep its jobs as daemons. See [Executors](/reference/background-jobs/executors/).
-
-Job actions run through Compose are scoped the same way, so several projects can share one root directory. `compose start jobs`, `stop jobs`, `pause jobs`, `restart jobs`, and `delete jobs` with no job names act only on this project's jobs (and do nothing if it has none). Naming a job stamped by another project is refused, since running it here would apply this project's config to it: start or stop it from its own project's compose file instead.
+- **Project ownership:** `compose up`, `start/stop/pause/restart/delete jobs` only touch jobs stamped by this project (refusing to clobber another project's job before making any changes).
+- **`systemd` by default:** On systemd hosts, Compose starts jobs as user units (`mrsm-<project>.<job>.service`) so they survive reboots. Set `config: {meerschaum: {executor: local}}` to keep local daemons instead ([Executors](/reference/background-jobs/executors/)).
 
 ## 🧩 Multiple Projects: `include` and `parent`
 
-A large deployment is easier to maintain as several small projects. A root compose file lists the others under `include:`, and `mrsm compose up`, `down`, `run`, `ps`, `logs`, `explain` and the rest then span the root and everything it includes.
+Split large deployments into smaller Compose files tied together from a root file. Commands like `mrsm compose up`, `down`, `run`, `ps`, `logs`, and `explain` then span the entire tree.
 
 ```yaml
 # mrsm-compose.yaml
@@ -303,11 +297,11 @@ root_dir: ./root
 plugins_dir: [./plugins]
 
 include:
-  - projects/                 # every *.yaml / *.yml in it, plus projects/*/mrsm-compose.yaml
-  - extra/weather.yaml        # a file
+  - projects/                 # every *.yaml / *.yml, plus projects/*/mrsm-compose.yaml
+  - extra/weather.yaml        # a single file
   - 'regions/*.yaml'          # a glob
   - path: local-overrides.yaml
-    required: false           # a missing optional file only warns
+    required: false           # missing optional files only warn
 
 config:
   meerschaum:
@@ -317,7 +311,7 @@ config:
 ```yaml
 # projects/weather.yaml
 project_name: weather
-parent: ..                    # optional: run this file from the root's project
+parent: ..                    # optional: run from the root project automatically
 plugins: [noaa]
 pipes:
   - connector: "plugin:noaa"
@@ -325,41 +319,31 @@ pipes:
     location: "atlanta"
 ```
 
-**`include:` entries** are a path or `{path, required}`. A directory means every `*.yaml` / `*.yml` file in it plus `<dir>/*/mrsm-compose.yaml`. Paths are relative to the including file, includes are transitive, and a file reached twice loads once. A missing `required` path (the default) is an error, a missing optional path warns, and a glob that matches nothing is silent. An include cycle warns and skips that edge, and a file that fails to parse is reported (by `compose explain` as well) and skipped.
+### How overrides work
 
-**Each included project keeps its identity.** It has its own `project_name` (job names and pipe tags are the same as if the file ran alone), its own `plugins_dir`, and its relative paths and `.env` resolve from its own directory. Its `root_dir` is the including project's unless the file sets one.
+Each included project keeps its own `project_name`, `plugins_dir`, and relative `.env`, while the **root project wins** when values overlap:
 
-**The including project wins.** The root's values are layered over each included project's:
+| Key | Merge behavior |
+|---|---|
+| `config` / `environment` / `.env` | Deep-merged; root wins (each project keeps its own `stack.project_name`). |
+| `pipes` | Matched by `(connector, metric, location, instance)`; root entry replaces the child's. |
+| `plugins` | Matched by name; root spec (e.g., `noaa@api:custom`) wins. |
+| `jobs` | Scoped to each project; override from the root with `<project>/<job>` (e.g., `weather/sync`). |
 
-- `config` is deep-merged (the root's values win; every project keeps its own `stack.project_name`).
-- `environment` and the root's `.env` variables are passed down and win. The root and plugins directories are not variables to pass down: they come through `root_dir` and `plugins_dir`.
-- `pipes` are matched by `(connector, metric, location, instance)`. If the root defines the same pipe, the root's entry replaces the included one entirely (the pipe carries the root's tag).
-- `plugins` are matched by name; the root's spec (for example `noaa@api:custom`) wins.
-- `jobs` stay with their own project. The root may replace one with the key `<project>/<job>`, for example `weather/sync: "sync pipes -s 'every 2 hours'"`.
-- A project searches its own `plugins_dir` first, then its ancestors' (never a sibling's).
-
-`compose explain` lists every override as an informational finding.
-
-**Order.** Operations run depth-first, the projects a file includes (in the order listed) before the file itself. `compose down` runs in reverse. `--project <name>` limits any command to one project of the tree.
-
-**Jobs started from a root carry the label `MRSM__COMPOSE_ROOT`.** Running a command directly inside an included project that has no `parent:` warns (`managed by the root compose at ...; rerun from there or pass --force`) and leaves those jobs alone; `explain` and `show` still work.
-
-**`parent:`** is an explicit path (a directory or a compose file, relative to the file that sets it; there is no search upward). Any subaction in a file with `parent:` runs as `mrsm compose <subaction> --project <this project>` from the parent: the parent's root directory, overrides, `.env` and plugins apply, and only this project is touched. If the parent does not include the project, it warns and treats the project as included. Parent chains are transitive (the topmost project wins per item) and a `parent:` cycle warns and stops at the last valid level. `--standalone` ignores the parent.
-
-Jobs started together (`compose up` over several jobs or projects) go through the per-root [startup gate](/reference/background-jobs/), which staggers them; `--no-stagger` bypasses it.
+- **Execution order:** Depth-first (included projects before the root; `compose down` reverses order). Pass `--project <name>` to target one project.
+- **`parent:`:** Lets you run `mrsm compose up` from a subproject directory while inheriting the root's config and overrides (pass `--standalone` to ignore `parent:`).
+- **Startup gate:** Multi-job startups stagger automatically; pass `--no-stagger` to start immediately.
 
 ## 🔎 Explaining a project
 
-`mrsm compose explain` prints the pipes the file defines, whether each is registered on its instance, and the parameters that differ, in the same colors as the rest of Meerschaum. It is read-only: it does not create the root directory, write the config cache, install requirements or fetch plugins (it reports what `compose up` would install instead).
+`mrsm compose explain` prints defined pipes, registration status, parameter diffs, and lint findings—completely **read-only** (no directories created, no packages installed, no plugins downloaded):
 
-Every reference that does not resolve on this host is a finding, and `explain` keeps going:
+```bash
+mrsm compose explain
+mrsm compose explain --project weather
+```
 
-- a connector or instance that is not defined (`connector 'mqtt:x' is not defined on this host (referenced by config.meerschaum.connectors.mqtt.x)`),
-- a plugin that is not in the plugins directories and not listed under `plugins:`,
-- an `MRSM{...}` symlink that does not resolve,
-- a `{{ Pipe() }}` reference to a pipe that is not defined or registered,
-- an instance that cannot be reached (the registrations are then reported as unknown).
+It reports missing connectors, uninstalled plugins, unresolved `MRSM{...}` symlinks, broken `{{ Pipe() }}` references, and unreachable instances. `compose up` and `run` fail fast on missing connectors.
 
-`compose up`, `run` and `sync pipes` refuse to start on a missing connector, naming it and where it is referenced. Every compose error exits with a non-zero status.
-
-`mrsm compose init -c <connector> -m <metric> -l <location> -t <tag> -i <instance>` in a directory with no project asks to add the matching registered pipes to the new `mrsm-compose.yaml`.
+!!! tip "Generate a Compose file from existing pipes"
+    Run `mrsm compose init -c <connector> -m <metric> -t <tag> -i <instance>` in an empty folder to scaffold a new `mrsm-compose.yaml` from matching registered pipes.
