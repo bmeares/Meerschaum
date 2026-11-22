@@ -13873,6 +13873,7 @@ Maintenance release: leaner Docker images that share layers, stricter SQL checks
 
 - **Non-administrator SQL is checked more strictly.** Through the API and MCP, a query or pipe definition from a caller who is not an administrator is now refused when any SQL dialect would read it as more than one statement or as a write: a `;` inside a dollar-quoted string (`$$a;b$$`), or a mutating keyword after `#` or after `--` with no space. Administrators and local `mrsm` commands are unaffected.
 - **Docker images run as UID and GID 1000.** This was already the default; images built by the release workflow no longer inherit the build host's IDs.
+- **A connector whose `port` is not a number is refused.** A `sql` connector with a `port` such as `abc` or `true` used to connect to another port without saying so (the flavor's default, or port 1). Connecting now fails with `Invalid port 'abc'.`, as in Meerschaum 4.
 
 ### Highlights & Fixes
 
@@ -13900,6 +13901,9 @@ Maintenance release: leaner Docker images that share layers, stricter SQL checks
 - **One console permission check.**  
   An isolated team member's permissions are computed in one place, so the result no longer depends on which console page loaded first.
 
+- **Reading a pipe through the API stays fast as the instance grows.**  
+  Each data request confirmed its pipe was registered by reading the instance's whole list of pipes. On `sql` and `valkey` instances it now reads that one pipe: with 2,000 pipes on SQLite, the check takes 3.6 ms per request instead of 108 ms.
+
 - **In-place syncs stay on the pipe's instance.**  
   A pipe whose source is the engine's home database but whose instance is another database no longer runs its sync inside the source database.
 
@@ -13910,7 +13914,7 @@ Maintenance release: leaner Docker images that share layers, stricter SQL checks
   A sync metric that cannot be written within its time budget now logs a warning (at most once a minute) instead of disappearing, and Oracle instances no longer lose their internal tables' ready state after index DDL.
 
 - **For contributors.**  
-  Rust integration tests build as 45 suite binaries instead of 411, `scripts/check_architecture.py` enforces crate layering and test wiring in CI, and `GLOSSARY.md`, `docs/adr/` and `CODING_STANDARDS.md` describe the codebase's terms, decisions and review rules.
+  Rust integration tests build as 45 suite binaries instead of 411, and 47 of the 51 Rust files over 1,700 lines are split into modules named for what they own. `scripts/check_architecture.py` enforces crate layering, test wiring and file paths cited by docs in CI, and `GLOSSARY.md`, `docs/adr/` and `CODING_STANDARDS.md` describe the codebase's terms, decisions and review rules.
 
 ## 5.1.1
 
