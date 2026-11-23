@@ -177,3 +177,81 @@ print('JSON:' + json.dumps(result, default=str))
     for who in ('mixed', 'admin', 'anonymous'):
         assert out[who]['sql:main'] == 'built', (who, out[who])
         assert out[who]['sql:drydb'] == 'built', (who, out[who])
+
+
+def test_isolated_team_member_lists_and_registers_tokens_with_a_server_cache(sandbox):
+    root, plugins = sandbox
+    out = extract_json(run_python(root, plugins, SIGN_IN + '''
+import json
+import meerschaum as mrsm
+from meerschaum.api import get_api_connector
+from meerschaum.api.host import build_app
+from meerschaum.core import Token, User
+from starlette.testclient import TestClient
+
+conn = get_api_connector()
+team_conn = mrsm.get_connector(
+    'sql', 'token_team', flavor='sqlite', database=':memory:', teams=['token-team']
+)
+assert mrsm.Team('token-team', instance=conn, attributes={
+    'isolated': True,
+    'instance': str(team_conn),
+}).register()[0]
+session = sign_in('team-token-user', role='viewer', teams={'token-team': 'member'})
+owner = User('team-token-user', instance=conn)
+assert Token('existing-token', instance=conn, user=owner, scopes=['pipes:read']).register()[0]
+### Simulate the configured production cache without connecting to Valkey.
+del conn._tokens_pipe
+conn._cache_connector = 'valkey:main'
+client = TestClient(build_app())
+client.cookies.set('mrsm-session-id', session['session-id'])
+dependencies = client.get('/dash/_dash-dependencies').json()
+
+def click(button, state=()):
+    output = next(
+        dep['output'] for dep in dependencies
+        if dep['inputs'] == [{'id': button, 'property': 'n_clicks'}]
+    )
+    return client.post('/dash/_dash-update-component', json={
+        'output': output,
+        'outputs': [
+            {'id': component, 'property': prop.split('@')[0]}
+            for component, prop in (
+                part.split('.', 1) for part in output.strip('.').split('...')
+            )
+        ],
+        'inputs': [{'id': button, 'property': 'n_clicks', 'value': 1}],
+        'changedPropIds': [button + '.n_clicks'],
+        'state': [*state, {'id': 'session-store', 'property': 'data', 'value': session}],
+    })
+
+listing = click('tokens-refresh-button')
+response = click('tokens-register-button', [
+    {'id': 'tokens-name-input', 'property': 'value', 'value': 'team-read'},
+    {'id': 'tokens-scopes-checklist', 'property': 'value', 'value': ['pipes:read']},
+    {'id': 'tokens-toggle-scopes-switch', 'property': 'value', 'value': False},
+    {'id': 'tokens-expiration-datepickersingle', 'property': 'date', 'value': None},
+])
+del conn._cache_connector
+del conn._tokens_pipe
+tokens = conn.get_tokens(user=owner, labels=['team-read'])
+print('JSON:' + json.dumps({
+    'listing_status': listing.status_code,
+    'existing_token_visible': 'existing-token' in listing.text,
+    'registration_status': response.status_code,
+    'credentials_shown': 'Client Secret' in response.text and 'mrsm-key:' in response.text,
+    'scopes': [token.scopes for token in tokens],
+    'owners': [token.user.username for token in tokens],
+}))
+''', extra_env={
+        'MRSM_PATCH': '{"system":{"experimental":{"valkey_session_cache":true}}}',
+        'MRSM_VALKEY_MAIN': '{"host":"127.0.0.1","port":1}',
+    }))
+    assert out == {
+        'listing_status': 200,
+        'existing_token_visible': True,
+        'registration_status': 200,
+        'credentials_shown': True,
+        'scopes': [['pipes:read']],
+        'owners': ['team-token-user'],
+    }

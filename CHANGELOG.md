@@ -4,6 +4,11 @@
 
 ## Meerschaum 5
 
+### 5.1.4
+
+- **Register and manage tokens from isolated teams.**  
+  Isolated team members can [list and manage their tokens](https://meerschaum.io/reference/api-instance/tokens/#web-ui) in the Web Console. **Register** saves the token to the API server's store and shows its credentials in the result dialog.
+
 ### 5.1.3
 
 Patch release making untagged (**Everyone**) pipes and saved Pipelines on team-reserved instances usable by the reserved teams with no backfill.
