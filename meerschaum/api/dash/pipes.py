@@ -1547,8 +1547,8 @@ def build_pipes_tags_dropdown(
     viewer = access.current_viewer()
 
     def _visible_tags(**keys) -> List[str]:
-        pipes = access.visible_pipes(viewer, mrsm.get_pipes(instance=instance, as_list=True, **keys))
-        return sorted({str(tag) for pipe in pipes for tag in (pipe.tags or [])})
+        rows = access.visible_registrations(viewer, instance, **keys)
+        return sorted({str(tag) for _, _, _, parameters in rows for tag in (parameters.get('tags') or [])})
 
     _tags_alone = tags and not any([str(x) for x in (connector_keys + metric_keys + location_keys)])
     _tags_pipes = _visible_tags(

@@ -165,6 +165,11 @@ impl Principal {
     }
 }
 
+/// Whether the reservation names any team whose role can extend Everyone.
+pub fn extends_everyone(reservation: &[String]) -> bool {
+    reservation.iter().any(|team| !is_everyone(Some(team)))
+}
+
 /// The principal's highest role among the instance's reserved teams.
 fn reserved_role(principal: &Principal, reservation: &[String]) -> Option<TeamRole> {
     reservation
@@ -248,6 +253,17 @@ pub fn can_manage_access(
             || instance_team_role(principal, team, reservation) == Some(TeamRole::Manager))
 }
 
+/// Whether the principal may assign a new owner to a pipe of this team.
+pub fn can_assign_pipe_owner(
+    principal: &Principal,
+    team: Option<&str>,
+    reservation: &[String],
+) -> bool {
+    permits_pipe_team(principal, team, reservation)
+        && (principal.is_admin
+            || instance_team_role(principal, team, reservation) == Some(TeamRole::Manager))
+}
+
 /// Whether `principal` may lock or unlock a pipe through the API or the console: its owner,
 /// its team's managers and administrators (locally anyone with access to the instance may).
 pub fn can_lock(principal: &Principal, access: &PipeAccess, reservation: &[String]) -> bool {
@@ -294,11 +310,15 @@ pub fn retired_reservation(team: &str, id: Option<&str>) -> String {
     format!("Deleted team {team} #{}", id.unwrap_or("unknown"))
 }
 
-/// The `teams` restriction of a configured connector. An absent or null attribute is unrestricted.
-pub fn connector_reservation(connectors: &Map, connector_keys: &str) -> Option<Vec<String>> {
+/// The `teams` attribute of the named connector, without inherited defaults.
+fn connector_teams_attribute<'a>(connectors: &'a Map, connector_keys: &str) -> Option<&'a Value> {
     let (typ, label) = connector_keys.split_once(':')?;
-    let attrs = connectors.get(typ)?.get(label)?;
-    match attrs.get("teams")? {
+    connectors.get(typ)?.get(label)?.get("teams")
+}
+
+/// The `teams` restriction used by the connector gate. An absent or null value is unrestricted.
+pub fn connector_teams(connectors: &Map, connector_keys: &str) -> Option<Vec<String>> {
+    match connector_teams_attribute(connectors, connector_keys)? {
         Value::List(items) => Some(items.iter().map(Value::py_str).collect()),
         Value::Str(names) => Some(
             names
@@ -310,6 +330,26 @@ pub fn connector_reservation(connectors: &Map, connector_keys: &str) -> Option<V
         ),
         Value::Null => None,
         other => Some(vec![other.py_str()]),
+    }
+}
+
+/// The named teams that extend Everyone on this instance.
+pub fn connector_reservation(connectors: &Map, connector_keys: &str) -> Option<Vec<String>> {
+    pipe_reservation(connector_teams_attribute(connectors, connector_keys)?)
+}
+
+/// The pipe reservation described by a connector's `teams` attribute.
+pub fn pipe_reservation(attribute: &Value) -> Option<Vec<String>> {
+    match attribute {
+        Value::List(items) => Some(
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect(),
+        ),
+        Value::Str(_) => reservation_names(attribute),
+        _ => None,
     }
 }
 
@@ -533,8 +573,7 @@ pub fn check_access_change(
     let gives_up = new.owner.is_none() && old.is_owner(&principal.username);
     if owner_changed
         && !gives_up
-        && instance_team_role(principal, old.team.as_deref(), reservation)
-            != Some(TeamRole::Manager)
+        && !can_assign_pipe_owner(principal, old.team.as_deref(), reservation)
     {
         return Err(
             "Only the team's managers and administrators may give a pipe to another owner."

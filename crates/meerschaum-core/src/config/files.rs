@@ -311,9 +311,15 @@ impl ConfigState {
 
     /// See [`Config::refresh_connectors`].
     pub fn refresh_connectors(&mut self) -> bool {
+        self.refresh_connector_settings(false)
+    }
+
+    /// Refresh connector settings from disk. The console adds new labels and refreshes
+    /// reservations while keeping other attributes of its existing live connectors.
+    pub fn refresh_connector_settings(&mut self, reservations_only: bool) -> bool {
         let key = "meerschaum".to_string();
         let Ok((fresh, _)) =
-            self.read_config_lossless(None, Some(std::slice::from_ref(&key)), false, true, false)
+            self.read_config_lossless(None, Some(std::slice::from_ref(&key)), false, true, true)
         else {
             return false;
         };
@@ -324,7 +330,7 @@ impl ConfigState {
         else {
             return false;
         };
-        let Some(section) = self.config.get_mut(&key).and_then(|m| m.as_map_mut()) else {
+        let Some(section) = self.config.get(&key).and_then(ConfigValue::as_map) else {
             return false;
         };
         let existing = section
@@ -333,12 +339,55 @@ impl ConfigState {
             .unwrap_or_else(ConfigValue::new_map);
         let mut aliases = connector_alias_sections(&existing);
         aliases.extend(connector_alias_sections(&fresh));
-        let mut merged = apply_patch(&existing, &fresh);
+        let mut merged = if reservations_only {
+            existing.clone()
+        } else {
+            apply_patch(&existing, &fresh)
+        };
         restore_connector_alias_sections(&mut merged, aliases);
+        let origins = self.origins(&key);
+        let effective = origins.resolved_substituted.or(origins.resolved);
+        if let (Some(disk), Some(live)) = (fresh.as_map(), merged.as_map_mut()) {
+            for (typ, labels) in disk {
+                let Some(labels) = labels.as_map() else {
+                    continue;
+                };
+                let Some(current) = live
+                    .entry(typ.clone())
+                    .or_insert_with(ConfigValue::new_map)
+                    .as_map_mut()
+                else {
+                    continue;
+                };
+                let effective_labels = effective
+                    .as_ref()
+                    .and_then(|section| section.get("connectors"))
+                    .and_then(|section| section.get(typ));
+                for (label, attrs) in labels {
+                    let effective_attrs = effective_labels.and_then(|labels| labels.get(label));
+                    let entry = current
+                        .entry(label.clone())
+                        .or_insert_with(|| effective_attrs.unwrap_or(attrs).clone());
+                    let Some(entry) = entry.as_map_mut() else {
+                        continue;
+                    };
+                    match effective_attrs.and_then(|attrs| attrs.get("teams")) {
+                        Some(teams) => {
+                            entry.insert("teams".into(), teams.clone());
+                        }
+                        None => {
+                            entry.shift_remove("teams");
+                        }
+                    }
+                }
+            }
+        }
         if merged == existing {
             return false;
         }
-        section.insert("connectors".to_string(), merged);
+        if let Some(section) = self.config.get_mut(&key).and_then(|m| m.as_map_mut()) {
+            section.insert("connectors".to_string(), merged);
+        }
         true
     }
 

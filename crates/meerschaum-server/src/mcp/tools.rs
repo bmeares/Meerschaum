@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use chrono::TimeDelta;
 use indexmap::IndexMap;
-use meerschaum_connector::{DataQuery, DateBound, InstanceConnector, PipesKeysQuery};
+use meerschaum_connector::{DataQuery, DateBound, InstanceConnector, PipesKeys, PipesKeysQuery};
 use meerschaum_core::{Map, Pipe, SuccessTuple, Value};
 use meerschaum_kernel::serialize::GeometryFormat;
 use meerschaum_kernel::value::DateTimeValue;
@@ -260,14 +260,17 @@ pub async fn resolve_pipe(
         .map(Value::py_str)
         .unwrap_or_default();
     let mut pipe = build_pipe(cx, &conn, &ck, &mk, lk.as_deref(), None)?;
-    hydrate(&conn, &mut pipe)
+    let hydrated = hydrate(&conn, &mut pipe)
         .await
         .map_err(|e| ToolError::other(api_error_str(&e)))?;
     check_protected_target(&pipe)?;
     // Over HTTP: only the pipes the caller can see.
     if cx.caller.api {
         let caller = caller_access(cx).await?;
-        if !caller.can_see_pipe(cx.state, &pipe) {
+        let pipe_access = caller.for_instance(cx.state, pipe.instance_keys());
+        if (!hydrated && pipe_access.needs_authoritative_registration())
+            || !pipe_access.can_see_pipe(&pipe)
+        {
             return Err(hidden(&pipe));
         }
         if !caller.is_admin() {
@@ -374,10 +377,6 @@ pub async fn get_pipes(
     conn: &Arc<dyn InstanceConnector>,
     query: &PipesKeysQuery,
 ) -> Result<Vec<Pipe>, ToolError> {
-    let keys = conn
-        .fetch_pipes_keys(query)
-        .await
-        .map_err(|e| ToolError::other(e.to_string()))?;
     type Grouped = IndexMap<String, IndexMap<String, Vec<Pipe>>>;
     let mut grouped: Grouped = IndexMap::new();
     // Over HTTP: only the pipes the caller can see.
@@ -389,7 +388,27 @@ pub async fn get_pipes(
     let access = caller
         .as_ref()
         .map(|caller| caller.for_instance(cx.state, &conn.connector_keys()));
-    for entry in keys.entries() {
+    let authoritative = access
+        .as_ref()
+        .is_some_and(access::InstanceAccess::needs_authoritative_registration);
+    let keys: Vec<_> = if authoritative {
+        conn.registered_pipes(query)
+            .await
+            .map_err(|e| ToolError::other(e.to_string()))?
+    } else {
+        match conn
+            .fetch_pipes_keys(query)
+            .await
+            .map_err(|e| ToolError::other(e.to_string()))?
+        {
+            PipesKeys::List(entries) => entries.into_iter().map(|entry| (None, entry)).collect(),
+            PipesKeys::Dict(entries) => entries
+                .into_iter()
+                .map(|(id, entry)| (Some(id), entry))
+                .collect(),
+        }
+    };
+    for (identity, entry) in keys {
         let lk = normalize_location(entry.location_key.as_deref());
         let params = match &entry.extra {
             Some(Value::Map(m)) => Some(m.clone()),
@@ -400,19 +419,29 @@ pub async fn get_pipes(
             _ => None,
         };
         let has_params = params.is_some();
-        let mut pipe = build_pipe(
-            cx,
-            conn,
-            &entry.connector_keys,
-            &entry.metric_key,
-            lk.as_deref(),
-            params,
-        )?;
-        if !has_params {
-            hydrate(conn, &mut pipe)
+        let pipe = if authoritative {
+            cx.state
+                .registered_handle(conn, identity, &entry, lk.as_deref())
                 .await
-                .map_err(|e| ToolError::other(api_error_str(&e)))?;
-        }
+                .map_err(|e| ToolError::other(api_error_str(&e)))?
+                .pipe
+                .clone()
+        } else {
+            let mut pipe = build_pipe(
+                cx,
+                conn,
+                &entry.connector_keys,
+                &entry.metric_key,
+                lk.as_deref(),
+                params,
+            )?;
+            if !has_params {
+                hydrate(conn, &mut pipe)
+                    .await
+                    .map_err(|e| ToolError::other(api_error_str(&e)))?;
+            }
+            pipe
+        };
         if access
             .as_ref()
             .is_some_and(|access| !access.can_see_pipe(&pipe))

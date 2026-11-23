@@ -67,11 +67,24 @@ async fn registered_visible(
     lk: &str,
 ) -> Result<(Arc<dyn InstanceConnector>, Pipe), ApiError> {
     let ik = ctx.instance_keys();
+    let conn = ctx.state.get_api_connector(ik.as_deref())?;
+    if caller
+        .for_instance(&ctx.state, &conn.connector_keys())
+        .needs_authoritative_registration()
+    {
+        let pipe = ctx.state.pipe_from_path(&conn, ck, mk, Some(lk))?;
+        let h = ctx
+            .state
+            .registered_pipe(&conn, &pipe, ik.as_deref())
+            .await?
+            .filter(|h| caller.can_see_pipe(&ctx.state, &h.pipe))
+            .ok_or_else(|| access::hidden_pipe(&pipe))?;
+        return Ok((conn, h.pipe.clone()));
+    }
     let h = ctx
         .state
         .get_pipe(ck, mk, Some(lk), ik.as_deref(), true)
         .await?;
-    let conn = ctx.state.get_api_connector(ik.as_deref())?;
     let registered = conn
         .get_pipe_id(&h.pipe)
         .await

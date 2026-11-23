@@ -420,7 +420,7 @@ impl AppState {
         )
     }
 
-    async fn registered_handle(
+    pub(crate) async fn registered_handle(
         &self,
         conn: &Arc<dyn InstanceConnector>,
         identity: Option<PipeId>,
@@ -437,7 +437,19 @@ impl AppState {
             params,
         )?;
         if needs_hydration {
-            hydrate(conn, &mut pipe).await?;
+            let hydrated = hydrate(conn, &mut pipe).await?;
+            if !hydrated
+                && meerschaum_core::access::connector_reservation(
+                    &self.connectors(),
+                    pipe.instance_keys(),
+                )
+                .is_some_and(|teams| meerschaum_core::access::extends_everyone(&teams))
+            {
+                return Err(ApiError::new(
+                    503,
+                    "The pipe's registered parameters are unavailable.",
+                ));
+            }
         }
         if let Some(identity) = identity {
             pipe.set_registration_id(Some(identity.to_string()));
@@ -626,7 +638,7 @@ fn keyed_registration_query(conn: &dyn InstanceConnector, pipe: &Pipe) -> Option
 
 /// Load a pipe's parameters from the instance (`Pipe.attributes`: the instance's attributes
 /// patched with the local ones).
-pub async fn hydrate(conn: &Arc<dyn InstanceConnector>, pipe: &mut Pipe) -> Result<(), ApiError> {
+pub async fn hydrate(conn: &Arc<dyn InstanceConnector>, pipe: &mut Pipe) -> Result<bool, ApiError> {
     let attrs = conn
         .get_pipe_attributes(pipe)
         .await
@@ -634,8 +646,9 @@ pub async fn hydrate(conn: &Arc<dyn InstanceConnector>, pipe: &mut Pipe) -> Resu
     if let Some(params) = parameters_of(&attrs) {
         let merged = meerschaum_core::value::apply_patch_maps(&params, pipe.raw_parameters());
         pipe.set_parameters(merged);
+        return Ok(true);
     }
-    Ok(())
+    Ok(false)
 }
 
 /// The `parameters` of an attributes document (a dict, or a JSON string from some instances).

@@ -971,15 +971,15 @@ def update_pipe_fetch(n_clicks, text, meta, session_data):
 NO_OWNER = '__no_owner__'
 
 
-def owner_options(viewer: Any, current_owner: Optional[str], team: Optional[str]) -> List[Dict[str, str]]:
+def owner_options(viewer: Any, parameters: Dict[str, Any], instance: Any) -> List[Dict[str, str]]:
     """
     Who the Access dialog may name as the owner: any user for administrators and the team's
     managers; otherwise the owner may only keep or give up ownership.
     """
-    from meerschaum.api.dash import access
     from meerschaum.api import get_api_connector
     none = {'label': 'No owner', 'value': NO_OWNER}
-    if viewer.is_admin or viewer.no_auth or viewer.manages(team):
+    current_owner = access.access_fields(parameters).get('owner')
+    if access.can_assign_pipe_owner(viewer, parameters, instance=instance):
         try:
             names = sorted(str(name) for name in (get_api_connector().get_users() or []))
         except Exception:
@@ -1021,14 +1021,14 @@ def open_pipe_access(access_clicks, cancel_clicks, meta, session_data):
         raise PreventUpdate
     pipe = _meta_pipe(meta, session_data)
     viewer = access.resolve_viewer(session_data)
-    parameters = pipe.get_parameters(apply_symlinks=False, refresh=True) or {}
+    parameters = access.read_pipe_parameters(pipe, refresh=True)
     if not access.can_manage_access(viewer, parameters, instance=pipe.instance_keys):
         raise PreventUpdate
     fields = access.access_fields(parameters)
     team = fields.get('team') or access.EVERYONE
     return (
         True,
-        owner_options(viewer, fields.get('owner'), fields.get('team')),
+        owner_options(viewer, parameters, pipe.instance_keys),
         fields.get('owner') or NO_OWNER,
         access.pipe_team_options(viewer, team, pipe.instance_keys),
         team,
@@ -1065,7 +1065,7 @@ def save_pipe_access(n_clicks, owner, team, visibility, edit, meta, session_data
         return dash.no_update, alert_from_success_tuple((False, message)), dash.no_update, dash.no_update
     access.forget()
     pipes_table.clear_cache()
-    parameters = pipe.get_parameters(apply_symlinks=False, refresh=True) or {}
+    parameters = access.read_pipe_parameters(pipe, refresh=True)
     return (
         False, [], pipe_detail.build_badges(parameters),
         alert_from_success_tuple((True, f"Saved the access of {pipe}.")),
@@ -1093,7 +1093,7 @@ def open_pipe_locks(locks_clicks, cancel_clicks, meta, session_data):
     if not locks_clicks:
         raise PreventUpdate
     pipe = _meta_pipe(meta, session_data)
-    parameters = pipe.get_parameters(apply_symlinks=False, refresh=True) or {}
+    parameters = access.read_pipe_parameters(pipe, refresh=True)
     if not access.can_lock(access.resolve_viewer(session_data), parameters, instance=pipe.instance_keys):
         raise PreventUpdate
     return True, access.pipe_locks(parameters), []
@@ -1121,7 +1121,7 @@ def save_pipe_locks(n_clicks, locks, meta, session_data):
     if not success:
         return dash.no_update, alert_from_success_tuple((False, message)), dash.no_update, dash.no_update
     pipes_table.clear_cache()
-    parameters = pipe.get_parameters(apply_symlinks=False, refresh=True) or {}
+    parameters = access.read_pipe_parameters(pipe, refresh=True)
     return False, [], pipe_detail.build_badges(parameters), alert_from_success_tuple((True, message))
 
 

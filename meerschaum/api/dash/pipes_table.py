@@ -369,22 +369,19 @@ def list_rows(
     from meerschaum.api.dash.connector_listing import reserved_for_viewer
     viewer = viewer if viewer is not None else access.current_viewer()
     connector_keys = [str(ck) for ck in (connector_keys or [])]
-    pipes = mrsm.get_pipes(
+    pipes = access.visible_registered_pipes(
+        viewer,
+        instance,
         connector_keys=connector_keys,
         metric_keys=[str(mk) for mk in (metric_keys or [])],
         location_keys=[(None if str(lk) == 'None' else str(lk)) for lk in (location_keys or [])],
         tags=[str(tag) for tag in (tags or [])],
-        instance=instance,
-        as_list=True,
     )
     include_internal = 'mrsm' in connector_keys
     my_reservation = reserved_for_viewer(instance, viewer)
-    visible = access.pipe_visibility(viewer, instance)
     rows = []
     for pipe in pipes:
         if str(pipe.connector_keys) == 'mrsm' and not include_internal:
-            continue
-        if not visible(pipe):
             continue
         row = _row_from_pipe(pipe)
         row['my_reserved_team'] = bool(my_reservation and not row['team'])

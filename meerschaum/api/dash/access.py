@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import threading
 import time
+import json
 
 import meerschaum as mrsm
 from typing import Callable, Set
@@ -129,8 +130,34 @@ def _parameters_of(pipe_or_parameters: Any) -> Dict[str, Any]:
         raise ValueError('The pipe is not available.')
     getter = getattr(pipe_or_parameters, 'get_parameters', None)
     if callable(getter):
-        return getter(apply_symlinks=False) or {}
+        return read_pipe_parameters(pipe_or_parameters)
     return dict(pipe_or_parameters.parameters or {})
+
+
+def read_pipe_parameters(
+    pipe: Any, *, refresh: bool = False, require_registration: bool = False,
+) -> Dict[str, Any]:
+    """Read raw parameters and distinguish an empty document from a failed registration read."""
+    failures = getattr(pipe, '_attributes_load_failures', 0)
+    try:
+        parameters = pipe.get_parameters(apply_symlinks=False, refresh=refresh)
+    except TypeError:
+        parameters = pipe.get_parameters(apply_symlinks=False)
+    if getattr(pipe, '_attributes_load_failures', 0) > failures:
+        raise ValueError('Pipe metadata is unavailable.')
+    if refresh and hasattr(pipe, '_attributes_instance_registration'):
+        registered, instance_parameters = pipe._attributes_instance_registration
+        if registered:
+            parameters = instance_parameters
+            if isinstance(parameters, str):
+                parameters = json.loads(parameters)
+        elif require_registration:
+            raise ValueError('Pipe registration is unavailable.')
+        elif pipe.get_id() is not None:
+            raise ValueError('Pipe metadata is unavailable.')
+    if not isinstance(parameters, dict):
+        raise ValueError('Pipe parameters are unavailable.')
+    return parameters
 
 
 def pipe_access(pipe_or_parameters: Any) -> Dict[str, Any]:
@@ -177,13 +204,16 @@ def _rule(
     if not viewer.signed_in or pipe_or_parameters is _UNREADABLE_PARAMETERS:
         return False
     try:
-        parameters = pipe_access(pipe_or_parameters)
+        parameters = _parameters_of(pipe_or_parameters)
+        from meerschaum import _core
+        return bool(_core.access_can(
+            name.removeprefix('can_'), viewer.principal, parameters, reservation,
+            stored_parameters=True,
+        ))
     except Exception:
         ### An unreadable registration must never become an unrestricted Everyone pipe,
         ### even when a stale object still has a cached parameters dictionary.
         return False
-    func = getattr(core(), name)
-    return bool(func(viewer.principal, parameters, reservation=reservation))
 
 
 def pipe_visibility(viewer: Viewer, instance: Any) -> Callable[[Any], bool]:
@@ -237,6 +267,11 @@ def can_manage_access(viewer: Viewer, pipe_or_parameters: Any, *, instance: Any)
         _can_see(viewer, pipe_or_parameters, reservation)
         and _rule('can_manage_access', viewer, pipe_or_parameters, reservation)
     )
+
+
+def can_assign_pipe_owner(viewer: Viewer, parameters: Dict[str, Any], *, instance: Any) -> bool:
+    """Whether this viewer may transfer ownership of the pipe to another user."""
+    return _rule('assign_owner', viewer, parameters, _reservation(viewer, instance))
 
 
 def can_lock(viewer: Viewer, pipe_or_parameters: Any, *, instance: Any) -> bool:
@@ -343,14 +378,22 @@ def check_parameters_change(
 
 
 def visible_pipes(viewer: Viewer, pipes: Iterable[Any]) -> List[Any]:
-    """The pipes the viewer may see (their parameters as listed; no new reads)."""
+    """The pipes the viewer may see, reading current registration metadata when reserved."""
     reservations = {}
     visible = []
     for pipe in pipes:
         instance = pipe.instance_keys
         if instance not in reservations:
             reservations[instance] = _reservation(viewer, instance)
-        if _can_see(viewer, pipe.parameters, reservations[instance]):
+        reservation = reservations[instance]
+        try:
+            parameters = (
+                read_pipe_parameters(pipe, refresh=True, require_registration=True)
+                if reservation else pipe.parameters
+            )
+        except Exception:
+            continue
+        if _can_see(viewer, parameters, reservation):
             visible.append(pipe)
     return visible
 
@@ -383,7 +426,6 @@ def registered_pipes(
     An instance that lists keys without parameters (a custom instance connector may) has each
     pipe's parameters read, so its `access` is never guessed.
     """
-    import json
     from meerschaum.utils import fetch_pipes_keys
     conn = instance if not isinstance(instance, str) else mrsm.get_connector(instance)
     result = fetch_pipes_keys('registered', conn, **filters)
@@ -406,13 +448,7 @@ def registered_pipes(
         if not hydrated or not isinstance(parameters, dict):
             try:
                 pipe = mrsm.Pipe(ck, mk, lk, instance=conn)
-                failures = pipe.__dict__.get('_attributes_load_failures', 0)
-                parameters = pipe.get_parameters(apply_symlinks=False, refresh=True)
-                if (not isinstance(parameters, dict)
-                    or pipe.__dict__.get('_attributes_load_failures', 0) > failures):
-                    raise ValueError('Pipe metadata is unavailable.')
-                if not parameters and not pipe.attributes.get('pipe_id') and pipe.get_id() is None:
-                    raise ValueError('Pipe registration is unavailable.')
+                parameters = read_pipe_parameters(pipe, refresh=True, require_registration=True)
             except Exception:
                 parameters = _UNREADABLE_PARAMETERS
         out.append((str(ck), str(mk), (None if lk is None else str(lk)), parameters))
@@ -425,6 +461,17 @@ def visible_registrations(
     """Read an instance's registrations and apply its reservation to the batch."""
     visible = pipe_visibility(viewer, instance)
     return [row for row in registered_pipes(instance, **filters) if visible(row[3])]
+
+
+def visible_registered_pipes(viewer: Viewer, instance: Any, **filters: Any) -> List[Any]:
+    """Build pipe objects from the same registration documents used to authorize the list."""
+    pipes = []
+    now = time.time()
+    for ck, mk, lk, parameters in visible_registrations(viewer, instance, **filters):
+        pipe = mrsm.Pipe(ck, mk, lk, instance=instance, parameters=parameters)
+        pipe._cache_value('_attributes_sync_time', now, memory_only=True)
+        pipes.append(pipe)
+    return pipes
 
 
 def visible_refs(viewer: Viewer, instance: Any) -> Optional[Set[str]]:
@@ -566,7 +613,7 @@ def pipeline_registry_parameters(name: str, instance: Any) -> Dict[str, Any]:
     """The parameters of a saved Pipeline's registry pipe (`Pipe('mrsm', 'pipeline', name)`)."""
     from meerschaum.core.Pipeline._saved import registration
     try:
-        return registration(name, instance).get_parameters(apply_symlinks=False, refresh=True) or {}
+        return read_pipe_parameters(registration(name, instance), refresh=True, require_registration=True)
     except Exception:
         return {}
 
@@ -651,10 +698,7 @@ def resolve_visible_pipe(
     if viewer.no_auth or viewer.is_admin:
         return pipe, None
     try:
-        try:
-            parameters = pipe.get_parameters(apply_symlinks=False, refresh=True) or {}
-        except TypeError:
-            parameters = pipe.get_parameters(apply_symlinks=False) or {}
+        parameters = read_pipe_parameters(pipe, refresh=True)
     except Exception as e:
         return None, e
     return (pipe if can_see_pipe(viewer, parameters, instance=instance) else None), None

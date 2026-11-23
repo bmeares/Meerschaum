@@ -168,6 +168,136 @@ fn on_reserved(path: &str) -> String {
 }
 
 #[tokio::test]
+async fn reserved_valkey_listings_use_registered_access() {
+    use meerschaum_connector_valkey::{MemoryBackend, ValkeyBackend, ValkeyConnector, keys};
+
+    let mut f = fixture().await;
+    let instance_keys = "valkey:reserved";
+    let backend = Arc::new(MemoryBackend::new());
+    let valkey = Arc::new(ValkeyConnector::with_backend(
+        "reserved",
+        Map::new(),
+        backend.clone(),
+    ));
+    for (metric, parameters) in [
+        ("untagged", json!({})),
+        ("private", json!({"access": {"visibility": "private"}})),
+        ("malformed", json!({"access": "broken JSON"})),
+        ("missing", json!({"access": {"visibility": "private"}})),
+        (
+            "legacy_json",
+            json!({"access": "{\"team\":null,\"visibility\":\"team\"}"}),
+        ),
+    ] {
+        let pipe = Pipe::builder("manual:list", metric)
+            .instance(instance_keys)
+            .parameters(map(parameters))
+            .build()
+            .unwrap();
+        assert!(valkey.register_pipe(&pipe).await.success);
+    }
+    // Its listing row remains after the registration disappears.
+    assert_eq!(
+        backend
+            .del(&[keys::get_pipe_key("manual:list", "missing", None)])
+            .await
+            .unwrap(),
+        1
+    );
+    let mut config = (*f.state.config).clone();
+    config.allow_multiple_instances = true;
+    config.allowed_instance_keys = vec![INSTANCE.into(), instance_keys.into()];
+    config.connectors = map(json!({"valkey": {"reserved": {"teams": ["Wet", null]}}}));
+    f.state = AppState::builder(config, f.instance.clone())
+        .secret(SECRET.to_vec())
+        .resolver(Arc::new(Instances(vec![(instance_keys.into(), valkey)])))
+        .build()
+        .unwrap();
+    f.app = meerschaum_server::app(f.state.clone());
+    f.mcp = McpServer::for_state(&f.state).with_backend(Arc::new(Mcp::default()));
+    isolated_team(
+        &f,
+        "Wet",
+        &[("wren", TeamRole::Member)],
+        &[],
+        Some(instance_keys),
+    )
+    .await;
+    let auth = token(&f, "wren").await;
+    let catalog = get(&f, &auth, "/pipes").await;
+    assert_eq!(catalog.status, StatusCode::OK, "{}", catalog.text());
+    let listing = catalog.json();
+    let listed_metrics = listing["manual:list"].as_object().unwrap();
+    assert_eq!(listed_metrics.len(), 2, "{listing}");
+    assert_eq!(listed_metrics["untagged"]["None"]["parameters"], json!({}));
+    assert!(listed_metrics.contains_key("legacy_json"));
+    assert_eq!(
+        listed(&get(&f, &auth, "/pipes/keys").await),
+        names(&[("manual:list", "untagged"), ("manual:list", "legacy_json")])
+    );
+    let response = call(
+        &f,
+        "POST",
+        &auth,
+        "/mcp",
+        Some(json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "list_pipes", "arguments": {}},
+        })),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    let reply = tool_result(response.json()).unwrap().to_string();
+    for visible in ["untagged", "legacy_json"] {
+        assert!(reply.contains(visible), "{reply}");
+    }
+    for hidden in ["private", "malformed", "missing"] {
+        assert!(!reply.contains(hidden), "{reply}");
+        let path = format!("/pipes/manual:list/{hidden}/None/attributes");
+        assert_eq!(get(&f, &auth, &path).await.status, StatusCode::NOT_FOUND);
+    }
+    isolated_team(
+        &f,
+        "None",
+        &[("null-member", TeamRole::Member)],
+        &[instance_keys],
+        None,
+    )
+    .await;
+    let auth = token(&f, "null-member").await;
+    let catalog = get(&f, &auth, &format!("/pipes?instance_keys={instance_keys}")).await;
+    assert_eq!(catalog.status, StatusCode::OK, "{}", catalog.text());
+    assert_eq!(catalog.json(), json!({}));
+}
+
+#[tokio::test]
+async fn catalog_keeps_its_default_routing_for_unreserved_team_instances() {
+    let (f, instances) = configured_instance(json!(["Wet"])).await;
+    let team_pipe = ("manual:team", "only_on_team_instance");
+    register(
+        &instances.unreserved,
+        team_pipe,
+        json!({"access": {"team": "Wet"}}),
+    )
+    .await;
+    isolated_team(
+        &f,
+        "Wet",
+        &[("wren", TeamRole::Member)],
+        &[UNRESERVED],
+        Some(UNRESERVED),
+    )
+    .await;
+    let auth = token(&f, "wren").await;
+    let implicit = get(&f, &auth, "/pipes").await;
+    let explicit = get(&f, &auth, &format!("/pipes?instance_keys={UNRESERVED}")).await;
+    assert_eq!(implicit.status, StatusCode::OK, "{}", implicit.text());
+    assert_eq!(explicit.status, StatusCode::OK, "{}", explicit.text());
+    assert!(!implicit.text().contains(team_pipe.1));
+    assert!(explicit.text().contains(team_pipe.1), "{}", explicit.text());
+}
+
+#[tokio::test]
 async fn isolated_members_see_and_change_untagged_pipes_on_their_reserved_instance() {
     let (f, instances) = configured_instance(json!(["Wet"])).await;
     isolated_team(

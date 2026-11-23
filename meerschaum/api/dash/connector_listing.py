@@ -634,14 +634,16 @@ def connector_team_allows(keys: str, viewer: Any) -> bool:
 
 
 def connector_reservation(instance: Any) -> Tuple[str, ...]:
-    """The named teams in an instance's reservation."""
-    from meerschaum.core.access import is_everyone
-    teams = _connector_team_attribute(str(instance))
-    if isinstance(teams, str):
-        teams = teams.split(',')
-    if not isinstance(teams, (list, tuple, set, frozenset)):
+    """The reservation on the named connector in the live configuration."""
+    from meerschaum import _core
+    from meerschaum.config import get_config
+    from meerschaum.api.dash.connectors_file import refresh_connectors
+    typ, delimiter, label = str(instance).partition(':')
+    if not delimiter:
         return ()
-    return tuple(str(team).strip() for team in teams if not is_everyone(str(team)))
+    refresh_connectors()
+    teams = get_config('meerschaum', 'connectors', typ, label, 'teams', patch=False, warn=False)
+    return tuple(_core.access_pipe_reservation(teams))
 
 
 def reserved_for_viewer(instance: Any, viewer: Any) -> bool:

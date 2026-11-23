@@ -18,7 +18,10 @@ use serde_json::{Value as Json, json};
 
 // The handlers in the submodules name these sibling route modules as `super::...`.
 use super::{Ctx, body_bytes, engine, graph_batch, sync_status};
-use crate::access::{self, Access, rules::LockOp};
+use crate::access::{
+    self, Access,
+    rules::{self, LockOp},
+};
 use crate::config::ServerConfig;
 use crate::error::{ApiError, ApiResult};
 use crate::json::{from_core, ok_json, python_json, raw_json, to_core, tuple, tuple_response};
@@ -298,7 +301,22 @@ async fn visible(
     refresh: bool,
 ) -> Result<(Arc<dyn InstanceConnector>, Arc<PipeHandle>), ApiError> {
     let index = visibility_index(ctx, access).await?;
-    let (conn, h) = handle(ctx, ck, mk, lk, refresh).await?;
+    let ik = ctx.instance_keys();
+    let conn = ctx.state.get_api_connector(ik.as_deref())?;
+    let h = if access
+        .for_instance(&ctx.state, &conn.connector_keys())
+        .needs_authoritative_registration()
+    {
+        let pipe = ctx.state.pipe_from_path(&conn, ck, mk, Some(lk))?;
+        ctx.state
+            .registered_pipe(&conn, &pipe, ik.as_deref())
+            .await?
+            .ok_or_else(|| access::hidden_pipe(&pipe))?
+    } else {
+        ctx.state
+            .get_pipe(ck, mk, Some(lk), ik.as_deref(), refresh)
+            .await?
+    };
     check_pipe_visibility(&ctx.state, access, &conn, &h.pipe, index.as_deref())?;
     Ok((conn, h))
 }

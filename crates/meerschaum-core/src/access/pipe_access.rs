@@ -113,6 +113,41 @@ impl PipeAccess {
         PipeAccess::from_value(parameters.get(ACCESS_KEY))
     }
 
+    /// Resolve stored access for this instance. Malformed access cannot gain a reservation's
+    /// Everyone rights. Legacy JSON maps and the unreserved read rules still work.
+    pub fn for_authorization(
+        parameters: &Map,
+        reservation: &[String],
+        principal: &Principal,
+    ) -> Option<PipeAccess> {
+        let Some(value) = parameters.get(ACCESS_KEY) else {
+            return Some(PipeAccess::default());
+        };
+        if (principal.is_admin && principal.team_boundary.is_none())
+            || !extends_everyone(reservation)
+        {
+            return Some(PipeAccess::from_value(Some(value)));
+        }
+        let parsed;
+        let value = if let Value::Str(text) = value {
+            parsed = Value::from_json_str(text).ok()?;
+            if !matches!(parsed, Value::Map(_)) {
+                return None;
+            }
+            &parsed
+        } else {
+            value
+        };
+        if let Value::Map(map) = value
+            && map
+                .values()
+                .any(|field| !matches!(field, Value::Str(_) | Value::Null))
+        {
+            return None;
+        }
+        PipeAccess::parse(value).ok()
+    }
+
     /// The access of a pipe's parameters (`pipe.parameters` resolved).
     pub fn of_pipe(pipe: &Pipe) -> PipeAccess {
         PipeAccess::from_parameters(pipe.raw_parameters())

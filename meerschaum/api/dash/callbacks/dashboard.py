@@ -574,19 +574,19 @@ def update_keys_options(
         instance_connector = get_web_connector(ctx.states)
         _all_visible = access.visible_registrations(viewer, instance_connector)
         _all_keys = [(ck, mk, lk) for ck, mk, lk, _ in _all_visible]
-        _selected = access.visible_pipes(viewer, mrsm.get_pipes(
+        _selected = access.visible_registrations(
+            viewer,
+            instance_connector,
             connector_keys=connector_keys,
             metric_keys=metric_keys,
             location_keys=location_keys,
             tags=tags,
-            instance=instance_connector,
-            as_list=True,
-        ))
-        _keys = [
-            (str(pipe.connector_keys), str(pipe.metric_key), pipe.location_key)
-            for pipe in _selected
-        ]
-        _tags_pipes = {str(tag) for pipe in _selected for tag in (pipe.tags or [])}
+        )
+        _keys = [(ck, mk, lk) for ck, mk, lk, _ in _selected]
+        _tags_pipes = {
+            str(tag) for _, _, _, parameters in _selected
+            for tag in (parameters.get('tags') or [])
+        }
         _all_tags = list(
             {
                 str(tag)

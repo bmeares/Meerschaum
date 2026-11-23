@@ -10,7 +10,6 @@ another process (`bootstrap teams`) reaches the live config without a restart.
 
 from __future__ import annotations
 
-import copy
 import os
 import threading
 
@@ -24,11 +23,9 @@ _connectors_mtime: Optional[float] = None
 def connectors_file() -> Optional[str]:
     """The configuration file under the root's `config/` that holds the connectors, if any."""
     try:
-        from meerschaum.config.paths import CONFIG_DIR_PATH
-        for name in ('meerschaum.yaml', 'meerschaum.yml', 'meerschaum.json'):
-            path = os.path.join(str(CONFIG_DIR_PATH), name)
-            if os.path.exists(path):
-                return path
+        from meerschaum.config._read_config import get_keyfile_path
+        path = get_keyfile_path('meerschaum')
+        return str(path) if path is not None else None
     except Exception:
         pass
     return None
@@ -46,42 +43,23 @@ def remember_connectors_file() -> None:
 
 def refresh_connectors() -> bool:
     """
-    Pick up the connectors another process wrote to the configuration file since this one read it
-    (a team's database made with `bootstrap teams`): new labels are added to the live config, and
-    nothing in memory is replaced or removed. Returns whether anything was added. Cheap: one
-    `stat` unless the file changed.
+    Pick up new connector labels and edited reservations from the file. Returns whether the
+    live connector configuration changed.
     """
     global _connectors_mtime
-    path = connectors_file()
-    if path is None:
-        return False
-    try:
-        mtime = os.path.getmtime(path)
-    except OSError:
-        return False
-    if _connectors_mtime is None:
-        _connectors_mtime = mtime
-        return False
-    if mtime == _connectors_mtime:
-        return False
-    added = False
     with CONFIG_LOCK:
-        _connectors_mtime = mtime
+        path = connectors_file()
+        if path is None:
+            return False
         try:
-            from meerschaum.config import get_config
-            from meerschaum.config._read_config import read_config
-            disk = read_config(keys=['meerschaum'], write_missing=False, substitute=True)
-            fresh = (disk.get('meerschaum', None) or {}).get('connectors', None) or {}
-            live = get_config('meerschaum', 'connectors', warn=False)
-            if not isinstance(live, dict):
+            mtime = os.path.getmtime(path)
+            if mtime == _connectors_mtime:
                 return False
-            for typ, labels in fresh.items():
-                if not isinstance(labels, dict):
-                    continue
-                for label, attributes in labels.items():
-                    if label not in live.setdefault(typ, {}):
-                        live[typ][label] = copy.deepcopy(attributes)
-                        added = True
+            from meerschaum import _core
+            from meerschaum.config import get_config
+            get_config('meerschaum', 'connectors', warn=False)
+            changed = _core.refresh_console_connectors()
+            _connectors_mtime = mtime
+            return changed
         except Exception:
             return False
-    return added

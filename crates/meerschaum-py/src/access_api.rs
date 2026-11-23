@@ -546,30 +546,49 @@ pub fn access_edit_refusal(
     Ok(access::lock_refusal(&core, &locks, LockOp::EditParameters))
 }
 
-/// `_core.access_can(rule, principal, access, reservation)`: `rule` is `see`, `edit`, `manage_access` or
-/// `lock`.
+/// Apply a pipe rule to parsed access or directly to stored parameters.
 #[pyfunction]
-#[pyo3(signature = (rule, principal, access, reservation))]
+#[pyo3(signature = (rule, principal, access, reservation, *, stored_parameters=false))]
 pub fn access_can(
     rule: &str,
     principal: &Bound<'_, PyAny>,
     access: Option<&Bound<'_, PyAny>>,
     reservation: Option<&Bound<'_, PyAny>>,
+    stored_parameters: bool,
 ) -> PyResult<bool> {
     let p = principal_of(principal)?;
-    let a = access_of(access)?;
     let reservation = strings(reservation)?;
+    let a = if stored_parameters {
+        let parameters = map_of(access)?.unwrap_or_default();
+        let Some(a) = PipeAccess::for_authorization(&parameters, &reservation, &p) else {
+            return Ok(false);
+        };
+        a
+    } else {
+        access_of(access)?
+    };
     Ok(match rule {
         "see" => access::can_see(&p, &a, &reservation),
         "edit" => access::can_edit(&p, &a, &reservation),
         "manage_access" => access::can_manage_access(&p, &a, &reservation),
         "lock" => access::can_lock(&p, &a, &reservation),
+        "assign_owner" => access::can_assign_pipe_owner(&p, a.team.as_deref(), &reservation),
         other => {
             return Err(PyValueError::new_err(format!(
-                "Unknown rule '{other}': use see, edit, manage_access or lock."
+                "Unknown rule '{other}': use see, edit, manage_access, lock or assign_owner."
             )));
         }
     })
+}
+
+/// Read the names in a connector's `teams` setting for pipe access.
+#[pyfunction]
+pub fn access_pipe_reservation(teams: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
+    Ok(access::pipe_reservation(&py_to_core(teams)?)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|team| !access::is_everyone(Some(team)))
+        .collect())
 }
 
 /// `_core.access_can_see_email(viewer, target_user_teams, target_username=None)`.
@@ -1363,6 +1382,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(access_is_lock_refusal, m)?)?;
     m.add_function(wrap_pyfunction!(access_edit_refusal, m)?)?;
     m.add_function(wrap_pyfunction!(access_can, m)?)?;
+    m.add_function(wrap_pyfunction!(access_pipe_reservation, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_see_email, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_manage_team, m)?)?;
     m.add_function(wrap_pyfunction!(access_can_administer_teams, m)?)?;

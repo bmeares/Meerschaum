@@ -261,7 +261,8 @@ impl Access {
     pub fn for_instance(&self, state: &AppState, instance_keys: &str) -> InstanceAccess<'_> {
         InstanceAccess {
             access: self,
-            reservation: guard::connector_teams(state, instance_keys).unwrap_or_default(),
+            reservation: rules::connector_reservation(&state.connectors(), instance_keys)
+                .unwrap_or_default(),
         }
     }
 
@@ -306,13 +307,19 @@ impl InstanceAccess<'_> {
         self.access.no_auth
     }
 
+    pub(crate) fn needs_authoritative_registration(&self) -> bool {
+        !self.access.is_admin() && rules::extends_everyone(&self.reservation)
+    }
+
+    fn pipe_access(&self, parameters: &Map) -> Option<PipeAccess> {
+        PipeAccess::for_authorization(parameters, &self.reservation, &self.access.principal)
+    }
+
     /// Whether the caller may see a pipe with these parameters.
     pub fn can_see(&self, parameters: &Map) -> bool {
-        rules::can_see(
-            &self.access.principal,
-            &PipeAccess::from_parameters(parameters),
-            &self.reservation,
-        )
+        self.pipe_access(parameters).is_some_and(|access| {
+            rules::can_see(&self.access.principal, &access, &self.reservation)
+        })
     }
 
     /// [`Access::can_see_pipe`] with this instance's reservation.
@@ -344,29 +351,23 @@ impl InstanceAccess<'_> {
 
     /// Whether the caller may change a pipe with these parameters (within its permissions).
     pub fn can_edit(&self, parameters: &Map) -> bool {
-        rules::can_edit(
-            &self.access.principal,
-            &PipeAccess::from_parameters(parameters),
-            &self.reservation,
-        )
+        self.pipe_access(parameters).is_some_and(|access| {
+            rules::can_edit(&self.access.principal, &access, &self.reservation)
+        })
     }
 
     /// Whether the caller may change a pipe's `access`.
     pub fn can_manage_access(&self, parameters: &Map) -> bool {
-        rules::can_manage_access(
-            &self.access.principal,
-            &PipeAccess::from_parameters(parameters),
-            &self.reservation,
-        )
+        self.pipe_access(parameters).is_some_and(|access| {
+            rules::can_manage_access(&self.access.principal, &access, &self.reservation)
+        })
     }
 
     /// Whether the caller may lock and unlock a pipe.
     pub fn can_lock(&self, parameters: &Map) -> bool {
-        rules::can_lock(
-            &self.access.principal,
-            &PipeAccess::from_parameters(parameters),
-            &self.reservation,
-        )
+        self.pipe_access(parameters).is_some_and(|access| {
+            rules::can_lock(&self.access.principal, &access, &self.reservation)
+        })
     }
 
     /// Whether the caller may change this pipe's access from `old` to `new`.

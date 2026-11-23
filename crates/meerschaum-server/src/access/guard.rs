@@ -104,7 +104,7 @@ pub fn merge_edit(access: &InstanceAccess<'_>, old: &Map, mut new: Map) -> Resul
 /// The connector `teams` restriction (`meerschaum:connectors:<type>:<label>:teams`): the teams
 /// whose pipes may use the connector (`None`: every team).
 pub fn connector_teams(state: &AppState, connector_keys: &str) -> Option<Vec<String>> {
-    rules::connector_reservation(&state.connectors(), connector_keys)
+    rules::connector_teams(&state.connectors(), connector_keys)
 }
 
 /// Whether `access` may use the connector `connector_keys` for pipes (or SQL reads): every
