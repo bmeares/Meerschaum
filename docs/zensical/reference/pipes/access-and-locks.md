@@ -83,6 +83,7 @@ pipe.set_access(team=None)    # move back to Everyone
 - Pipes registered through an `api:` instance or the web console default to the creator as `owner` and their primary team as `team`.
 - Only the owner, team managers, and admins can edit `access` or locks.
 - `copy pipes` preserves locks and never copies `access`. Deleting a user clears ownership while leaving pipes with their teams.
+- **Reserved instances:** On an instance with `teams: [...]`, **Everyone** covers members (and managers) of the reserved teams without changing stored `access`. In the console, the **Access** dialog lists those teams and **My teams** includes untagged pipes on your teams' reserved instances—see [Reserve an instance for teams](../api-instance/teams.md#reserve-an-instance-for-teams).
 
 ## Teams
 

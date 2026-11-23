@@ -5,8 +5,9 @@ how a request flows through it, and which tests cover it. Read this before chang
 `team_scope`, `execute_policy`, `executor`, `team_*` or `source_fetch_*`. Terms are defined in
 [`GLOSSARY.md`](../../GLOSSARY.md) ("Teams and access", "Executors"); the decisions are
 [ADR 0007](../adr/0007-isolated-teams-scoped-processes.md),
-[0008](../adr/0008-main-api-keeps-authority-over-team-executors.md) and
-[0009](../adr/0009-team-execution-requires-enforced-sandbox.md). The user-facing behavior is in
+[0008](../adr/0008-main-api-keeps-authority-over-team-executors.md),
+[0009](../adr/0009-team-execution-requires-enforced-sandbox.md) and
+[0011](../adr/0011-instance-reservations-extend-everyone.md). The user-facing behavior is in
 `docs/zensical/reference/api-instance/teams.md` and `docs/zensical/reference/team-executors.md`;
 when code and those pages disagree, the code is the fact and the page is a docs bug.
 
