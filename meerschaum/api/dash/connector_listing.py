@@ -612,10 +612,8 @@ def _teams_allow(attributes: Dict[str, Any], viewer: Any, keys: Optional[str] = 
     return core().can_use_connector(principal, teams, keys)
 
 
-def connector_team_allows(keys: str, viewer: Any) -> bool:
-    """Check a connector's config/runtime team restriction without constructing it."""
-    if viewer.no_auth or viewer.is_admin:
-        return True
+def _connector_team_attribute(keys: str) -> Any:
+    """Read the configured or registered `teams` attribute without constructing the connector."""
     from meerschaum.connectors.parse import parse_connector_keys
     configured = parse_connector_keys(str(keys), construct=False)
     attributes = dict(configured) if isinstance(configured, dict) else {}
@@ -625,7 +623,37 @@ def connector_team_allows(keys: str, viewer: Any) -> bool:
     runtime = vars(conn) if conn is not None else {}
     if not isinstance(configured, dict) and 'teams' in runtime:
         attributes['teams'] = runtime['teams']
-    return _teams_allow(attributes, viewer, keys=str(keys))
+    return attributes.get('teams')
+
+
+def connector_team_allows(keys: str, viewer: Any) -> bool:
+    """Check a connector's config/runtime team restriction without constructing it."""
+    if viewer.no_auth or viewer.is_admin:
+        return True
+    return _teams_allow({'teams': _connector_team_attribute(keys)}, viewer, keys=str(keys))
+
+
+def connector_reservation(instance: Any) -> Tuple[str, ...]:
+    """The reservation on the named connector in the live configuration."""
+    from meerschaum import _core
+    from meerschaum.config import get_config
+    from meerschaum.api.dash.connectors_file import refresh_connectors
+    typ, delimiter, label = str(instance).partition(':')
+    if not delimiter:
+        return ()
+    refresh_connectors()
+    teams = get_config('meerschaum', 'connectors', typ, label, 'teams', patch=False, warn=False)
+    return tuple(_core.access_pipe_reservation(teams))
+
+
+def reserved_for_viewer(instance: Any, viewer: Any) -> bool:
+    """Whether an instance reservation names a team of the viewer."""
+    from meerschaum.core.access import same_team
+    return any(
+        same_team(team, reserved)
+        for reserved in connector_reservation(instance)
+        for team in viewer.own_teams
+    )
 
 
 def _env_patches() -> List[Tuple[str, Dict[str, Any]]]:

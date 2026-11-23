@@ -505,8 +505,8 @@ impl Snapshot {
             pipe.set_parameters(parameters.clone());
             if registration.as_ref() != Some(&member.registration)
                 || parameters != &member.parameters
-                || !caller.can_see_pipe(&pipe)
-                || (member.writable && !caller.can_edit(parameters))
+                || !caller.can_see_pipe(state, &pipe)
+                || (member.writable && !caller.can_edit_pipe(state, &pipe))
             {
                 return Err(ApiError::new(
                     403,
@@ -515,7 +515,7 @@ impl Snapshot {
             }
             guard::check_source_connector(state, caller, pipe.connector_keys())?;
             let index = crate::access::pipe_index(state, Some(parts[0])).await?;
-            guard::check_pipe_target(conn.as_ref(), &pipe, &index.hidden_targets(caller))?;
+            guard::check_pipe_target(conn.as_ref(), &pipe, &index.hidden_targets(state, caller))?;
             if member.writable
                 && let Some(error) =
                     guard::lock_conflict(&pipe, meerschaum_core::access::LockOp::Sync)

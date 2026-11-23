@@ -542,10 +542,13 @@ async fn canonicalize_node_registrations(
             .and_then(|metrics| metrics.get(metric))
             .and_then(|locations| locations.get(&location.map(str::to_string)))
             .ok_or_else(|| ApiError::new(404, "Pipe was not found."))?;
-        if !fresh.can_see_pipe(&handle.pipe) {
+        if !fresh.can_see_pipe(&ctx.state, &handle.pipe) {
             return Err(ApiError::new(404, "Pipe was not found."));
         }
-        if !fresh.can_edit(handle.pipe.parameters()) {
+        if !fresh
+            .for_instance(&ctx.state, handle.pipe.instance_keys())
+            .can_edit(handle.pipe.parameters())
+        {
             return Err(access::not_editable(&handle.pipe));
         }
         if meerschaum_connector::sync_metrics::observed_registration(&handle.pipe).as_ref()
@@ -634,6 +637,11 @@ async fn canonicalize_pipeline_registries(
         .await
         .map_err(|_| ApiError::new(503, "Cannot read saved Pipeline access."))?;
     let mut current = std::collections::HashMap::new();
+    let caller = caller.for_instance(&ctx.state, selected.logical());
+    let service = selected.service_access();
+    let service = service
+        .as_ref()
+        .map(|service| service.for_instance(&ctx.state, &conn.connector_keys()));
     for (_, entry) in saved {
         let parameters = match entry.extra {
             Some(meerschaum_core::Value::Map(parameters)) => parameters,
@@ -646,8 +654,7 @@ async fn canonicalize_pipeline_registries(
             _ => continue,
         };
         if caller.can_see(&parameters)
-            && selected
-                .service_access()
+            && service
                 .as_ref()
                 .is_none_or(|service| service.can_see(&parameters))
             && let Some(name) = entry.location_key

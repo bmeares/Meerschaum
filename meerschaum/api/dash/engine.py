@@ -887,12 +887,9 @@ def _request(instance: Any, **kwargs: Any) -> Dict[str, Any]:
 
 
 def _instance_pipes(instance: Any, viewer: Any = None) -> List[mrsm.Pipe]:
-    from meerschaum.utils.pipes import flatten_pipes_dict
     from meerschaum.api.dash import access
-    ### `get_pipes()` leaves out Meerschaum's internal `mrsm` pipes (saved Pipelines' registry).
-    pipes_dict = mrsm.get_pipes(instance=instance, as_list=False)
     viewer = viewer if viewer is not None else access.current_viewer()
-    return access.visible_pipes(viewer, flatten_pipes_dict(pipes_dict))
+    return access.visible_registered_pipes(viewer, instance)
 
 
 def dependency_graph(instance: Any, pipes: Optional[List[mrsm.Pipe]] = None,

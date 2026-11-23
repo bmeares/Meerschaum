@@ -182,16 +182,17 @@ impl NativeRegistry {
         access::guard::check_connector_teams(state, service, &self.native.connector_keys())?;
         for (principal, pipe) in [(original, &object.logical), (service, &object.physical)] {
             access::guard::check_source_connector(state, principal, pipe.connector_keys())?;
-            if !principal.can_see_pipe(pipe) {
+            let access = principal.for_instance(state, pipe.instance_keys());
+            if !access.can_see_pipe(pipe) {
                 return Err(missing());
             }
-            if write && !principal.can_edit(pipe.raw_parameters()) {
+            if write && !access.can_edit(pipe.raw_parameters()) {
                 return Err(access::not_editable(pipe));
             }
             access::guard::check_pipe_target(
                 self.native.as_ref(),
                 pipe,
-                &self.index.hidden_targets(principal),
+                &self.index.hidden_targets_for(&access),
             )?;
         }
         Ok(object)

@@ -41,7 +41,7 @@ out = {
         {'target': 'MRSM{meerschaum:instance}'}),
     'internal': sql_guard.check_parameters(viewer,
         mrsm.Pipe('mrsm', 'users', instance=conn, temporary=True), {}),
-    'visible_internal': access.can_see_pipe(viewer, {'target': 'mrsm_users'}),
+    'visible_internal': access.can_see_pipe(viewer, {'target': 'mrsm_users'}, instance=conn),
 }
 print('JSON:' + json.dumps(out))
 assert hidden.delete()[0]

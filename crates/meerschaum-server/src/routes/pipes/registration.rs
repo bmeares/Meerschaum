@@ -50,7 +50,11 @@ pub(super) async fn register_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Bod
     }
     access::guard::check_source_connector(&ctx.state, &fresh, &ck)?;
     let index = access::index_from_dict(&conn.connector_keys(), &dict, conn.as_ref());
-    access::guard::check_pipe_target(conn.as_ref(), &pipe, &index.hidden_targets(&fresh))?;
+    access::guard::check_pipe_target(
+        conn.as_ref(),
+        &pipe,
+        &index.hidden_targets(&ctx.state, &fresh),
+    )?;
     let res = mutation::run(
         &ctx,
         &conn,
@@ -106,7 +110,11 @@ pub(super) async fn edit_pipe(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -
     } else {
         parameters
     };
-    let new = access::guard::merge_edit(&access, &old, requested)?;
+    let new = access::guard::merge_edit(
+        &access.for_instance(&ctx.state, h.pipe.instance_keys()),
+        &old,
+        requested,
+    )?;
     access::guard::check_parameters(&ctx.state, &access, &conn, &h.pipe, Some(&old), &new).await?;
     if let Some(e) = access::guard::parameters_lock_conflict(&h.pipe, &old, &new) {
         return Ok(tuple(false, e.detail_text()));

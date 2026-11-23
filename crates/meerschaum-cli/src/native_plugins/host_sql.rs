@@ -102,7 +102,7 @@ impl PluginHost {
                 let index = meerschaum_server::access::pipe_index(&api.state, Some(keys))
                     .await
                     .map_err(|e| host_error(e.detail_text()))?;
-                index.hidden_targets(access)
+                index.hidden_targets(&api.state, access)
             }
             None => meerschaum_server::sql_guard::HiddenTables::default(),
         };

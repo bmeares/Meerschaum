@@ -68,8 +68,8 @@ impl ReadAccess {
                     .parameters(member.parameters.clone())
                     .build()
                     .map_err(|_| denied())?;
-                if !caller.can_see_pipe(&pipe)
-                    || member.writable && !caller.can_edit(pipe.raw_parameters())
+                if !caller.can_see_pipe(state, &pipe)
+                    || member.writable && !caller.can_edit_pipe(state, &pipe)
                 {
                     return Err(denied());
                 }

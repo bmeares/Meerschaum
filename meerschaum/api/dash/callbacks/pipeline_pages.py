@@ -108,7 +108,7 @@ def build_list_cards(registry: str, viewer: Any = None) -> List[Any]:
             members += [html.Small(access.hidden_label(int(definition['hidden_members'])))]
         complete = not definition.get('hidden_members')
         may_sync = complete and viewer.can('pipes:write')
-        may_edit = access.can_edit_pipe(viewer, registry_parameters.get(name, {}))
+        may_edit = access.can_edit_pipe(viewer, registry_parameters.get(name, {}), instance=instance)
         manage = [
             (action, label) for action, label in (
                 ('analyze', 'Analyze tags'), ('schedule', 'Schedule'), ('copy', 'Copy'),

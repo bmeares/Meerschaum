@@ -2,22 +2,19 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
-"""
-Isolated teams in the web console (5.1), in process on the sandbox's SQLite instance, as real
-users with real console sessions (`SIGN_IN`):
+"""Isolated teams in the web console on sandboxed SQLite with real console sessions (`SIGN_IN`):
 
 - a member of an isolated team is walled off from Everyone: its pipes, jobs, connectors, plugins,
   teams and accounts, and they never hold the permissions that act with the server's credentials;
 - a member of an isolated team and an open team keeps the open team's view;
 - New team creates the team with its settings (isolation, default instance, grants), and with a
-  database of its own it writes the team's connector and makes it the default instance;
-- Settings edits them, keeping the team's database;
-- a connector another process wrote to the configuration is picked up.
+  database of its own it writes the team's default connector, which Settings preserves.
+- the console picks up connectors written by other processes.
 """
 
 import json
 
-from tests.api_host._helpers import SIGN_IN, run_python, extract_json
+from tests.api_host._helpers import SIGN_IN, run_python, extract_json, check_reserved_instance_visibility
 
 
 SEED = SIGN_IN + '''
@@ -54,7 +51,7 @@ from meerschaum.api.dash import access, team_setup, teams as team_records, viewe
 def test_members_of_an_isolated_team_are_walled_off_from_everyone(sandbox):
     root, plugins = sandbox
     out = extract_json(run_python(root, plugins, SEED + '''
-from meerschaum.api.dash import overview, pipes_table, connector_listing, components
+from meerschaum.api.dash import overview, connector_listing, components
 from meerschaum.api.dash.users import visible_teams
 from meerschaum.connectors import get_connector
 team('wetlands', isolated=True, instance='sql:wetdb', connectors=['sql:wetdb'], plugins=['noaa'])
@@ -75,10 +72,9 @@ get_connector('sql', 'shared', flavor='sqlite', database=':memory:')
 out = {}
 for who, session in SESSIONS.items():
     viewer = access.resolve_viewer(session)
-    rows = pipes_table.list_rows(conn, viewer=viewer, connector_keys=['ti:src']) if hasattr(pipes_table, 'list_rows') else []
     seen = sorted(
         mk for ck, mk, lk, parameters in access.registered_pipes(conn)
-        if ck == 'ti:src' and access.can_see_pipe(viewer, parameters)
+        if ck == 'ti:src' and access.can_see_pipe(viewer, parameters, instance=conn)
     )
     out[who] = {
         'isolated': viewer.is_isolated,
@@ -834,7 +830,7 @@ def snapshot(session, team_cookie=None):
         inst_sel = find_id(nav, 'pages-instance-select')
         pipes = sorted(
             mk for ck, mk, lk, parameters in access.registered_pipes(conn)
-            if ck == 'ti:src' and mk.startswith('sw_') and access.can_see_pipe(viewer, parameters)
+            if ck == 'ti:src' and mk.startswith('sw_') and access.can_see_pipe(viewer, parameters, instance=conn)
         )
         return {
             'is_admin': viewer.is_admin,
@@ -1002,3 +998,7 @@ print('JSON:' + json.dumps({
     assert out['ok_unwritable'] is False
     assert 'chown -R meerschaum:meerschaum /meerschaum/config' in out['msg_unwritable']
     assert out['db_create_called'] is False
+
+
+def test_reserved_instance_shows_untagged_pipes_to_members_and_acting_admins(sandbox):
+    check_reserved_instance_visibility(sandbox, SEED)

@@ -26,7 +26,7 @@ use meerschaum_connector::InstanceConnector;
 use meerschaum_core::template::referenced_pipes_in_parameters;
 use meerschaum_core::{Map, Pipe, Value};
 
-use super::{Access, PipeAccess, rules};
+use super::{Access, InstanceAccess, PipeAccess, rules};
 use crate::error::ApiError;
 use crate::sql_guard;
 use crate::state::AppState;
@@ -68,7 +68,7 @@ pub fn stamp_new_pipe(access: &Access, parameters: &Map) -> Result<Map, ApiError
 /// The parameters of an edit of a stored pipe (`old`, its registered parameters) to `new`
 /// (already patched when the request patches): `access` and `locks` that `new` leaves out keep
 /// their stored values; changing them needs the rights to.
-pub fn merge_edit(access: &Access, old: &Map, mut new: Map) -> Result<Map, ApiError> {
+pub fn merge_edit(access: &InstanceAccess<'_>, old: &Map, mut new: Map) -> Result<Map, ApiError> {
     for key in [rules::ACCESS_KEY, rules::LOCKS_KEY] {
         if !new.contains_key(key)
             && let Some(value) = old.get(key)
@@ -76,7 +76,7 @@ pub fn merge_edit(access: &Access, old: &Map, mut new: Map) -> Result<Map, ApiEr
             new.insert(key.to_string(), value.clone());
         }
     }
-    if access.no_auth {
+    if access.no_auth() {
         return Ok(new);
     }
     let old_access = PipeAccess::from_parameters(old);
@@ -86,12 +86,13 @@ pub fn merge_edit(access: &Access, old: &Map, mut new: Map) -> Result<Map, ApiEr
             Some(value) => PipeAccess::parse(value).map_err(|e| ApiError::new(400, e))?,
         };
         if requested != old_access {
-            rules::check_access_change(&access.principal, &old_access, &requested)
+            access
+                .check_access_change(&old_access, &requested)
                 .map_err(forbidden)?;
         }
     }
     if rules::Locks::from_parameters(old) != rules::Locks::from_parameters(&new)
-        && !rules::can_lock(&access.principal, &old_access)
+        && !access.can_lock(old)
     {
         return Err(forbidden(
             "Only the pipe's owner, its team's managers and administrators may lock or unlock it.",
@@ -103,20 +104,7 @@ pub fn merge_edit(access: &Access, old: &Map, mut new: Map) -> Result<Map, ApiEr
 /// The connector `teams` restriction (`meerschaum:connectors:<type>:<label>:teams`): the teams
 /// whose pipes may use the connector (`None`: every team).
 pub fn connector_teams(state: &AppState, connector_keys: &str) -> Option<Vec<String>> {
-    let (typ, label) = connector_keys.split_once(':')?;
-    let connectors = state.connectors();
-    let attrs = connectors.get(typ)?.get(label)?;
-    match attrs.get("teams")? {
-        Value::List(items) => Some(items.iter().map(Value::py_str).collect()),
-        Value::Str(s) => Some(
-            s.split(',')
-                .map(|t| t.trim().to_string())
-                .filter(|t| !t.is_empty())
-                .collect(),
-        ),
-        Value::Null => None,
-        other => Some(vec![other.py_str()]),
-    }
+    rules::connector_teams(&state.connectors(), connector_keys)
 }
 
 /// Whether `access` may use the connector `connector_keys` for pipes (or SQL reads): every
@@ -282,7 +270,7 @@ pub async fn definition_hidden_targets(
         return Ok(sql_guard::HiddenTables::default());
     }
     let index = super::pipe_index(state, Some(keys)).await?;
-    Ok(index.hidden_targets(access))
+    Ok(index.hidden_targets(state, access))
 }
 
 /// Check the parameters `new` a caller registers (`old` is `None`) or edits a pipe with (`pipe`
@@ -315,7 +303,7 @@ pub async fn check_parameters(
         return Ok(());
     }
     let index = super::pipe_index(state, Some(&conn.connector_keys())).await?;
-    let hidden = index.hidden_targets(access);
+    let hidden = index.hidden_targets(state, access);
     // Keys derive a target even when no target parameter was supplied. Check that name too:
     // different keys can resolve to the same table (and `mrsm/users` names `mrsm_users`).
     let mut candidate = pipe.clone();
@@ -426,7 +414,9 @@ async fn reference_visible(
             reference.metric_key(),
             reference.location_key(),
         ) {
-            Some(p) => access.can_see_indexed(p),
+            Some(p) => access
+                .for_instance(state, &index.instance_keys)
+                .can_see_indexed(p),
             None => true,
         },
     )
@@ -493,27 +483,31 @@ mod tests {
             r#"{"access": {"owner": "alice", "team": "data"}, "locks": ["drop"], "columns": {}}"#,
         );
         let bob = member("bob", &[("data", rules::TeamRole::Member)]);
+        let context = |access| InstanceAccess {
+            access,
+            reservation: Vec::new(),
+        };
         // Left out: kept.
-        let out = merge_edit(&bob, &old, map(r#"{"columns": {"id": "x"}}"#)).unwrap();
+        let out = merge_edit(&context(&bob), &old, map(r#"{"columns": {"id": "x"}}"#)).unwrap();
         assert_eq!(out.get("access"), old.get("access"));
         assert_eq!(out.get("locks"), old.get("locks"));
         // Changed without rights: refused.
         assert!(
             merge_edit(
-                &bob,
+                &context(&bob),
                 &old,
                 map(r#"{"access": {"owner": "bob", "team": "data"}}"#)
             )
             .is_err()
         );
-        assert!(merge_edit(&bob, &old, map(r#"{"locks": []}"#)).is_err());
+        assert!(merge_edit(&context(&bob), &old, map(r#"{"locks": []}"#)).is_err());
         // The owner and the team's managers may.
         let alice = member("alice", &[("data", rules::TeamRole::Member)]);
-        assert!(merge_edit(&alice, &old, map(r#"{"locks": []}"#)).is_ok());
+        assert!(merge_edit(&context(&alice), &old, map(r#"{"locks": []}"#)).is_ok());
         let mia = member("mia", &[("data", rules::TeamRole::Manager)]);
         assert!(
             merge_edit(
-                &mia,
+                &context(&mia),
                 &old,
                 map(r#"{"access": {"owner": "mia", "team": "data", "visibility": "private"}}"#)
             )

@@ -18,6 +18,7 @@ async fn lease(ctx: Ctx, body: Body, release: bool) -> ApiResult {
         ));
     }
     let conn = connector(&ctx)?;
+    let pipe_access = caller.for_instance(&ctx.state, &conn.connector_keys());
     let location = if parts[3] == "None" {
         None
     } else {
@@ -28,10 +29,10 @@ async fn lease(ctx: Ctx, body: Body, release: bool) -> ApiResult {
         // The lease of a Pipeline's edit: a Pipeline the caller may change.
         if parts[2] == "pipeline"
             && let Some(parameters) = registration_parameters(&ctx.state, &conn, name).await?
-            && !caller.can_edit(&parameters)
+            && !pipe_access.can_edit(&parameters)
         {
             return Err(ApiError::new(
-                if caller.can_see(&parameters) {
+                if pipe_access.can_see(&parameters) {
                     403
                 } else {
                     404
@@ -103,10 +104,13 @@ async fn visible_pipeline_pipe(
 
 pub(super) async fn get_access(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
     let caller = access::require(&ctx.state, &ctx.headers, &["pipes:read"]).await?;
-    let (_, _, parameters) = visible_pipeline_pipe(&ctx, &caller, &name).await?;
+    let (_, pipe, parameters) = visible_pipeline_pipe(&ctx, &caller, &name).await?;
     Ok(envelope::ok(
         format!("The access of Pipeline '{name}'."),
-        super::pipe_access::access_fields(&caller, &parameters),
+        super::pipe_access::access_fields(
+            &caller.for_instance(&ctx.state, pipe.instance_keys()),
+            &parameters,
+        ),
     ))
 }
 
@@ -115,7 +119,11 @@ pub(super) async fn patch_access(ctx: Ctx, Path(name): Path<String>, body: Body)
     let body = optional_body(body, ctx.state.config.limits.body).await?;
     let body = if body.is_null() { json!({}) } else { body };
     let (conn, pipe, parameters) = visible_pipeline_pipe(&ctx, &caller, &name).await?;
-    let new = super::pipe_access::changed_access(&caller, &parameters, &body)?;
+    let new = super::pipe_access::changed_access(
+        &caller.for_instance(&ctx.state, pipe.instance_keys()),
+        &parameters,
+        &body,
+    )?;
     let res = conn.set_pipe_access(&pipe, &new).await;
     super::pipe_access::forget(&ctx.state, &conn).await;
     if !res.success {
@@ -124,7 +132,10 @@ pub(super) async fn patch_access(ctx: Ctx, Path(name): Path<String>, body: Body)
     let parameters = super::pipe_access::registered(&conn, &pipe).await?;
     Ok(envelope::ok(
         res.message,
-        super::pipe_access::access_fields(&caller, &parameters),
+        super::pipe_access::access_fields(
+            &caller.for_instance(&ctx.state, pipe.instance_keys()),
+            &parameters,
+        ),
     ))
 }
 
@@ -133,7 +144,12 @@ async fn lock_or_unlock(ctx: Ctx, name: String, body: Body, lock: bool) -> ApiRe
     let body = optional_body(body, ctx.state.config.limits.body).await?;
     let requested = super::pipe_access::requested_locks(&body)?;
     let (conn, pipe, parameters) = visible_pipeline_pipe(&ctx, &caller, &name).await?;
-    super::pipe_access::check_may_lock(&caller, &pipe, &parameters, lock)?;
+    super::pipe_access::check_may_lock(
+        &caller.for_instance(&ctx.state, pipe.instance_keys()),
+        &pipe,
+        &parameters,
+        lock,
+    )?;
     let res = if lock {
         conn.lock_pipe(&pipe, &requested).await
     } else {
@@ -146,7 +162,10 @@ async fn lock_or_unlock(ctx: Ctx, name: String, body: Body, lock: bool) -> ApiRe
     let parameters = super::pipe_access::registered(&conn, &pipe).await?;
     Ok(envelope::ok(
         res.message,
-        super::pipe_access::access_fields(&caller, &parameters),
+        super::pipe_access::access_fields(
+            &caller.for_instance(&ctx.state, pipe.instance_keys()),
+            &parameters,
+        ),
     ))
 }
 

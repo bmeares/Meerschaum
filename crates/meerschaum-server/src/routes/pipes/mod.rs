@@ -18,7 +18,10 @@ use serde_json::{Value as Json, json};
 
 // The handlers in the submodules name these sibling route modules as `super::...`.
 use super::{Ctx, body_bytes, engine, graph_batch, sync_status};
-use crate::access::{self, Access, rules::LockOp};
+use crate::access::{
+    self, Access,
+    rules::{self, LockOp},
+};
 use crate::config::ServerConfig;
 use crate::error::{ApiError, ApiResult};
 use crate::json::{from_core, ok_json, python_json, raw_json, to_core, tuple, tuple_response};
@@ -258,11 +261,13 @@ async fn visibility_index(
 
 /// Check the pipe's own access and the instance's index of protected resources.
 fn check_pipe_visibility(
+    state: &AppState,
     access: &Access,
     conn: &Arc<dyn InstanceConnector>,
     pipe: &Pipe,
     index: Option<&access::PipeIndex>,
 ) -> Result<(), ApiError> {
+    let access = access.for_instance(state, pipe.instance_keys());
     if !access.can_see_pipe(pipe) {
         return Err(access::hidden_pipe(pipe));
     }
@@ -273,8 +278,12 @@ fn check_pipe_visibility(
             pipe.location_key(),
         );
         if indexed.is_some_and(|p| !access.can_see_indexed(p))
-            || access::guard::check_pipe_target(conn.as_ref(), pipe, &index.hidden_targets(access))
-                .is_err()
+            || access::guard::check_pipe_target(
+                conn.as_ref(),
+                pipe,
+                &index.hidden_targets_for(&access),
+            )
+            .is_err()
         {
             return Err(access::hidden_pipe(pipe));
         }
@@ -292,8 +301,23 @@ async fn visible(
     refresh: bool,
 ) -> Result<(Arc<dyn InstanceConnector>, Arc<PipeHandle>), ApiError> {
     let index = visibility_index(ctx, access).await?;
-    let (conn, h) = handle(ctx, ck, mk, lk, refresh).await?;
-    check_pipe_visibility(access, &conn, &h.pipe, index.as_deref())?;
+    let ik = ctx.instance_keys();
+    let conn = ctx.state.get_api_connector(ik.as_deref())?;
+    let h = if access
+        .for_instance(&ctx.state, &conn.connector_keys())
+        .needs_authoritative_registration()
+    {
+        let pipe = ctx.state.pipe_from_path(&conn, ck, mk, Some(lk))?;
+        ctx.state
+            .registered_pipe(&conn, &pipe, ik.as_deref())
+            .await?
+            .ok_or_else(|| access::hidden_pipe(&pipe))?
+    } else {
+        ctx.state
+            .get_pipe(ck, mk, Some(lk), ik.as_deref(), refresh)
+            .await?
+    };
+    check_pipe_visibility(&ctx.state, access, &conn, &h.pipe, index.as_deref())?;
     Ok((conn, h))
 }
 
@@ -307,7 +331,7 @@ async fn editable(
     refresh: bool,
 ) -> Result<(Arc<dyn InstanceConnector>, Arc<PipeHandle>), ApiError> {
     let (conn, h) = visible(ctx, access, ck, mk, lk, refresh).await?;
-    if !access.can_edit(h.pipe.raw_parameters()) {
+    if !access.can_edit_pipe(&ctx.state, &h.pipe) {
         return Err(access::not_editable(&h.pipe));
     }
     Ok((conn, h))

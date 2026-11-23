@@ -2,9 +2,8 @@
 //!
 //! Every request resolves an [`Access`]: the authenticated principal ([`crate::auth::Principal`],
 //! a user or a token) and the rules' [`rules::Principal`] (username, administrator flag,
-//! effective permissions, teams). Routes, MCP tools, the engine and Pipelines routes ask it
-//! [`Access::can_see`] / [`Access::can_edit`] / [`Access::can_manage_access`] /
-//! [`Access::can_lock`] about a pipe's parameters. The rules are
+//! effective permissions, teams). Routes, MCP tools, the engine and Pipelines routes apply
+//! [`InstanceAccess`] to a pipe's parameters with its instance's current reservation. The rules are
 //! [`meerschaum_core::access`]'s ([`rules`]).
 //!
 //! - **Effective permissions**: an administrator holds every permission; otherwise the
@@ -258,53 +257,27 @@ impl Access {
         rules::can_manage_team(&self.principal, team.unwrap_or(EVERYONE))
     }
 
-    /// Whether the caller may see a pipe with these parameters.
-    pub fn can_see(&self, parameters: &Map) -> bool {
-        rules::can_see(&self.principal, &PipeAccess::from_parameters(parameters))
+    /// Pipe access with the reservation from the live configuration of this instance.
+    pub fn for_instance(&self, state: &AppState, instance_keys: &str) -> InstanceAccess<'_> {
+        InstanceAccess {
+            access: self,
+            reservation: rules::connector_reservation(&state.connectors(), instance_keys)
+                .unwrap_or_default(),
+        }
     }
 
     /// Whether a pipe may be exposed through the generic pipe routes. Internal state has
     /// dedicated routes which filter its rows; its raw tables must not bypass those checks.
     /// Saved Pipelines use their dedicated routes, which also hide inaccessible members.
-    pub fn can_see_pipe(&self, pipe: &Pipe) -> bool {
-        self.can_see(pipe.raw_parameters())
-            && (self.is_admin()
-                || pipe.target(None).is_ok_and(|target| {
-                    crate::sql_guard::check_target(
-                        &target,
-                        &crate::sql_guard::HiddenTables::default(),
-                    )
-                    .is_ok()
-                }))
+    pub fn can_see_pipe(&self, state: &AppState, pipe: &Pipe) -> bool {
+        self.for_instance(state, pipe.instance_keys())
+            .can_see_pipe(pipe)
     }
 
-    /// [`Access::can_see_pipe`] for an entry of the bulk pipe index.
-    pub fn can_see_indexed(&self, pipe: &IndexedPipe) -> bool {
-        self.can_see(&pipe.parameters)
-            && (self.is_admin()
-                || (pipe.connector_keys == "mrsm" && pipe.metric_key == "pipeline")
-                || pipe.targets.iter().all(|target| {
-                    crate::sql_guard::check_target(
-                        target,
-                        &crate::sql_guard::HiddenTables::default(),
-                    )
-                    .is_ok()
-                }))
-    }
-
-    /// Whether the caller may change a pipe with these parameters (within its permissions).
-    pub fn can_edit(&self, parameters: &Map) -> bool {
-        rules::can_edit(&self.principal, &PipeAccess::from_parameters(parameters))
-    }
-
-    /// Whether the caller may change a pipe's `access`.
-    pub fn can_manage_access(&self, parameters: &Map) -> bool {
-        rules::can_manage_access(&self.principal, &PipeAccess::from_parameters(parameters))
-    }
-
-    /// Whether the caller may lock and unlock a pipe.
-    pub fn can_lock(&self, parameters: &Map) -> bool {
-        rules::can_lock(&self.principal, &PipeAccess::from_parameters(parameters))
+    /// Whether the caller may change this pipe within its permissions.
+    pub fn can_edit_pipe(&self, state: &AppState, pipe: &Pipe) -> bool {
+        self.for_instance(state, pipe.instance_keys())
+            .can_edit(pipe.raw_parameters())
     }
 
     /// Whether the caller may see the email of `username`, a user in `teams`.
@@ -320,6 +293,86 @@ impl Access {
         } else {
             Scopes::List(rules::ordered_permissions(&self.principal.permissions))
         }
+    }
+}
+
+/// The request's pipe access on one instance, with its reservation read for this decision.
+pub struct InstanceAccess<'a> {
+    access: &'a Access,
+    reservation: Vec<String>,
+}
+
+impl InstanceAccess<'_> {
+    pub(crate) fn no_auth(&self) -> bool {
+        self.access.no_auth
+    }
+
+    pub(crate) fn needs_authoritative_registration(&self) -> bool {
+        !self.access.is_admin() && rules::extends_everyone(&self.reservation)
+    }
+
+    fn pipe_access(&self, parameters: &Map) -> Option<PipeAccess> {
+        PipeAccess::for_authorization(parameters, &self.reservation, &self.access.principal)
+    }
+
+    /// Whether the caller may see a pipe with these parameters.
+    pub fn can_see(&self, parameters: &Map) -> bool {
+        self.pipe_access(parameters).is_some_and(|access| {
+            rules::can_see(&self.access.principal, &access, &self.reservation)
+        })
+    }
+
+    /// [`Access::can_see_pipe`] with this instance's reservation.
+    pub fn can_see_pipe(&self, pipe: &Pipe) -> bool {
+        self.can_see(pipe.raw_parameters())
+            && (self.access.is_admin()
+                || pipe.target(None).is_ok_and(|target| {
+                    crate::sql_guard::check_target(
+                        &target,
+                        &crate::sql_guard::HiddenTables::default(),
+                    )
+                    .is_ok()
+                }))
+    }
+
+    /// [`Access::can_see_pipe`] for an entry of this instance's bulk pipe index.
+    pub fn can_see_indexed(&self, pipe: &IndexedPipe) -> bool {
+        self.can_see(&pipe.parameters)
+            && (self.access.is_admin()
+                || (pipe.connector_keys == "mrsm" && pipe.metric_key == "pipeline")
+                || pipe.targets.iter().all(|target| {
+                    crate::sql_guard::check_target(
+                        target,
+                        &crate::sql_guard::HiddenTables::default(),
+                    )
+                    .is_ok()
+                }))
+    }
+
+    /// Whether the caller may change a pipe with these parameters (within its permissions).
+    pub fn can_edit(&self, parameters: &Map) -> bool {
+        self.pipe_access(parameters).is_some_and(|access| {
+            rules::can_edit(&self.access.principal, &access, &self.reservation)
+        })
+    }
+
+    /// Whether the caller may change a pipe's `access`.
+    pub fn can_manage_access(&self, parameters: &Map) -> bool {
+        self.pipe_access(parameters).is_some_and(|access| {
+            rules::can_manage_access(&self.access.principal, &access, &self.reservation)
+        })
+    }
+
+    /// Whether the caller may lock and unlock a pipe.
+    pub fn can_lock(&self, parameters: &Map) -> bool {
+        self.pipe_access(parameters).is_some_and(|access| {
+            rules::can_lock(&self.access.principal, &access, &self.reservation)
+        })
+    }
+
+    /// Whether the caller may change this pipe's access from `old` to `new`.
+    pub fn check_access_change(&self, old: &PipeAccess, new: &PipeAccess) -> Result<(), String> {
+        rules::check_access_change(&self.access.principal, old, new, &self.reservation)
     }
 }
 
@@ -866,8 +919,19 @@ impl PipeIndex {
     }
 
     /// The target names of the pipes `access` cannot see.
-    pub fn hidden_targets(&self, access: &Access) -> crate::sql_guard::HiddenTables {
-        if access.is_admin() {
+    pub fn hidden_targets(
+        &self,
+        state: &AppState,
+        access: &Access,
+    ) -> crate::sql_guard::HiddenTables {
+        self.hidden_targets_for(&access.for_instance(state, &self.instance_keys))
+    }
+
+    pub(crate) fn hidden_targets_for(
+        &self,
+        access: &InstanceAccess<'_>,
+    ) -> crate::sql_guard::HiddenTables {
+        if access.access.is_admin() {
             return crate::sql_guard::HiddenTables::default();
         }
         crate::sql_guard::HiddenTables::new(
@@ -880,10 +944,11 @@ impl PipeIndex {
     }
 
     /// How many pipes `access` cannot see.
-    pub fn hidden_count(&self, access: &Access) -> usize {
+    pub fn hidden_count(&self, state: &AppState, access: &Access) -> usize {
         if access.is_admin() {
             return 0;
         }
+        let access = access.for_instance(state, &self.instance_keys);
         self.pipes
             .iter()
             .filter(|p| !access.can_see(&p.parameters))
@@ -987,12 +1052,14 @@ pub async fn pipe_index(
 
 /// Whether `access` may see the pipe a `pipe_ref` names on `index` (a pipe that is not
 /// registered there has the default access: visible).
-pub fn can_see_ref(access: &Access, index: &PipeIndex, pipe_ref: &str) -> bool {
+pub fn can_see_ref(state: &AppState, access: &Access, index: &PipeIndex, pipe_ref: &str) -> bool {
     if access.is_admin() {
         return true;
     }
     match index.by_ref(pipe_ref) {
-        Some(p) => access.can_see_indexed(p),
+        Some(p) => access
+            .for_instance(state, &index.instance_keys)
+            .can_see_indexed(p),
         None => true,
     }
 }
@@ -1158,6 +1225,18 @@ impl RefFilter {
                 })
                 .await;
             if let Ok(listing) = listing {
+                let physical = conn.connector_keys();
+                let caller = self.access.for_instance(
+                    &self.state,
+                    self.native_registry
+                        .as_ref()
+                        .map_or(physical.as_str(), |native| native.logical.as_str()),
+                );
+                let service = self
+                    .native_registry
+                    .as_ref()
+                    .and_then(|native| native.service.as_ref())
+                    .map(|access| access.for_instance(&self.state, &physical));
                 for (_, entry) in listing {
                     let parameters = match entry.extra {
                         Some(Value::Map(parameters)) => parameters,
@@ -1182,13 +1261,11 @@ impl RefFilter {
                         }
                         _ => continue,
                     };
-                    let visible_name = (self.access.can_see(&parameters)
-                        && self.native_registry.as_ref().is_none_or(|native| {
-                            native
-                                .service
+                    let visible_name = (caller.can_see(&parameters)
+                        && (self.native_registry.is_none()
+                            || service
                                 .as_ref()
-                                .is_some_and(|service| service.can_see(&parameters))
-                        }))
+                                .is_some_and(|service| service.can_see(&parameters))))
                     .then_some(name);
                     // A duplicate UUID is ambiguous even when its other registration is hidden.
                     identities
@@ -1242,18 +1319,21 @@ impl RefFilter {
         }
     }
 
-    async fn entry(&mut self, pipe_ref: &str) -> Option<Option<IndexedPipe>> {
+    async fn entry(&mut self, pipe_ref: &str) -> Option<Option<(String, IndexedPipe)>> {
         if self.native_registry.is_some() {
             let registry = self.native_objects().await?;
             let object = registry.object(pipe_ref).ok()?;
             let pipe = &object.logical;
-            return Some(Some(IndexedPipe {
-                connector_keys: pipe.connector_keys().into(),
-                metric_key: pipe.metric_key().into(),
-                location_key: pipe.location_key().map(str::to_string),
-                parameters: pipe.raw_parameters().clone(),
-                targets: pipe_targets(pipe),
-            }));
+            return Some(Some((
+                pipe.instance_keys().into(),
+                IndexedPipe {
+                    connector_keys: pipe.connector_keys().into(),
+                    metric_key: pipe.metric_key().into(),
+                    location_key: pipe.location_key().map(str::to_string),
+                    parameters: pipe.raw_parameters().clone(),
+                    targets: pipe_targets(pipe),
+                },
+            )));
         }
         let parts: Vec<&str> = pipe_ref.split('|').collect();
         let instance = if parts.len() == 4 && !(self.client_refs && parts[0].starts_with("api:")) {
@@ -1275,7 +1355,12 @@ impl RefFilter {
             self.indexes.insert(instance.clone(), index);
         }
         let index = self.indexes.get(&instance)?.as_ref()?;
-        Some(index.by_ref(pipe_ref).cloned())
+        Some(
+            index
+                .by_ref(pipe_ref)
+                .cloned()
+                .map(|pipe| (index.instance_keys.clone(), pipe)),
+        )
     }
 
     /// Whether the caller may see the pipe `pipe_ref` names.
@@ -1302,7 +1387,10 @@ impl RefFilter {
         let visible = match self.entry(pipe_ref).await {
             None => false,
             Some(None) => true,
-            Some(Some(p)) => self.access.can_see_indexed(&p),
+            Some(Some((instance, p))) => self
+                .access
+                .for_instance(&self.state, &instance)
+                .can_see_indexed(&p),
         };
         self.hidden_seen |= !visible;
         visible
@@ -1312,7 +1400,7 @@ impl RefFilter {
     /// `sync` lock skips it anyway).
     pub async fn editable(&mut self, pipe_ref: &str) -> (bool, bool) {
         let entry = self.entry(pipe_ref).await;
-        let locked = matches!(&entry, Some(Some(p)) if rules::Locks::from_parameters(&p.parameters).contains(rules::Lock::Sync));
+        let locked = matches!(&entry, Some(Some((_, p))) if rules::Locks::from_parameters(&p.parameters).contains(rules::Lock::Sync));
         if self.unrestricted() {
             return (true, locked);
         }
@@ -1334,7 +1422,10 @@ impl RefFilter {
         let editable = match entry {
             None => false,
             Some(None) => true,
-            Some(Some(p)) => self.access.can_see_indexed(&p) && self.access.can_edit(&p.parameters),
+            Some(Some((instance, p))) => {
+                let access = self.access.for_instance(&self.state, &instance);
+                access.can_see_indexed(&p) && access.can_edit(&p.parameters)
+            }
         };
         (editable, locked)
     }
@@ -1410,7 +1501,13 @@ mod tests {
         )
         .unwrap()
         .to_map();
-        assert!(access.can_see(&private));
+        assert!(
+            InstanceAccess {
+                access: &access,
+                reservation: Vec::new()
+            }
+            .can_see(&private)
+        );
         assert!(Access::everything().has("my_plugin:custom"));
     }
 }

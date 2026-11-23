@@ -115,12 +115,13 @@ pub async fn list_pipelines(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolEr
     let conn = registry(cx, args)?;
     let caller = caller_access(cx).await?;
     let mut filter = RefFilter::new(cx.state, &caller, &conn.connector_keys());
+    let access = caller.for_instance(cx.state, &conn.connector_keys());
     let mut definitions = Vec::new();
     for (definition, parameters) in http::list_registrations(cx.state, &conn)
         .await
         .map_err(api)?
     {
-        if caller.can_see(&parameters) {
+        if access.can_see(&parameters) {
             definitions.push(http::visible_definition(&mut filter, definition).await);
         }
     }

@@ -395,7 +395,7 @@ async fn a_manager_role_gained_during_lookup_cannot_expand_the_original_object_c
         &initial,
         "sql:fixture"
     ));
-    assert!(!initial.can_see_pipe(&fixture.pipe));
+    assert!(!initial.can_see_pipe(&fixture.state, &fixture.pipe));
     let app = fixture.app.clone();
     let req = request(&token);
     let pending = tokio::spawn(async move { common::send(&app, req).await });
@@ -412,7 +412,10 @@ async fn a_manager_role_gained_during_lookup_cannot_expand_the_original_object_c
             .await
             .unwrap()
             .caller();
-    assert!(gained.can_see_pipe(&fixture.pipe) && gained.can_edit(fixture.pipe.raw_parameters()));
+    assert!(
+        gained.can_see_pipe(&fixture.state, &fixture.pipe)
+            && gained.can_edit_pipe(&fixture.state, &fixture.pipe)
+    );
     fixture.actions.release.notify_one();
     let response = pending.await.unwrap();
     assert_eq!(
@@ -472,7 +475,10 @@ async fn a_wider_provider_cannot_restore_write_to_a_narrow_data_request_jwt() {
         .await
         .unwrap();
     assert!(limited.has("pipes:write") && !limited.has("pipes:read"));
-    assert!(limited.can_see_pipe(&fixture.pipe) && limited.can_edit(fixture.pipe.raw_parameters()));
+    assert!(
+        limited.can_see_pipe(&fixture.state, &fixture.pipe)
+            && limited.can_edit_pipe(&fixture.state, &fixture.pipe)
+    );
     assert!(meerschaum_server::access::guard::may_use_connector(
         &fixture.state,
         &limited,

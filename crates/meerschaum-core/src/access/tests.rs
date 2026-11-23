@@ -21,13 +21,13 @@ fn execution_team_boundary_precedes_ownership_membership_and_administration() {
     .unwrap();
     let mut foreign = local.clone();
     foreign.team = Some("Forest".into());
-    assert!(can_see(&caller, &local));
-    assert!(can_edit(&caller, &local));
-    assert!(!can_see(&caller, &foreign));
-    assert!(!can_edit(&caller, &foreign));
-    assert!(!can_manage_access(&caller, &foreign));
-    assert!(!can_lock(&caller, &foreign));
-    assert!(check_access_change(&caller, &local, &foreign).is_err());
+    assert!(can_see(&caller, &local, &[]));
+    assert!(can_edit(&caller, &local, &[]));
+    assert!(!can_see(&caller, &foreign, &[]));
+    assert!(!can_edit(&caller, &foreign, &[]));
+    assert!(!can_manage_access(&caller, &foreign, &[]));
+    assert!(!can_lock(&caller, &foreign, &[]));
+    assert!(check_access_change(&caller, &local, &foreign, &[]).is_err());
     assert!(!caller.is_member(Some("Forest")));
     assert!(!caller.is_member(None));
     let job = crate::job_access::JobAccess {
@@ -38,11 +38,11 @@ fn execution_team_boundary_precedes_ownership_membership_and_administration() {
     assert!(!crate::job_access::can_see_job(&caller, &job));
     // Even a mismatched raw administrator flag cannot bypass the object boundary.
     caller.is_admin = true;
-    assert!(!can_see(&caller, &foreign));
+    assert!(!can_see(&caller, &foreign, &[]));
     assert!(!crate::job_access::can_see_job(&caller, &job));
     assert!(!can_manage_team(&caller, "Forest"));
     assert!(!can_administer_teams(&caller));
-    assert!(check_access_change(&caller, &local, &foreign).is_err());
+    assert!(check_access_change(&caller, &local, &foreign, &[]).is_err());
     assert!(!can_use_connector(&caller, Some(&["Forest".into()])));
     let scoped_admin = Principal::admin("admin").within_team("Harbor");
     assert!(!scoped_admin.is_admin);
@@ -668,14 +668,14 @@ fn visibility_and_edit_rules() {
     // The default: everyone sees and edits.
     let open = PipeAccess::default();
     for p in [&admin, &alice, &manager, &other, &owner] {
-        assert!(can_see(p, &open), "{}", p.username);
-        assert!(can_edit(p, &open), "{}", p.username);
+        assert!(can_see(p, &open, &[]), "{}", p.username);
+        assert!(can_edit(p, &open, &[]), "{}", p.username);
     }
     // Only Everyone's managers and admins manage the default pipe's access.
-    assert!(can_manage_access(&admin, &open));
-    assert!(!can_manage_access(&alice, &open));
+    assert!(can_manage_access(&admin, &open, &[]));
+    assert!(!can_manage_access(&alice, &open, &[]));
     let everyone_manager = user("eve", &[], &[("Everyone", TeamRole::Manager)]);
-    assert!(can_manage_access(&everyone_manager, &open));
+    assert!(can_manage_access(&everyone_manager, &open, &[]));
 
     // Team visibility: the team's members and the owner.
     let team = PipeAccess {
@@ -683,44 +683,44 @@ fn visibility_and_edit_rules() {
         team: Some("OPS".into()),
         ..Default::default()
     };
-    assert!(can_see(&alice, &team));
-    assert!(can_see(&manager, &team));
-    assert!(can_see(&owner, &team));
-    assert!(can_see(&admin, &team));
-    assert!(!can_see(&other, &team));
-    assert!(can_edit(&alice, &team));
-    assert!(!can_edit(&other, &team));
+    assert!(can_see(&alice, &team, &[]));
+    assert!(can_see(&manager, &team, &[]));
+    assert!(can_see(&owner, &team, &[]));
+    assert!(can_see(&admin, &team, &[]));
+    assert!(!can_see(&other, &team, &[]));
+    assert!(can_edit(&alice, &team, &[]));
+    assert!(!can_edit(&other, &team, &[]));
 
     // Private: the owner, the team's managers and admins.
     let private = PipeAccess {
         visibility: Visibility::Private,
         ..team.clone()
     };
-    assert!(!can_see(&alice, &private));
-    assert!(can_see(&manager, &private));
-    assert!(can_see(&owner, &private));
-    assert!(can_see(&admin, &private));
-    assert!(!can_see(&other, &private));
+    assert!(!can_see(&alice, &private, &[]));
+    assert!(can_see(&manager, &private, &[]));
+    assert!(can_see(&owner, &private, &[]));
+    assert!(can_see(&admin, &private, &[]));
+    assert!(!can_see(&other, &private, &[]));
 
     // Everyone: every user sees it; edit `team` lets anyone who sees it change it.
     let public = PipeAccess {
         visibility: Visibility::Everyone,
         ..team.clone()
     };
-    assert!(can_see(&other, &public));
-    assert!(can_edit(&other, &public));
+    assert!(can_see(&other, &public, &[]));
+    assert!(can_edit(&other, &public, &[]));
 
     // Edit `owner`: the owner, the team's managers and admins.
     let owner_only = PipeAccess {
         edit: EditMode::Owner,
         ..public.clone()
     };
-    assert!(can_see(&other, &owner_only));
-    assert!(!can_edit(&other, &owner_only));
-    assert!(!can_edit(&alice, &owner_only));
-    assert!(can_edit(&manager, &owner_only));
-    assert!(can_edit(&owner, &owner_only));
-    assert!(can_edit(&admin, &owner_only));
+    assert!(can_see(&other, &owner_only, &[]));
+    assert!(!can_edit(&other, &owner_only, &[]));
+    assert!(!can_edit(&alice, &owner_only, &[]));
+    assert!(can_edit(&manager, &owner_only, &[]));
+    assert!(can_edit(&owner, &owner_only, &[]));
+    assert!(can_edit(&admin, &owner_only, &[]));
 
     // Managing access and locks: owner, team managers, admins.
     for (p, expected) in [
@@ -730,12 +730,12 @@ fn visibility_and_edit_rules() {
         (&alice, false),
         (&other, false),
     ] {
-        assert_eq!(can_manage_access(p, &team), expected, "{}", p.username);
-        assert_eq!(can_lock(p, &team), expected, "{}", p.username);
+        assert_eq!(can_manage_access(p, &team, &[]), expected, "{}", p.username);
+        assert_eq!(can_lock(p, &team, &[]), expected, "{}", p.username);
     }
     // An anonymous caller owns nothing.
     let anonymous = user("", &[], &[]);
-    assert!(!can_manage_access(&anonymous, &PipeAccess::default()));
+    assert!(!can_manage_access(&anonymous, &PipeAccess::default(), &[]));
 }
 
 #[test]
@@ -844,28 +844,28 @@ fn access_changes() {
         visibility: Visibility::Private,
         ..old.clone()
     };
-    assert!(check_access_change(&owner, &old, &private).is_ok());
-    assert!(check_access_change(&stranger, &old, &private).is_err());
+    assert!(check_access_change(&owner, &old, &private, &[]).is_ok());
+    assert!(check_access_change(&stranger, &old, &private, &[]).is_err());
     // To a team the caller is not in.
     let to_data = PipeAccess {
         team: Some("data".into()),
         ..old.clone()
     };
-    assert!(check_access_change(&owner, &old, &to_data).is_err());
-    assert!(check_access_change(&manager, &old, &to_data).is_ok());
+    assert!(check_access_change(&owner, &old, &to_data, &[]).is_err());
+    assert!(check_access_change(&manager, &old, &to_data, &[]).is_ok());
     // Another owner: team managers only; the owner may give it up.
     let to_sam = PipeAccess {
         owner: Some("sam".into()),
         ..old.clone()
     };
-    assert!(check_access_change(&owner, &old, &to_sam).is_err());
-    assert!(check_access_change(&manager, &old, &to_sam).is_ok());
+    assert!(check_access_change(&owner, &old, &to_sam, &[]).is_err());
+    assert!(check_access_change(&manager, &old, &to_sam, &[]).is_ok());
     let nobody = PipeAccess {
         owner: None,
         ..old.clone()
     };
-    assert!(check_access_change(&owner, &old, &nobody).is_ok());
-    assert!(check_access_change(&Principal::admin("root"), &old, &to_sam).is_ok());
+    assert!(check_access_change(&owner, &old, &nobody, &[]).is_ok());
+    assert!(check_access_change(&Principal::admin("root"), &old, &to_sam, &[]).is_ok());
 }
 
 #[test]
@@ -1069,12 +1069,18 @@ fn walled_off_principals_do_not_see_everyone() {
     )))
     .unwrap();
     let mine_in_everyone = PipeAccess::parse(&Value::Map(map(r#"{"owner": "ann"}"#))).unwrap();
-    assert!(!can_see(&ann, &legacy) && !can_edit(&ann, &legacy));
-    assert!(!can_see(&ann, &public_other));
-    assert!(can_see(&ann, &own) && can_edit(&ann, &own) && can_see(&ann, &own_public));
-    assert!(can_see(&ann, &mine_in_everyone));
-    assert!(can_see(&bob, &legacy) && can_see(&bob, &public_other) && can_see(&bob, &own_public));
-    assert!(!can_see(&bob, &own));
+    assert!(!can_see(&ann, &legacy, &[]) && !can_edit(&ann, &legacy, &[]));
+    assert!(!can_see(&ann, &public_other, &[]));
+    assert!(
+        can_see(&ann, &own, &[]) && can_edit(&ann, &own, &[]) && can_see(&ann, &own_public, &[])
+    );
+    assert!(can_see(&ann, &mine_in_everyone, &[]));
+    assert!(
+        can_see(&bob, &legacy, &[])
+            && can_see(&bob, &public_other, &[])
+            && can_see(&bob, &own_public, &[])
+    );
+    assert!(!can_see(&bob, &own, &[]));
 
     // Jobs.
     let everyone_job = crate::job_access::JobAccess::from_properties("sync", &Map::new());
@@ -1161,4 +1167,158 @@ fn walled_off_principals_never_run_actions_or_terminals() {
     let open = Principal::new("bob", false, Role::Operator.permissions(), own)
         .with_grants(TeamGrants::default());
     assert!(open.has(Permission::ACTIONS_EXECUTE));
+}
+
+#[test]
+fn everyone_pipes_use_the_highest_role_on_the_reserved_instance() {
+    use TeamRole::{Manager, Member};
+
+    let isolated = |name, memberships: &[(&str, TeamRole)]| {
+        user(name, &[], memberships).with_grants(TeamGrants {
+            isolated: true,
+            ..TeamGrants::default()
+        })
+    };
+    let retired = retired_reservation("Harbor", Some("retired"));
+    let instances = [
+        ("unreserved", vec![]),
+        ("empty", vec![]),
+        ("everyone", vec![EVERYONE.into()]),
+        ("harbor", vec!["harbor".into()]),
+        ("shared", vec!["harbor".into(), "forest".into()]),
+        ("retired", vec![retired]),
+    ];
+    let cases = [
+        (Principal::admin("admin"), [Some(Manager); 6]),
+        (
+            user("open_member", &[], &[("Harbor", Member)]),
+            [Some(Member); 6],
+        ),
+        (
+            user("open_manager", &[], &[("Harbor", Manager)]),
+            [
+                Some(Member),
+                Some(Member),
+                Some(Member),
+                Some(Manager),
+                Some(Manager),
+                Some(Member),
+            ],
+        ),
+        (
+            isolated("isolated_member", &[("Harbor", Member)]),
+            [None, None, None, Some(Member), Some(Member), None],
+        ),
+        (
+            isolated(
+                "isolated_manager",
+                &[("Harbor", Member), ("Forest", Manager)],
+            ),
+            [None, None, None, Some(Member), Some(Manager), None],
+        ),
+        (
+            isolated(
+                "everyone_manager",
+                &[(EVERYONE, Manager), ("Harbor", Member)],
+            ),
+            [Some(Manager); 6],
+        ),
+        (
+            isolated("bound_member", &[("Harbor", Member), ("Forest", Manager)])
+                .within_team("Harbor"),
+            [None, None, None, Some(Member), Some(Member), None],
+        ),
+        (
+            isolated("bound_manager", &[("Forest", Manager)]).within_team("Forest"),
+            [None, None, None, None, Some(Manager), None],
+        ),
+        (isolated("unrelated", &[("Field", Manager)]), [None; 6]),
+    ];
+    for (principal, expected) in cases {
+        for ((instance, reservation), role) in instances.iter().zip(expected) {
+            let context = format!("{} on {instance}", principal.username);
+            for (visibility, visible) in [
+                (Visibility::Everyone, role.is_some()),
+                (Visibility::Team, role.is_some()),
+                (Visibility::Private, role == Some(Manager)),
+            ] {
+                let access = PipeAccess {
+                    visibility,
+                    ..PipeAccess::default()
+                };
+                assert_eq!(
+                    can_see(&principal, &access, reservation),
+                    visible,
+                    "{context}"
+                );
+                assert_eq!(
+                    can_edit(&principal, &access, reservation),
+                    visible,
+                    "{context}"
+                );
+                assert_eq!(
+                    can_manage_access(&principal, &access, reservation),
+                    role == Some(Manager),
+                    "{context}"
+                );
+                assert_eq!(
+                    can_lock(&principal, &access, reservation),
+                    role == Some(Manager),
+                    "{context}"
+                );
+                let owner_only = PipeAccess {
+                    edit: EditMode::Owner,
+                    ..access
+                };
+                assert_eq!(
+                    can_edit(&principal, &owner_only, reservation),
+                    role == Some(Manager),
+                    "{context}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_reserved_instance_extends_everyone_visibility_and_allows_giving_pipes_to_everyone() {
+    let manager = user("manager", &[], &[("Harbor", TeamRole::Manager)]).with_grants(TeamGrants {
+        isolated: true,
+        ..TeamGrants::default()
+    });
+    let reservation = ["Harbor".into(), "Forest".into()];
+    let harbor = PipeAccess {
+        team: Some("Harbor".into()),
+        ..PipeAccess::default()
+    };
+    let open = PipeAccess::default();
+    assert!(check_access_change(&manager, &harbor, &open, &[]).is_err());
+    assert!(check_access_change(&manager, &harbor, &open, &reservation).is_ok());
+
+    let untagged = PipeAccess {
+        owner: Some("manager".into()),
+        visibility: Visibility::Private,
+        ..PipeAccess::default()
+    };
+    assert!(can_edit(&manager, &untagged, &[]));
+    assert!(can_edit(&manager, &untagged, &reservation));
+    let new_owner = PipeAccess {
+        owner: Some("new-owner".into()),
+        ..untagged.clone()
+    };
+    assert!(check_access_change(&manager, &untagged, &new_owner, &[]).is_err());
+    assert!(check_access_change(&manager, &untagged, &new_owner, &reservation).is_ok());
+
+    let foreign = PipeAccess {
+        team: Some("Forest".into()),
+        visibility: Visibility::Everyone,
+        ..PipeAccess::default()
+    };
+    assert!(!can_see(&manager, &foreign, &[]));
+    assert!(can_see(&manager, &foreign, &reservation));
+    assert!(!can_manage_access(&manager, &foreign, &reservation));
+    let bound = manager.within_team("Harbor");
+    assert!(check_access_change(&bound, &harbor, &open, &reservation).is_ok());
+    assert!(!can_see(&bound, &foreign, &reservation));
+    assert!(!can_see(&bound, &untagged, &["Forest".into()]));
 }

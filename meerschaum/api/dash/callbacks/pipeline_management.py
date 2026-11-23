@@ -32,9 +32,9 @@ def _require_pipeline_rights(session, name, instance, permission='pipes:write'):
     if viewer.no_auth or viewer.is_admin:
         return viewer
     parameters = access.pipeline_registry_parameters(name, instance)
-    if not parameters or not access.can_see_pipe(viewer, parameters):
+    if not parameters or not access.can_see_pipe(viewer, parameters, instance=instance):
         raise PermissionError(f"Pipeline '{name}' is not available.")
-    if not access.can_edit_pipe(viewer, parameters, permission):
+    if not access.can_edit_pipe(viewer, parameters, permission, instance=instance):
         raise PermissionError(f"You may not change Pipeline('{name}').")
     return viewer
 

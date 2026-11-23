@@ -1601,11 +1601,28 @@ pub fn apply_environment_uris(py: Python<'_>, env: Option<&Bound<'_, PyAny>>) ->
     })
 }
 
+/// Refresh the console's configured instance reservations and add new connector labels.
+#[pyfunction]
+pub fn refresh_console_connectors(py: Python<'_>) -> PyResult<bool> {
+    let host = host(py)?;
+    let dict = store(py);
+    let mut conv = ToCfg::new(py, false)?;
+    let before = load_keys(&mut conv, &dict, Some(&["meerschaum"]))?;
+    let (changed, after, _) = run(&host, before.clone(), |state| {
+        state.refresh_connector_settings(true)
+    });
+    if changed {
+        write_back(py, &dict, &before, &after, &conv.opaque)?;
+    }
+    Ok(changed)
+}
+
 /// Register the config functions on the `_core` module.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(config_dict, m)?)?;
     m.add_function(wrap_pyfunction!(config_set, m)?)?;
     m.add_function(wrap_pyfunction!(config_reset, m)?)?;
+    m.add_function(wrap_pyfunction!(refresh_console_connectors, m)?)?;
     m.add_function(wrap_pyfunction!(get_config, m)?)?;
     m.add_function(wrap_pyfunction!(get_plugin_config, m)?)?;
     m.add_function(wrap_pyfunction!(write_plugin_config, m)?)?;

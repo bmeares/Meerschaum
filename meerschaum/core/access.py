@@ -516,40 +516,40 @@ def is_lock_refusal(message: str) -> bool:
     return bool(_core().access_is_lock_refusal(str(message)))
 
 
-def can_see(principal: Union[Principal, Dict[str, Any]], access: Any = None) -> bool:
+def can_see(principal: Union[Principal, Dict[str, Any]], access: Any = None, *, reservation: Any = None) -> bool:
     """
     Whether `principal` can see a pipe with `access` (a dict, a pipe, or a pipe's parameters):
     administrators and the owner always; `'everyone'`: every user; `'team'`: the team's members;
     `'private'`: the team's managers.
     """
-    return bool(_core().access_can('see', _principal_arg(principal), _access_arg(access)))
+    return bool(_core().access_can('see', _principal_arg(principal), _access_arg(access), reservation))
 
 
-def can_edit(principal: Union[Principal, Dict[str, Any]], access: Any = None) -> bool:
+def can_edit(principal: Union[Principal, Dict[str, Any]], access: Any = None, *, reservation: Any = None) -> bool:
     """
     Whether `principal` may change a pipe with `access` (within their permissions): edit
     `'team'`: anyone who can see it; edit `'owner'`: the owner, the team's managers and
     administrators.
     """
-    return bool(_core().access_can('edit', _principal_arg(principal), _access_arg(access)))
+    return bool(_core().access_can('edit', _principal_arg(principal), _access_arg(access), reservation))
 
 
-def can_manage_access(principal: Union[Principal, Dict[str, Any]], access: Any = None) -> bool:
+def can_manage_access(principal: Union[Principal, Dict[str, Any]], access: Any = None, *, reservation: Any = None) -> bool:
     """
     Whether `principal` may change a pipe's access: its owner, its team's managers and
     administrators.
     """
     return bool(
-        _core().access_can('manage_access', _principal_arg(principal), _access_arg(access))
+        _core().access_can('manage_access', _principal_arg(principal), _access_arg(access), reservation)
     )
 
 
-def can_lock(principal: Union[Principal, Dict[str, Any]], access: Any = None) -> bool:
+def can_lock(principal: Union[Principal, Dict[str, Any]], access: Any = None, *, reservation: Any = None) -> bool:
     """
     Whether `principal` may lock or unlock a pipe through the API or the console: its owner,
     its team's managers and administrators.
     """
-    return bool(_core().access_can('lock', _principal_arg(principal), _access_arg(access)))
+    return bool(_core().access_can('lock', _principal_arg(principal), _access_arg(access), reservation))
 
 
 def can_see_email(
@@ -658,13 +658,15 @@ def check_access_change(
     principal: Union[Principal, Dict[str, Any]],
     old: Any,
     new: Any,
+    *,
+    reservation: Any = None,
 ) -> Optional[str]:
     """
     Return `None` when `principal` may change a pipe's access from `old` to `new` through the
     API or the console, else why not.
     """
     return _core().access_check_access_change(
-        _principal_arg(principal), _access_arg(old), _access_arg(new)
+        _principal_arg(principal), _access_arg(old), _access_arg(new), reservation
     )
 
 

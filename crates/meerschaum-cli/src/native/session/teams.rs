@@ -147,6 +147,7 @@ impl Session {
             member.map(|member| {
                 Arc::new(TeamPipeGuard {
                     instances: child.instances.clone(),
+                    config: team_config.clone(),
                     member,
                 }) as Arc<dyn meerschaum_worker::callback::CallbackGuard>
             });
@@ -261,6 +262,7 @@ impl Session {
 struct TeamPipeGuard {
     instances: Arc<Mutex<HashMap<String, Instance>>>,
     member: meerschaum_core::access::Principal,
+    config: Arc<Config>,
 }
 
 #[meerschaum_connector::async_trait]
@@ -279,15 +281,44 @@ impl meerschaum_worker::callback::CallbackGuard for TeamPipeGuard {
             return Ok(());
         };
         let conn = instance.conn();
+        let connectors = self
+            .config
+            .get(&["meerschaum", "connectors"])
+            .map(|value| value.to_map())
+            .unwrap_or_default();
+        use meerschaum_core::access::{
+            PipeAccess, can_edit, connector_reservation, extends_everyone,
+        };
+        let reservation =
+            connector_reservation(&connectors, &conn.connector_keys()).unwrap_or_default();
+        let reserved = extends_everyone(&reservation);
         let stored = match conn.get_pipe_attributes(pipe).await {
             Ok(attributes) => attributes,
+            Err(error) if reserved => return Err(format!("Could not read {pipe}: {error}")),
             Err(_) => return Ok(()),
         };
-        let Some(Value::Map(parameters)) = stored.get("parameters") else {
-            return Ok(());
+        let parsed;
+        let parameters = match stored.get("parameters") {
+            Some(Value::Map(parameters)) => parameters,
+            Some(Value::Str(text)) if reserved => {
+                let Ok(Value::Map(parameters)) = Value::from_json_str(text) else {
+                    return Err(format!(
+                        "The registered parameters of {pipe} are unavailable."
+                    ));
+                };
+                parsed = parameters;
+                &parsed
+            }
+            _ if reserved && !stored.is_empty() => {
+                return Err(format!(
+                    "The registered parameters of {pipe} are unavailable."
+                ));
+            }
+            _ => return Ok(()),
         };
-        let access = meerschaum_core::access::PipeAccess::from_parameters(parameters);
-        if meerschaum_core::access::can_edit(&self.member, &access) {
+        if PipeAccess::for_authorization(parameters, &reservation, &self.member)
+            .is_some_and(|access| can_edit(&self.member, &access, &reservation))
+        {
             Ok(())
         } else {
             Err(format!("You may not change {pipe}."))

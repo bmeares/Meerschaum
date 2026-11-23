@@ -136,8 +136,8 @@ def pipes_summary(instance: Any, viewer: Any = None, now: Optional[datetime] = N
     from meerschaum.api.dash import access
     viewer = viewer if viewer is not None else access.current_viewer()
     refs = {}
-    for ck, mk, lk, parameters in access.registered_pipes(instance):
-        if str(ck) != 'mrsm' and access.can_see_pipe(viewer, parameters):
+    for ck, mk, lk, _ in access.visible_registrations(viewer, instance):
+        if str(ck) != 'mrsm':
             refs[pipe_ref(str(instance), ck, mk, lk)] = str(ck)
     connectors: Dict[str, int] = {}
     for ck in refs.values():

@@ -155,16 +155,16 @@ impl Authority {
                     return Err(ApiError::new(409, "The pipe is already registered."));
                 }
                 canonical.set_parameters(parameters.clone());
-                if !caller.can_see_pipe(&canonical) {
+                if !caller.can_see_pipe(&self.state, &canonical) {
                     return Err(access::hidden_pipe(&canonical));
                 }
-                if !caller.can_edit(canonical.raw_parameters()) {
+                if !caller.can_edit_pipe(&self.state, &canonical) {
                     return Err(access::not_editable(&canonical));
                 }
                 match self.operation {
                     Operation::Edit(_) => {
                         let merged = access::guard::merge_edit(
-                            &caller,
+                            &caller.for_instance(&self.state, canonical.instance_keys()),
                             parameters,
                             self.pipe.raw_parameters().clone(),
                         )?;
@@ -223,15 +223,15 @@ impl Authority {
         let caller = self.fresh(permissions).await?;
         access::guard::check_connector_teams(&self.state, &caller, self.pipe.instance_keys())?;
         if self.parameters.is_some() {
-            if !caller.can_see_pipe(&canonical) {
+            if !caller.can_see_pipe(&self.state, &canonical) {
                 return Err(access::hidden_pipe(&canonical));
             }
-            if !caller.can_edit(canonical.raw_parameters()) {
+            if !caller.can_edit_pipe(&self.state, &canonical) {
                 return Err(access::not_editable(&canonical));
             }
             if let Operation::Edit(_) = &self.operation {
                 let merged = access::guard::merge_edit(
-                    &caller,
+                    &caller.for_instance(&self.state, canonical.instance_keys()),
                     canonical.raw_parameters(),
                     self.pipe.raw_parameters().clone(),
                 )?;
@@ -249,12 +249,12 @@ impl Authority {
         access::guard::check_pipe_target(
             self.conn.as_ref(),
             &canonical,
-            &index.hidden_targets(&caller),
+            &index.hidden_targets(&self.state, &caller),
         )?;
         access::guard::check_pipe_target(
             self.conn.as_ref(),
             &self.pipe,
-            &index.hidden_targets(&caller),
+            &index.hidden_targets(&self.state, &caller),
         )?;
         Ok(())
     }

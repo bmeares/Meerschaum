@@ -153,7 +153,7 @@ def save_parameters(pipe: mrsm.Pipe, parameters: Dict[str, Any], viewer: Any = N
     if not isinstance(parameters, dict):
         return False, "The parameters must be a dictionary."
     try:
-        old = deepcopy(pipe.get_parameters(apply_symlinks=False, refresh=True) or {})
+        old = deepcopy(access.read_pipe_parameters(pipe, refresh=True))
     except Exception as e:
         return False, f"Could not read {pipe}: {e}"
     new = deepcopy(parameters)
@@ -178,7 +178,7 @@ def save_parameters(pipe: mrsm.Pipe, parameters: Dict[str, Any], viewer: Any = N
 def update_parameters(pipe: mrsm.Pipe, patch: Dict[str, Any], viewer: Any = None) -> SuccessTuple:
     """Merge `patch` into a pipe's parameters (one level deep for `fetch`) and save them."""
     try:
-        parameters = deepcopy(pipe.get_parameters(apply_symlinks=False, refresh=True) or {})
+        parameters = deepcopy(access.read_pipe_parameters(pipe, refresh=True))
     except Exception as e:
         return False, f"Could not read {pipe}: {e}"
     for key, value in (patch or {}).items():
@@ -261,10 +261,10 @@ def set_access(
     """Manage > Access…: the owner, team, visibility and edit mode of a pipe."""
     viewer = _viewer(viewer)
     try:
-        parameters = deepcopy(pipe.get_parameters(apply_symlinks=False, refresh=True) or {})
+        parameters = deepcopy(access.read_pipe_parameters(pipe, refresh=True))
     except Exception as e:
         return False, f"Could not read {pipe}: {e}"
-    if not access.can_manage_access(viewer, parameters):
+    if not access.can_manage_access(viewer, parameters, instance=pipe.instance_keys):
         return False, "Only the pipe's owner, its team's managers and administrators may change its access."
     visibility = visibility if visibility in {value for value, _ in access.VISIBILITIES} else 'team'
     edit = edit if edit in {value for value, _ in access.EDIT_MODES} else 'team'
@@ -277,7 +277,7 @@ def set_access(
     parameters['access'] = {'owner': owner, 'team': team, 'visibility': visibility, 'edit': edit}
     setter = getattr(pipe, 'set_access', None)
     allowed, message = access.check_parameters_change(
-        viewer, pipe, pipe.get_parameters(apply_symlinks=False) or {}, parameters,
+        viewer, pipe, access.read_pipe_parameters(pipe), parameters,
     )
     if not allowed:
         return False, message
@@ -297,10 +297,10 @@ def set_locks(pipe: mrsm.Pipe, locks: List[str], viewer: Any = None) -> SuccessT
     """Manage > Locks…: lock and unlock a pipe (its owner, team managers and admins)."""
     viewer = _viewer(viewer)
     try:
-        parameters = pipe.get_parameters(apply_symlinks=False, refresh=True) or {}
+        parameters = access.read_pipe_parameters(pipe, refresh=True)
     except Exception as e:
         return False, f"Could not read {pipe}: {e}"
-    if not access.can_lock(viewer, parameters):
+    if not access.can_lock(viewer, parameters, instance=pipe.instance_keys):
         return False, "Only the pipe's owner, its team's managers and administrators may lock or unlock it."
     known = [lock for lock, _ in access.LOCKS]
     wanted = [lock for lock in known if lock in set(locks or [])]
@@ -345,7 +345,7 @@ def claim_new_pipe(
     if team and team != access.EVERYONE and team not in access.assignable_teams(viewer):
         return False, f"You are not a member of the team '{team}'."
     try:
-        parameters = deepcopy(pipe.get_parameters(apply_symlinks=False, refresh=True) or {})
+        parameters = deepcopy(access.read_pipe_parameters(pipe, refresh=True))
     except Exception as e:
         return False, f"Could not read {pipe}: {e}"
     parameters['access'] = new_access(viewer, team=team, visibility=visibility)

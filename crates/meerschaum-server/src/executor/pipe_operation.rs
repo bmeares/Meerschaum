@@ -173,8 +173,8 @@ impl PipeOperation {
             (pipe, registration)
         };
         if registration.as_ref() != Some(&self.registration)
-            || !caller.can_see_pipe(&pipe)
-            || !caller.can_edit(pipe.raw_parameters())
+            || !caller.can_see_pipe(state, &pipe)
+            || !caller.can_edit_pipe(state, &pipe)
         {
             return Err(ApiError::new(
                 403,

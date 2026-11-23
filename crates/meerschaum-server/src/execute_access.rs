@@ -429,7 +429,10 @@ async fn check_pipeline_op(
             }
             continue;
         }
-        if !caller.can_edit(&parameters) {
+        if !caller
+            .for_instance(state, &conn.connector_keys())
+            .can_edit(&parameters)
+        {
             return Err(ApiError::new(
                 403,
                 format!(
@@ -763,6 +766,7 @@ async fn check_selection(
         .await
         .map_err(|e| ApiError::exception("fetch_pipes_keys", e))?;
     let index = crate::access::pipe_index(state, Some(&conn.connector_keys())).await?;
+    let caller = caller.for_instance(state, &index.instance_keys);
     let mut refused = 0usize;
     for entry in keys.entries() {
         // The CLI leaves the internal `mrsm` pipes out unless `-c mrsm` names them.

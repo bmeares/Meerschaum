@@ -127,8 +127,8 @@ pub(super) async fn capture_selected(
         let writable = selected.contains(&reference);
         let pipe = record.to_pipe(&options.defaults).map_err(|_| denied())?;
         if pipe.connector_keys() == "mrsm"
-            || !caller.can_see_pipe(&pipe)
-            || (writable && !caller.can_edit(pipe.raw_parameters()))
+            || !caller.can_see_pipe(state, &pipe)
+            || (writable && !caller.can_edit_pipe(state, &pipe))
         {
             return Err(denied());
         }

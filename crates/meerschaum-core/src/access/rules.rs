@@ -165,52 +165,109 @@ impl Principal {
     }
 }
 
-/// Whether `principal` can see a pipe with `access`: administrators and the owner always;
+/// Whether the reservation names any team whose role can extend Everyone.
+pub fn extends_everyone(reservation: &[String]) -> bool {
+    reservation.iter().any(|team| !is_everyone(Some(team)))
+}
+
+/// The principal's highest role among the instance's reserved teams.
+fn reserved_role(principal: &Principal, reservation: &[String]) -> Option<TeamRole> {
+    reservation
+        .iter()
+        .filter(|team| !is_everyone(Some(team)))
+        .filter_map(|team| principal.team_role(Some(team)))
+        .max()
+}
+
+fn instance_team_role(
+    principal: &Principal,
+    team: Option<&str>,
+    reservation: &[String],
+) -> Option<TeamRole> {
+    let role = principal.team_role(team);
+    if is_everyone(team) {
+        role.max(reserved_role(principal, reservation))
+    } else {
+        role
+    }
+}
+
+fn permits_pipe_team(principal: &Principal, team: Option<&str>, reservation: &[String]) -> bool {
+    principal.permits_team(team)
+        || (is_everyone(team)
+            && principal.team_boundary.as_deref().is_some_and(|boundary| {
+                reservation
+                    .iter()
+                    .any(|reserved| same_team(Some(reserved), Some(boundary)))
+            }))
+}
+
+/// Whether `principal` can see a pipe with `access` on this instance: administrators and the owner;
 /// visibility `everyone`: every user; `team`: the team's members; `private`: the team's
-/// managers.
-pub fn can_see(principal: &Principal, access: &PipeAccess) -> bool {
-    if !principal.permits_team(access.team.as_deref()) {
+/// managers. On a reserved instance, the reserved teams are included in Everyone for this pipe.
+pub fn can_see(principal: &Principal, access: &PipeAccess, reservation: &[String]) -> bool {
+    let team = access.team.as_deref();
+    if !permits_pipe_team(principal, team, reservation) {
         return false;
     }
     if principal.is_admin || access.is_owner(&principal.username) {
         return true;
     }
     match access.visibility {
-        // "Everyone" is every member of the team Everyone: not a walled-off principal.
         Visibility::Everyone => {
-            !principal.is_isolated() || principal.is_member(access.team.as_deref())
+            !principal.is_isolated()
+                || principal.is_member(team)
+                || reserved_role(principal, reservation).is_some()
         }
-        Visibility::Team => principal.is_member(access.team.as_deref()),
-        Visibility::Private => principal.is_manager(access.team.as_deref()),
+        Visibility::Team => instance_team_role(principal, team, reservation).is_some(),
+        Visibility::Private => {
+            instance_team_role(principal, team, reservation) == Some(TeamRole::Manager)
+        }
     }
 }
 
 /// Whether `principal` may change a pipe with `access` (within their permissions, which the
 /// caller checks): edit `team`: anyone who can see it; edit `owner`: the owner, the team's
 /// managers and administrators.
-pub fn can_edit(principal: &Principal, access: &PipeAccess) -> bool {
-    if !can_see(principal, access) {
+pub fn can_edit(principal: &Principal, access: &PipeAccess, reservation: &[String]) -> bool {
+    if !can_see(principal, access, reservation) {
         return false;
     }
     match access.edit {
         EditMode::Team => true,
-        EditMode::Owner => can_manage_access(principal, access),
+        EditMode::Owner => can_manage_access(principal, access, reservation),
     }
 }
 
 /// Whether `principal` may change a pipe's `access`: its owner, its team's managers and
 /// administrators.
-pub fn can_manage_access(principal: &Principal, access: &PipeAccess) -> bool {
-    principal.permits_team(access.team.as_deref())
+pub fn can_manage_access(
+    principal: &Principal,
+    access: &PipeAccess,
+    reservation: &[String],
+) -> bool {
+    let team = access.team.as_deref();
+    permits_pipe_team(principal, team, reservation)
         && (principal.is_admin
             || access.is_owner(&principal.username)
-            || principal.is_manager(access.team.as_deref()))
+            || instance_team_role(principal, team, reservation) == Some(TeamRole::Manager))
+}
+
+/// Whether the principal may assign a new owner to a pipe of this team.
+pub fn can_assign_pipe_owner(
+    principal: &Principal,
+    team: Option<&str>,
+    reservation: &[String],
+) -> bool {
+    permits_pipe_team(principal, team, reservation)
+        && (principal.is_admin
+            || instance_team_role(principal, team, reservation) == Some(TeamRole::Manager))
 }
 
 /// Whether `principal` may lock or unlock a pipe through the API or the console: its owner,
 /// its team's managers and administrators (locally anyone with access to the instance may).
-pub fn can_lock(principal: &Principal, access: &PipeAccess) -> bool {
-    can_manage_access(principal, access)
+pub fn can_lock(principal: &Principal, access: &PipeAccess, reservation: &[String]) -> bool {
+    can_manage_access(principal, access, reservation)
 }
 
 /// Whether `viewer` may see the email address of a user in `target_user_teams` (that user's
@@ -251,6 +308,49 @@ pub fn can_administer_teams(principal: &Principal) -> bool {
 /// but nothing is inherited by a later team of the same name. `id`: the deleted team's id.
 pub fn retired_reservation(team: &str, id: Option<&str>) -> String {
     format!("Deleted team {team} #{}", id.unwrap_or("unknown"))
+}
+
+/// The `teams` attribute of the named connector, without inherited defaults.
+fn connector_teams_attribute<'a>(connectors: &'a Map, connector_keys: &str) -> Option<&'a Value> {
+    let (typ, label) = connector_keys.split_once(':')?;
+    connectors.get(typ)?.get(label)?.get("teams")
+}
+
+/// The `teams` restriction used by the connector gate. An absent or null value is unrestricted.
+pub fn connector_teams(connectors: &Map, connector_keys: &str) -> Option<Vec<String>> {
+    match connector_teams_attribute(connectors, connector_keys)? {
+        Value::List(items) => Some(items.iter().map(Value::py_str).collect()),
+        Value::Str(names) => Some(
+            names
+                .split(',')
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_string)
+                .collect(),
+        ),
+        Value::Null => None,
+        other => Some(vec![other.py_str()]),
+    }
+}
+
+/// The named teams that extend Everyone on this instance.
+pub fn connector_reservation(connectors: &Map, connector_keys: &str) -> Option<Vec<String>> {
+    pipe_reservation(connector_teams_attribute(connectors, connector_keys)?)
+}
+
+/// The pipe reservation described by a connector's `teams` attribute.
+pub fn pipe_reservation(attribute: &Value) -> Option<Vec<String>> {
+    match attribute {
+        Value::List(items) => Some(
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect(),
+        ),
+        Value::Str(_) => reservation_names(attribute),
+        _ => None,
+    }
 }
 
 /// The teams a connector's `teams` attribute names (a list, or a comma-separated string).
@@ -447,11 +547,12 @@ pub fn check_access_change(
     principal: &Principal,
     old: &PipeAccess,
     new: &PipeAccess,
+    reservation: &[String],
 ) -> Result<(), String> {
-    if !principal.permits_team(new.team.as_deref()) {
+    if !permits_pipe_team(principal, new.team.as_deref(), reservation) {
         return Err("An execution capability cannot move a pipe outside its team.".into());
     }
-    if !can_manage_access(principal, old) {
+    if !can_manage_access(principal, old, reservation) {
         return Err(
             "Only the pipe's owner, its team's managers and administrators may change its access."
                 .to_string(),
@@ -461,7 +562,7 @@ pub fn check_access_change(
         return Ok(());
     }
     if !same_team(old.team.as_deref(), new.team.as_deref())
-        && !principal.is_member(new.team.as_deref())
+        && instance_team_role(principal, new.team.as_deref(), reservation).is_none()
     {
         return Err(format!(
             "You are not a member of the team '{}'.",
@@ -470,7 +571,10 @@ pub fn check_access_change(
     }
     let owner_changed = old.owner != new.owner;
     let gives_up = new.owner.is_none() && old.is_owner(&principal.username);
-    if owner_changed && !gives_up && !principal.is_manager(old.team.as_deref()) {
+    if owner_changed
+        && !gives_up
+        && !can_assign_pipe_owner(principal, old.team.as_deref(), reservation)
+    {
         return Err(
             "Only the team's managers and administrators may give a pipe to another owner."
                 .to_string(),

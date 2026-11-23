@@ -151,7 +151,7 @@ fn captured_data_admission(
 /// Shared synchronous data-destination guards. The caller and metadata must have been
 /// refreshed after the last preparation await; this helper performs no canonical reads.
 pub(crate) fn check_data_destination(
-    caller: &Access,
+    caller: &access::InstanceAccess<'_>,
     conn: &dyn InstanceConnector,
     pipe: &Pipe,
     hidden: &crate::sql_guard::HiddenTables,
@@ -336,11 +336,12 @@ impl DataAdmission {
             )?;
         }
         let index = access::index_from_dict(pipe.instance_keys(), &dict, conn.as_ref());
+        let access = caller.for_instance(&self.state, pipe.instance_keys());
         check_data_destination(
-            &caller,
+            &access,
             conn.as_ref(),
             &pipe,
-            &index.hidden_targets(&caller),
+            &index.hidden_targets_for(&access),
         )?;
         // Check metadata drift only after verifying the current caller can see the target.
         if registered {

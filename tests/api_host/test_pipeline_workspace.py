@@ -207,7 +207,9 @@ execute.run_action = lambda args, user, **kw: calls.append((args,user,kw)) or {'
 a, b = 'sql:a|source|a|None', 'sql:b|source|b|None'
 page._engine.get_instance = lambda instance, **kwargs: instance
 from meerschaum.api.dash import access
-access.visible_pipe = lambda *args, **kwargs: SimpleNamespace(parameters={})
+access.visible_pipe = lambda ck, mk, lk, instance, **kwargs: SimpleNamespace(
+    instance_keys=instance, parameters={},
+)
 page.sync_selected_pipe(0, {'action':'sync','ref':b,'scope':'parents'}, {'ref':a}, 'this', '2020-01-01', '2021-01-01', None, None, {'session-id':'current'})
 assert '-i' in calls[0][0] and calls[0][0][3] == 'sql:b'
 assert '--parents' in calls[0][0] and '--begin' not in calls[0][0] and '--end' not in calls[0][0]

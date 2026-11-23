@@ -113,7 +113,10 @@ pub async fn visible_registration(
     let parameters = registration_parameters(state, conn, name)
         .await?
         .ok_or_else(missing)?;
-    if !caller.can_see(&parameters) {
+    if !caller
+        .for_instance(state, &conn.connector_keys())
+        .can_see(&parameters)
+    {
         return Err(missing());
     }
     let definition = parameters
@@ -168,9 +171,10 @@ pub(super) async fn list(ctx: Ctx) -> ApiResult {
     let conn = connector(&ctx)?;
     let registry = conn.connector_keys();
     let mut filter = RefFilter::new(&ctx.state, &caller, &registry);
+    let pipe_access = caller.for_instance(&ctx.state, &registry);
     let mut pipelines = Vec::new();
     for (definition, parameters) in list_registrations(&ctx.state, &conn).await? {
-        if caller.can_see(&parameters) {
+        if pipe_access.can_see(&parameters) {
             pipelines.push(visible_definition(&mut filter, definition).await);
         }
     }
@@ -222,6 +226,7 @@ pub(super) async fn keys(ctx: Ctx) -> ApiResult {
     let mut dictionary = serde_json::Map::new();
     let mut as_dict = ctx.query.bool("as_dict", false)?;
     let mut filter = RefFilter::new(&ctx.state, &caller, &conn.connector_keys());
+    let pipe_access = caller.for_instance(&ctx.state, &conn.connector_keys());
     for (identity, mut row) in keys {
         let mut parameters = match row.extra {
             Some(Value::Map(parameters)) => parameters,
@@ -231,7 +236,7 @@ pub(super) async fn keys(ctx: Ctx) -> ApiResult {
             },
             _ => continue,
         };
-        if !caller.can_see(&parameters) {
+        if !pipe_access.can_see(&parameters) {
             continue;
         }
         if let Some(definition) = parameters.get("pipeline") {

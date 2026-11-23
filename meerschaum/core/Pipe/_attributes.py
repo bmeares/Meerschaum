@@ -55,6 +55,7 @@ def attributes(self) -> Dict[str, Any]:
                     not instance_attributes and self._get_cached_value('_id') is not None
                 ):
                     raise RuntimeError(f"Missing metadata for registered pipe {self}.")
+                self._attributes_instance_registration = bool(instance_attributes), instance_attributes.get('parameters')
                 self._cache_value(
                     'attributes',
                     apply_patch_to_config(instance_attributes, local_attributes),
@@ -134,7 +135,6 @@ def get_parameters(
         with self._attributes_lock:
             self._clear_cache_key('_attributes_sync_time', debug=debug)
             self.__dict__.pop('_target', None)
-        ### Drop any memoized resolution so a later non-refresh call recomputes from fresh state.
         _ = self.__dict__.pop('_resolved_parameters_raw', None)
         _ = self.__dict__.pop('_resolved_parameters', None)
         _ = self.__dict__.pop('_resolved_parameters_symlinks', None)

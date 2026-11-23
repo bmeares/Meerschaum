@@ -150,6 +150,14 @@ the team's configuration, an environment allowlist and the filesystem sandbox
 ([ADR 0007](docs/adr/0007-isolated-teams-scoped-processes.md)).
 Owner: `crates/meerschaum-core/src/team_scope.rs`.
 
+**Reservation**:
+The named teams listed in a connector's `teams` attribute. Beyond gating connector access, an
+instance's reservation extends **Everyone** on that instance to members and managers of the
+reserved teams, so untagged pipes and saved Pipelines are usable without backfilling `access`
+([ADR 0011](docs/adr/0011-instance-reservations-extend-everyone.md)). Distinct from a connector
+grant, which lets a team use a connector without extending Everyone on it.
+Owner: `crates/meerschaum-core/src/access/rules.rs`, `crates/meerschaum-core/src/team_scope.rs`.
+
 **Acting team**:
 The one team a caller acts for on a request: never for an administrator; for a user whose teams
 (other than Everyone) are all isolated, the object's team or else their primary team. The console

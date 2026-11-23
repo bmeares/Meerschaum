@@ -366,7 +366,7 @@ def inspect_stage(clicks, definition, close_clicks, session_data, edit=False, dr
     viewer = access.resolve_viewer(session_data)
     instance_keys, connector_keys, metric_key, location_key = _engine.split_ref(ref)
     visible = access.visible_pipe(connector_keys, metric_key, location_key, instance_keys, viewer=viewer)
-    may_sync = visible is not None and access.can_edit_pipe(viewer, visible)
+    may_sync = visible is not None and access.can_edit_pipe(viewer, visible, instance=visible.instance_keys)
     dash.set_props('pipeline-inspector', {'hidden': False})
     import uuid
     selection = {'ref': ref, 'token': uuid.uuid4().hex}
