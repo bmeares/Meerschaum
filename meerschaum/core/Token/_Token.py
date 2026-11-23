@@ -28,7 +28,7 @@ class Token:
         label: Optional[str] = None,
         creation: Optional[datetime] = None,
         expiration: Optional[datetime] = _PLACEHOLDER_EXPIRATION,
-        instance: Optional[str] = None,
+        instance: Optional[Union[str, mrsm.connectors.InstanceConnector]] = None,
         user: Optional[mrsm.core.User] = None,
         user_id: Union[int, str, uuid.UUID, None] = None,
         scopes: Optional[List[str]] = None,
@@ -52,6 +52,7 @@ class Token:
             expiration = default_expiration
         self.creation = coerce_timezone(creation) if creation is not None else None
         self.expiration = coerce_timezone(expiration) if expiration is not None else None
+        self._instance_connector = instance if not isinstance(instance, str) else None
         self._instance_keys = str(instance) if instance is not None else None
         self.label = label or get_new_daemon_name()
         self._user = user
@@ -90,6 +91,8 @@ class Token:
         """
         Return the instance connector to use for this token.
         """
+        if self._instance_connector is not None:
+            return self._instance_connector
         from meerschaum.connectors.parse import parse_instance_keys
         return parse_instance_keys(self._instance_keys)
 

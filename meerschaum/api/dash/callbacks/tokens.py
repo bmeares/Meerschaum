@@ -294,6 +294,7 @@ def register_token_click(
     session_id = (session_data or {}).get('session-id', None)
     token = Token(
         label=(name or None),
+        instance=get_api_connector(),
         user=get_user_from_session(session_id),
         scopes=scopes,
         expiration=(datetime.fromisoformat(f"{expiration}") if expiration is not None else None),

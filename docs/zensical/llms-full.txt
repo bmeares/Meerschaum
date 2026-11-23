@@ -6643,12 +6643,12 @@ mrsm stack up -d
 Meerschaum spins up a dedicated container, isolated bridge network, and private volumes (`/meerschaum` and `/var/lib/meerschaum/factory`). Grant changes apply live; image, limit, or network changes need `mrsm stack up -d`.
 
 !!! tip "Override the executor image"
-    Stack executors default to `bmeares/meerschaum:5.1.3-full` (matching your main API release). Pin a custom image in `stack.yaml`:
+    Stack executors default to `bmeares/meerschaum:5.1.4-full` (matching your main API release). Pin a custom image in `stack.yaml`:
 
     ```yaml
     # mrsm edit config stack
     executor:
-      image: registry.example/meerschaum-executor:5.1.3
+      image: registry.example/meerschaum-executor:5.1.4
     ```
 
 ## Choose a deployment
@@ -13819,6 +13819,11 @@ Read the [migration guide](../reference/migrating-to-v5.md) before upgrading an 
 Source: https://meerschaum.io/changelog/v5/
 
 # Meerschaum 5
+
+## 5.1.4
+
+- **Register and manage tokens from isolated teams.**  
+  Isolated team members can [list and manage their tokens](../reference/api-instance/tokens.md#web-ui) in the Web Console. **Register** saves the token to the API server's store and shows its credentials in the result dialog.
 
 ## 5.1.3
 
