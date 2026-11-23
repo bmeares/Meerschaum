@@ -2868,6 +2868,7 @@ pipe.set_access(team=None)    # move back to Everyone
 - Pipes registered through an `api:` instance or the web console default to the creator as `owner` and their primary team as `team`.
 - Only the owner, team managers, and admins can edit `access` or locks.
 - `copy pipes` preserves locks and never copies `access`. Deleting a user clears ownership while leaving pipes with their teams.
+- **Reserved instances:** On an instance whose connector sets `teams: [...]`, **Everyone** covers members of the reserved teams (including isolated teams) without changing stored `access`. Reserved-team roles apply to untagged pipes and saved Pipelines—including manager control over access, locks, and private untagged pipes—and `visibility: everyone` covers every reserved team. In the web console, the **Access** dialog lists the reserved teams and **My teams** includes untagged pipes on your teams' reserved instances. See [Reserve an instance for teams](../api-instance/teams.md#reserve-an-instance-for-teams).
 
 ## Teams
 
@@ -6373,7 +6374,7 @@ Open **Users & Teams → New team** in the web console, or bootstrap a team from
 
 | Setting | What it does |
 |---|---|
-| `isolated: true` | Hides **Everyone**'s pipes, jobs, connectors, and plugins from team members. |
+| `isolated: true` | Restricts team members to their teams' objects and the shared catalog on [reserved instances](#reserve-an-instance-for-teams). |
 | `database` | `database` (new PostgreSQL DB), `schema` (new schema), or `none` (use an existing instance). |
 | `plugins` / `connectors` | Grants existing plugins and connectors to the team. |
 | `plugins_write: true` | Lets team members install, edit, and upload plugins (and run sandboxed team commands). |
@@ -6386,7 +6387,7 @@ A user is walled off whenever every team they belong to (other than **Everyone**
 
 Walled-off members:
 
-- See only their teams' pipes, saved Pipelines, runs, jobs, and teammates.
+- See their teams' pipes, saved Pipelines, runs, jobs, and teammates, plus **Everyone** (untagged) pipes and saved Pipelines on [instances reserved for their teams](#reserve-an-instance-for-teams).
 - Use only connectors reserved for (`teams: [wetlands]`) or granted to their teams, and only plugins granted to or installed by their teams.
 - Run sandboxed commands and [team terminals](#commands-of-a-team-that-runs-code) when `plugins_write` is enabled, or supported [API-only commands](../team-executors.md#commands-under-the-callers-identity) without it.
 - Use approved plugin MCP tools with `plugins:read` ([Plugin metadata and private handlers](../team-executors.md#plugin-metadata-and-private-handlers)).
@@ -6399,6 +6400,28 @@ Requests that omit `-i` / `instance` automatically default to the caller's team 
     ```bash
     mrsm start api --private
     ```
+
+## Reserve an instance for teams
+
+Set `teams` on an instance connector in `config/meerschaum.yaml` (any instance type—SQL, Valkey, or custom):
+
+```yaml
+connectors:
+  sql:
+    observations:
+      flavor: sqlite
+      database: observations.db
+      teams: [wetlands, water_quality]
+```
+
+On a reserved instance, **Everyone** covers members of the teams named in `teams`—including isolated teams, team terminals, team jobs, and MCP clients—without rewriting stored `access`:
+
+- **Untagged pipes and saved Pipelines** (from `mrsm compose`, direct CLI, plugins, or ported databases) are immediately usable with no backfill.
+- **Roles and per-pipe controls hold:** reserved-team managers can manage access, locks, and private untagged pipes (and return pipes to **Everyone**), while per-pipe owners, `private` visibility, `owner`-only edits, and locks work as usual. Visibility `everyone` on a team-owned pipe also covers every reserved team.
+- **Live updates:** editing `teams`, renaming a team, or deleting a team (which retires its reservation) takes effect on the next request without a restart. A retired or misspelt team name grants nobody access.
+- **Reservation vs. grant:** granting a connector via `connectors: [...]` lets a team use it without extending **Everyone** to its isolated members—list the team in `teams` when it should share untagged pipes.
+
+See [Access and Locks](../pipes/access-and-locks.md#access) for per-pipe visibility and edit rules.
 
 ## A database for each team
 
@@ -6619,12 +6642,12 @@ mrsm stack up -d
 Meerschaum spins up a dedicated container, isolated bridge network, and private volumes (`/meerschaum` and `/var/lib/meerschaum/factory`). Grant changes apply live; image, limit, or network changes need `mrsm stack up -d`.
 
 !!! tip "Override the executor image"
-    Stack executors default to `bmeares/meerschaum:5.1.2-full` (matching your main API release). Pin a custom image in `stack.yaml`:
+    Stack executors default to `bmeares/meerschaum:5.1.3-full` (matching your main API release). Pin a custom image in `stack.yaml`:
 
     ```yaml
     # mrsm edit config stack
     executor:
-      image: registry.example/meerschaum-executor:5.1.2
+      image: registry.example/meerschaum-executor:5.1.3
     ```
 
 ## Choose a deployment
@@ -13795,6 +13818,31 @@ Read the [migration guide](../reference/migrating-to-v5.md) before upgrading an 
 Source: https://meerschaum.io/changelog/v5/
 
 # Meerschaum 5
+
+## 5.1.3
+
+Patch release making untagged (**Everyone**) pipes and saved Pipelines on team-reserved instances usable by the reserved teams, with no backfill or migration required.
+
+- **Isolated teams can use untagged pipes on reserved instances.**  
+  On any instance whose connector sets `teams: [...]` (SQL, Valkey, or custom), **Everyone** now covers members of the reserved teams—including isolated teams, team terminals, team jobs, and MCP clients. Pipes and saved Pipelines registered by `mrsm compose`, direct CLI commands, plugins, or ported databases work immediately without writing `access` onto every pipe. See [Reserve an instance for teams](../reference/api-instance/teams.md#reserve-an-instance-for-teams).
+
+  ```yaml
+  connectors:
+    sql:
+      observations:
+        flavor: sqlite
+        database: observations.db
+        teams: [wetlands, water_quality]
+  ```
+
+- **Roles, visibility, locks, and live changes hold inside reserved instances.**  
+  Reserved-team managers can manage access, locks, and private untagged pipes (and move pipes back to **Everyone**), while per-pipe owners, `private` visibility, `owner`-only edits, and locks continue to apply. Visibility `everyone` on a team-owned pipe covers every team named in the reservation, and reservation edits, team renames, and team deletions take effect on the next request without a restart. See [Access and Locks](../reference/pipes/access-and-locks.md#access).
+
+- **Clearer console views for reserved instances.**  
+  The **Access** dialog notes which teams **Everyone** covers on a reserved instance, **My teams** includes untagged pipes on your teams' reserved instances, and the **Team** switcher preview matches what isolated members see.
+
+- **Unchanged outside reservations.**  
+  Stored pipe `access` is never mutated, instances without a `teams` reservation behave identically to 5.1.2, and connector grants (`connectors: [...]`) continue to grant connector access without exposing untagged pipes.
 
 ## 5.1.2
 
