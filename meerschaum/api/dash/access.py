@@ -64,7 +64,7 @@ __all__ = (
     'lock_refusal', 'may_run_pipe_action', 'new_pipe_access', 'partition_refs', 'pipe_access',
     'pipe_locks', 'pipe_ref', 'pipe_visibility', 'ref_is_visible', 'registered_pipes', 'resolve_visible_pipe',
     'sql_definition_changed', 'visible_pipe', 'visible_pipe_from_meta', 'visible_pipes',
-    'visible_ref_subset', 'visible_refs',
+    'visible_ref_subset', 'visible_refs', 'visible_registrations',
     # Pipelines.
     'hidden_members', 'may_sync_pipeline', 'pipeline_registry', 'pipeline_registry_parameters',
     'visible_pipeline', 'visible_pipelines',
@@ -419,6 +419,14 @@ def registered_pipes(
     return out
 
 
+def visible_registrations(
+    viewer: Viewer, instance: Any, **filters: Any,
+) -> List[Tuple[str, str, Optional[str], Dict[str, Any]]]:
+    """Read an instance's registrations and apply its reservation to the batch."""
+    visible = pipe_visibility(viewer, instance)
+    return [row for row in registered_pipes(instance, **filters) if visible(row[3])]
+
+
 def visible_refs(viewer: Viewer, instance: Any) -> Optional[Set[str]]:
     """
     The `pipe_ref`s of the registered pipes the viewer may see on `instance`, or `None` when the
@@ -729,6 +737,20 @@ def new_pipe_access(
         ### Everyone, chosen explicitly (the primary team is only the default).
         access['team'] = None if team else access.get('team')
     return access
+
+
+def pipe_team_options(viewer: Viewer, team: str, instance: Any) -> List[Dict[str, str]]:
+    """The Access dialog's team choices, with the instance reservation on Everyone's label."""
+    from meerschaum.api.dash.connector_listing import connector_reservation
+    teams = assignable_teams(viewer)
+    if team not in teams:
+        teams.insert(0, team)
+    reservation = connector_reservation(instance)
+    everyone_label = f"Everyone (including {', '.join(reservation)})" if reservation else EVERYONE
+    return [
+        {'label': everyone_label if name == EVERYONE else name, 'value': name}
+        for name in teams
+    ]
 
 
 def assignable_teams(viewer: Viewer) -> List[str]:

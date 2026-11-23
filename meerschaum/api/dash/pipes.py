@@ -1352,10 +1352,8 @@ def build_relations_body(
         instance_keys = str(pipe.instance_keys)
         try:
             ### Only the pipes the viewer may see are offered.
-            visible = access.pipe_visibility(viewer, instance_keys)
             all_keys = [
-                (ck, mk, lk) for ck, mk, lk, parameters in access.registered_pipes(pipe.instance_connector)
-                if visible(parameters)
+                (ck, mk, lk) for ck, mk, lk, _ in access.visible_registrations(viewer, pipe.instance_connector)
             ]
         except Exception:
             all_keys = []
@@ -1452,10 +1450,8 @@ def build_pipes_dropdown_keys_row(
     lk_alone = location_keys and not any([str(x) for x in (connector_keys + metric_keys + tags)])
     from meerschaum.api.dash import access
     viewer = access.current_viewer()
-    visible = access.pipe_visibility(viewer, instance_connector)
     all_keys = [
-        (ck, mk, lk) for ck, mk, lk, parameters in access.registered_pipes(instance_connector)
-        if visible(parameters)
+        (ck, mk, lk) for ck, mk, lk, _ in access.visible_registrations(viewer, instance_connector)
     ]
     pipes = access.visible_pipes(viewer, pipes)
 

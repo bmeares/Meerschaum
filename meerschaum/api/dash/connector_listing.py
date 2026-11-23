@@ -644,6 +644,16 @@ def connector_reservation(instance: Any) -> Tuple[str, ...]:
     return tuple(str(team).strip() for team in teams if not is_everyone(str(team)))
 
 
+def reserved_for_viewer(instance: Any, viewer: Any) -> bool:
+    """Whether an instance reservation names a team of the viewer."""
+    from meerschaum.core.access import same_team
+    return any(
+        same_team(team, reserved)
+        for reserved in connector_reservation(instance)
+        for team in viewer.own_teams
+    )
+
+
 def _env_patches() -> List[Tuple[str, Dict[str, Any]]]:
     """The connector parts of `MRSM_CONFIG` and `MRSM_PATCH`: `[(variable, {type: {label: ...}})]`."""
     from meerschaum._internal.static import STATIC_CONFIG

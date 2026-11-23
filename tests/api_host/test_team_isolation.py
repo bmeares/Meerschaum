@@ -2,22 +2,19 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 
-"""
-Isolated teams in the web console (5.1), in process on the sandbox's SQLite instance, as real
-users with real console sessions (`SIGN_IN`):
+"""Isolated teams in the web console on sandboxed SQLite with real console sessions (`SIGN_IN`):
 
 - a member of an isolated team is walled off from Everyone: its pipes, jobs, connectors, plugins,
   teams and accounts, and they never hold the permissions that act with the server's credentials;
 - a member of an isolated team and an open team keeps the open team's view;
 - New team creates the team with its settings (isolation, default instance, grants), and with a
-  database of its own it writes the team's connector and makes it the default instance;
-- Settings edits them, keeping the team's database;
-- a connector another process wrote to the configuration is picked up.
+  database of its own it writes the team's default connector, which Settings preserves.
+- the console picks up connectors written by other processes.
 """
 
 import json
 
-from tests.api_host._helpers import SIGN_IN, run_python, extract_json
+from tests.api_host._helpers import SIGN_IN, run_python, extract_json, check_reserved_instance_visibility
 
 
 SEED = SIGN_IN + '''
@@ -54,7 +51,7 @@ from meerschaum.api.dash import access, team_setup, teams as team_records, viewe
 def test_members_of_an_isolated_team_are_walled_off_from_everyone(sandbox):
     root, plugins = sandbox
     out = extract_json(run_python(root, plugins, SEED + '''
-from meerschaum.api.dash import overview, pipes_table, connector_listing, components
+from meerschaum.api.dash import overview, connector_listing, components
 from meerschaum.api.dash.users import visible_teams
 from meerschaum.connectors import get_connector
 team('wetlands', isolated=True, instance='sql:wetdb', connectors=['sql:wetdb'], plugins=['noaa'])
@@ -75,7 +72,6 @@ get_connector('sql', 'shared', flavor='sqlite', database=':memory:')
 out = {}
 for who, session in SESSIONS.items():
     viewer = access.resolve_viewer(session)
-    rows = pipes_table.list_rows(conn, viewer=viewer, connector_keys=['ti:src']) if hasattr(pipes_table, 'list_rows') else []
     seen = sorted(
         mk for ck, mk, lk, parameters in access.registered_pipes(conn)
         if ck == 'ti:src' and access.can_see_pipe(viewer, parameters, instance=conn)
@@ -1005,70 +1001,4 @@ print('JSON:' + json.dumps({
 
 
 def test_reserved_instance_shows_untagged_pipes_to_members_and_acting_admins(sandbox):
-    root, plugins = sandbox
-    reserved_config = json.dumps({
-        'flavor': 'sqlite',
-        'database': str(root / 'reserved-pipes.db'),
-        'teams': 'tidelands',
-    })
-    out = extract_json(run_python(root, plugins, SEED + '''
-import flask
-from meerschaum import api
-from meerschaum.api.dash import pipes_table
-from meerschaum.api.dash.callbacks.pipes import open_pipe_access
-
-team('tidelands', isolated=True, instance='sql:tidelands')
-member = sign_in('reserved-member', teams={'tidelands': 'member'})
-admin = sign_in('reserved-admin', user_type='admin')
-reserved = mrsm.get_connector('sql:tidelands')
-api.permissions_config.setdefault('instances', {}).update(
-    allow_multiple_instances=True,
-    allowed_instance_keys=[INSTANCE, str(reserved)],
-)
-legacy = mrsm.Pipe('ti:src', 'reserved_legacy', instance=reserved)
-assert legacy.register()[0]
-
-app = flask.Flask('reserved-pipes')
-
-def snapshot(session, acting_team=None):
-    cookie = f"mrsm-session-id={session['session-id']}"
-    if acting_team:
-        cookie += '; mrsm-team=' + acting_team
-    with app.test_request_context('/dash/pipes', headers={'Cookie': cookie}):
-        viewer = access.resolve_viewer(session)
-        rows = pipes_table.list_rows(reserved, viewer=viewer)
-        filtered = pipes_table.filter_scope(rows, 'teams', pipes_table.viewer_summary(viewer))
-        detail = access.visible_pipe('ti:src', 'reserved_legacy', instance_keys=str(reserved),
-                                     viewer=viewer)
-        everyone_label = None
-        if acting_team:
-            trigger('pipe-manage-access.n_clicks')
-            options = open_pipe_access(1, None, {
-                'connector_keys': 'ti:src', 'metric_key': 'reserved_legacy',
-                'instance_keys': str(reserved),
-            }, session)[3]
-            everyone_label = next(option['label'] for option in options
-                                  if option['value'] == 'Everyone')
-        return {
-            'isolated': viewer.is_isolated,
-            'acting_team': viewer.acting_team,
-            'rows': [[row['mk'], row['team']] for row in rows],
-            'my_teams': [row['mk'] for row in filtered],
-            'detail': detail is not None,
-            'everyone_label': everyone_label,
-        }
-
-print('JSON:' + json.dumps({
-    'member': snapshot(member),
-    'acting_admin': snapshot(admin, 'tidelands'),
-    'stored_access': legacy.get_parameters(apply_symlinks=False, refresh=True).get('access'),
-}))
-''', extra_env={'MRSM_SQL_TIDELANDS': reserved_config}))
-    assert out['acting_admin']['acting_team'] == 'tidelands'
-    assert out['acting_admin']['everyone_label'] == 'Everyone (including tidelands)'
-    for viewer in (out['member'], out['acting_admin']):
-        assert viewer['isolated']
-        assert viewer['rows'] == [['reserved_legacy', None]]
-        assert viewer['my_teams'] == ['reserved_legacy']
-        assert viewer['detail']
-    assert out['stored_access'] is None
+    check_reserved_instance_visibility(sandbox, SEED)

@@ -572,12 +572,7 @@ def update_keys_options(
         ### Only the pipes the viewer may see name their keys and tags here.
         viewer = access.resolve_viewer(ctx.states.get('session-store.data', None))
         instance_connector = get_web_connector(ctx.states)
-        can_see = access.pipe_visibility(viewer, instance_connector)
-        _all_visible = [
-            (ck, mk, lk, parameters)
-            for ck, mk, lk, parameters in access.registered_pipes(instance_connector)
-            if can_see(parameters)
-        ]
+        _all_visible = access.visible_registrations(viewer, instance_connector)
         _all_keys = [(ck, mk, lk) for ck, mk, lk, _ in _all_visible]
         _selected = access.visible_pipes(viewer, mrsm.get_pipes(
             connector_keys=connector_keys,

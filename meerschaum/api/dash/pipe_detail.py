@@ -132,19 +132,18 @@ def pipe_rights(viewer: Any, pipe: mrsm.Pipe, parameters: Optional[Dict[str, Any
             parameters = pipe.get_parameters(apply_symlinks=False) or {}
         except Exception:
             parameters = pipe  # Access checks handle unreadable metadata.
-    instance = pipe.instance_keys
     rights = {}
     for action in ('sync', 'verify', 'edit', 'clear', 'drop', 'delete'):
         permission = access.PIPE_ACTION_PERMISSIONS[action]
-        rights[action] = access.can_edit_pipe(viewer, parameters, permission, instance=instance)
+        rights[action] = access.can_edit_pipe(viewer, parameters, permission, instance=pipe.instance_keys)
     from meerschaum.config import get_config
     rights['copy'] = bool(
         viewer.can('pipes:register')
         and get_config('api', 'permissions', 'registration', 'pipes', warn=False)
-        and access.can_see_pipe(viewer, parameters, instance=instance)
+        and access.can_see_pipe(viewer, parameters, instance=pipe.instance_keys)
     )
-    rights['access'] = access.can_manage_access(viewer, parameters, instance=instance)
-    rights['locks'] = access.can_lock(viewer, parameters, instance=instance)
+    rights['access'] = access.can_manage_access(viewer, parameters, instance=pipe.instance_keys)
+    rights['locks'] = access.can_lock(viewer, parameters, instance=pipe.instance_keys)
     return rights
 
 

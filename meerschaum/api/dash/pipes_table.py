@@ -366,8 +366,7 @@ def list_rows(
     `mrsm` is asked for.
     """
     from meerschaum.api.dash import access
-    from meerschaum.api.dash.connector_listing import connector_reservation
-    from meerschaum.core.access import same_team
+    from meerschaum.api.dash.connector_listing import reserved_for_viewer
     viewer = viewer if viewer is not None else access.current_viewer()
     connector_keys = [str(ck) for ck in (connector_keys or [])]
     pipes = mrsm.get_pipes(
@@ -379,28 +378,16 @@ def list_rows(
         as_list=True,
     )
     include_internal = 'mrsm' in connector_keys
-    reservation = connector_reservation(instance)
-    my_reservation = any(
-        same_team(team, reserved)
-        for team in viewer.own_teams
-        for reserved in reservation
-    )
+    my_reservation = reserved_for_viewer(instance, viewer)
     visible = access.pipe_visibility(viewer, instance)
     rows = []
     for pipe in pipes:
         if str(pipe.connector_keys) == 'mrsm' and not include_internal:
             continue
-        try:
-            parameters = dict(pipe.parameters or {})
-        except Exception:
-            if not (viewer.no_auth or viewer.is_admin):
-                continue
-            parameters = {}
-        if not visible(parameters):
+        if not visible(pipe):
             continue
         row = _row_from_pipe(pipe)
-        if not row['team'] and my_reservation:
-            row['my_reserved_team'] = True
+        row['my_reserved_team'] = bool(my_reservation and not row['team'])
         _remember_pipe(row['ref'], pipe)
         rows.append(row)
     rows.sort(key=lambda row: (row['ck'].lower(), row['mk'].lower(), str(row['lk'] or '').lower()))
@@ -414,10 +401,9 @@ def filter_options(instance: Any, viewer: Any = None) -> Dict[str, List[str]]:
     """
     from meerschaum.api.dash import access
     viewer = viewer if viewer is not None else access.current_viewer()
-    visible = access.pipe_visibility(viewer, instance)
     connectors, metrics, locations, tags = set(), set(), set(), set()
-    for ck, mk, lk, parameters in access.registered_pipes(instance):
-        if str(ck) == 'mrsm' or not visible(parameters):
+    for ck, mk, lk, parameters in access.visible_registrations(viewer, instance):
+        if str(ck) == 'mrsm':
             continue
         connectors.add(str(ck))
         metrics.add(str(mk))
@@ -943,8 +929,7 @@ def filter_scope(
 ) -> List[Dict[str, Any]]:
     """
     The owner filter: `mine` (the viewer owns the pipe), `teams` (the pipe is one of the viewer's
-    teams, including Everyone on their reserved instances; for a viewer in no team but Everyone,
-    Everyone's pipes), else every row.
+    teams, including Everyone on their reserved instances), else every row.
     """
     if not scope or scope == 'all':
         return list(rows)

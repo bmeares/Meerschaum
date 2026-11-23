@@ -952,12 +952,7 @@ def _pipes_keys_options(instance) -> Tuple[Dict[str, List[str]], Optional[str]]:
     try:
         ### Only the pipes the viewer may see name their keys and tags here.
         viewer = access.current_viewer()
-        can_see = access.pipe_visibility(viewer, instance)
-        visible = [
-            (ck, mk, lk, parameters)
-            for ck, mk, lk, parameters in access.registered_pipes(instance)
-            if can_see(parameters)
-        ]
+        visible = access.visible_registrations(viewer, instance)
         options, _ = pipes_keys_options(visible)
     except Exception as e:
         empty = {'connector_keys': [], 'metric_keys': [], 'location_keys': [], 'tags': []}

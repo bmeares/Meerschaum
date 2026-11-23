@@ -1011,7 +1011,6 @@ def owner_options(viewer: Any, current_owner: Optional[str], team: Optional[str]
 def open_pipe_access(access_clicks, cancel_clicks, meta, session_data):
     """Access…: the pipe's owner, team, visibility and edit mode (for those who manage it)."""
     from meerschaum.api.dash import access
-    from meerschaum.api.dash.connector_listing import connector_reservation
     no = dash.no_update
     trigger = dash.callback_context.triggered_id
     if trigger == 'pipe-access-cancel':
@@ -1027,19 +1026,11 @@ def open_pipe_access(access_clicks, cancel_clicks, meta, session_data):
         raise PreventUpdate
     fields = access.access_fields(parameters)
     team = fields.get('team') or access.EVERYONE
-    teams = access.assignable_teams(viewer)
-    if team not in teams:
-        teams = [team] + teams
-    reservation = connector_reservation(pipe.instance_keys)
-    everyone_label = (
-        f"Everyone (including {', '.join(reservation)})" if reservation else access.EVERYONE
-    )
     return (
         True,
         owner_options(viewer, fields.get('owner'), fields.get('team')),
         fields.get('owner') or NO_OWNER,
-        [{'label': everyone_label if name == access.EVERYONE else name, 'value': name}
-         for name in teams],
+        access.pipe_team_options(viewer, team, pipe.instance_keys),
         team,
         fields.get('visibility') or 'team',
         fields.get('edit') or 'team',

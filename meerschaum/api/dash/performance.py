@@ -57,10 +57,9 @@ def metrics(instance_keys: Optional[str], session: Any, window='24h', pipe=None,
             allowed_sources[keys] = connector_team_allows(keys, who)
         return allowed_sources[keys]
     if with_options or not (who.no_auth or who.is_admin):
-        visible = access.pipe_visibility(who, instance)
         available_refs = {'|'.join((str(instance), ck, mk, str(lk)))
-                          for ck, mk, lk, parameters in access.registered_pipes(instance)
-                          if ck != 'mrsm' and visible(parameters) and source_allowed(ck)}
+                          for ck, mk, lk, _ in access.visible_registrations(who, instance)
+                          if ck != 'mrsm' and source_allowed(ck)}
         available_names = set(access.visible_pipelines(instance, viewer=who, include_members=False))
     else:
         available_refs, available_names = set(), set()
