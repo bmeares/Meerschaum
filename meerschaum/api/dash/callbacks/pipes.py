@@ -568,7 +568,8 @@ def toggle_pipe_edit(n_clicks, edit, active_tab, session_data, meta=None):
     if not n_clicks:
         raise PreventUpdate
     viewer = access.resolve_viewer(session_data)
-    if not access.can_edit_pipe(viewer, _meta_pipe(meta, session_data)):
+    pipe = _meta_pipe(meta, session_data)
+    if not access.can_edit_pipe(viewer, pipe, instance=pipe.instance_keys):
         raise PreventUpdate
     edit = not bool(edit)
     tab = active_tab
@@ -1010,6 +1011,7 @@ def owner_options(viewer: Any, current_owner: Optional[str], team: Optional[str]
 def open_pipe_access(access_clicks, cancel_clicks, meta, session_data):
     """Access…: the pipe's owner, team, visibility and edit mode (for those who manage it)."""
     from meerschaum.api.dash import access
+    from meerschaum.api.dash.connector_listing import connector_reservation
     no = dash.no_update
     trigger = dash.callback_context.triggered_id
     if trigger == 'pipe-access-cancel':
@@ -1021,18 +1023,23 @@ def open_pipe_access(access_clicks, cancel_clicks, meta, session_data):
     pipe = _meta_pipe(meta, session_data)
     viewer = access.resolve_viewer(session_data)
     parameters = pipe.get_parameters(apply_symlinks=False, refresh=True) or {}
-    if not access.can_manage_access(viewer, parameters):
+    if not access.can_manage_access(viewer, parameters, instance=pipe.instance_keys):
         raise PreventUpdate
     fields = access.access_fields(parameters)
     team = fields.get('team') or access.EVERYONE
     teams = access.assignable_teams(viewer)
     if team not in teams:
         teams = [team] + teams
+    reservation = connector_reservation(pipe.instance_keys)
+    everyone_label = (
+        f"Everyone (including {', '.join(reservation)})" if reservation else access.EVERYONE
+    )
     return (
         True,
         owner_options(viewer, fields.get('owner'), fields.get('team')),
         fields.get('owner') or NO_OWNER,
-        [{'label': name, 'value': name} for name in teams],
+        [{'label': everyone_label if name == access.EVERYONE else name, 'value': name}
+         for name in teams],
         team,
         fields.get('visibility') or 'team',
         fields.get('edit') or 'team',
@@ -1096,7 +1103,7 @@ def open_pipe_locks(locks_clicks, cancel_clicks, meta, session_data):
         raise PreventUpdate
     pipe = _meta_pipe(meta, session_data)
     parameters = pipe.get_parameters(apply_symlinks=False, refresh=True) or {}
-    if not access.can_lock(access.resolve_viewer(session_data), parameters):
+    if not access.can_lock(access.resolve_viewer(session_data), parameters, instance=pipe.instance_keys):
         raise PreventUpdate
     return True, access.pipe_locks(parameters), []
 
@@ -1315,7 +1322,7 @@ def edit_pipe_relations(
         raise PreventUpdate
     relation = triggered_id['relation']
     ### Changing a pipe's parents or children edits its parameters: edit rights, no lock.
-    authenticated = access.can_edit_pipe(viewer, pipe)
+    authenticated = access.can_edit_pipe(viewer, pipe, instance=pipe.instance_keys)
     refusal = access.lock_refusal(pipe, 'edit', pipe=pipe) if authenticated else None
     if not authenticated:
         feedback = (False, "You may not change this pipe.")
@@ -1338,7 +1345,7 @@ def edit_pipe_relations(
                 feedback = (
                     remove_pipe_relation(
                         pipe, relation, other,
-                        edit_other=(access.can_edit_pipe(viewer, other)
+                        edit_other=(access.can_edit_pipe(viewer, other, instance=other.instance_keys)
                                     and not access.lock_refusal(other, 'edit', pipe=other)),
                     )
                     if other is not None else (False, "That pipe is not available.")

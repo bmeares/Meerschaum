@@ -147,6 +147,7 @@ impl Session {
             member.map(|member| {
                 Arc::new(TeamPipeGuard {
                     instances: child.instances.clone(),
+                    config: team_config.clone(),
                     member,
                 }) as Arc<dyn meerschaum_worker::callback::CallbackGuard>
             });
@@ -261,6 +262,7 @@ impl Session {
 struct TeamPipeGuard {
     instances: Arc<Mutex<HashMap<String, Instance>>>,
     member: meerschaum_core::access::Principal,
+    config: Arc<Config>,
 }
 
 #[meerschaum_connector::async_trait]
@@ -287,7 +289,18 @@ impl meerschaum_worker::callback::CallbackGuard for TeamPipeGuard {
             return Ok(());
         };
         let access = meerschaum_core::access::PipeAccess::from_parameters(parameters);
-        if meerschaum_core::access::can_edit(&self.member, &access) {
+        let connectors = self
+            .config
+            .get(&["meerschaum", "connectors"])
+            .map(|value| value.to_map())
+            .unwrap_or_default();
+        let reservation =
+            meerschaum_core::access::connector_reservation(&connectors, &conn.connector_keys());
+        if meerschaum_core::access::can_edit(
+            &self.member,
+            &access,
+            reservation.as_deref().unwrap_or_default(),
+        ) {
             Ok(())
         } else {
             Err(format!("You may not change {pipe}."))

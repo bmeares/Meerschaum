@@ -14,8 +14,8 @@ runs on the server side of the callback: a page hides what the viewer may not do
 refuses it again when asked anyway.
 
 - `resolve_viewer(session)` / `current_viewer()`: who is asking (`meerschaum.api.dash.viewer`).
-- `can_see_pipe`, `can_edit_pipe`, `can_manage_access`, `can_lock`: a pipe (or its parameters),
-  for a viewer.
+- `can_see_pipe`, `can_edit_pipe`, `can_manage_access`, `can_lock`: a pipe (or its parameters)
+  on a specific instance, for a viewer.
 - `visible_refs(viewer, instance)`: the `pipe_ref`s a viewer may see on an instance (one read of
   the registered pipes), for filtering runs, statuses, graphs and counts.
 - `can_see_email(viewer, username)`: admins, and managers of a team the user is in.
@@ -30,7 +30,7 @@ import threading
 import time
 
 import meerschaum as mrsm
-from typing import Set
+from typing import Callable, Set
 from meerschaum.utils.typing import Any, Dict, Iterable, List, Optional, Tuple, SuccessTuple
 from meerschaum.api.dash.viewer import (
     ANONYMOUS,
@@ -62,7 +62,7 @@ __all__ = (
     'REFS_TTL_SECONDS', 'VISIBILITIES', 'access_fields', 'assignable_teams', 'can_edit_pipe',
     'can_lock', 'can_manage_access', 'can_see_pipe', 'check_parameters_change', 'hidden_label',
     'lock_refusal', 'may_run_pipe_action', 'new_pipe_access', 'partition_refs', 'pipe_access',
-    'pipe_locks', 'pipe_ref', 'ref_is_visible', 'registered_pipes', 'resolve_visible_pipe',
+    'pipe_locks', 'pipe_ref', 'pipe_visibility', 'ref_is_visible', 'registered_pipes', 'resolve_visible_pipe',
     'sql_definition_changed', 'visible_pipe', 'visible_pipe_from_meta', 'visible_pipes',
     'visible_ref_subset', 'visible_refs',
     # Pipelines.
@@ -158,10 +158,23 @@ def pipe_locks(pipe_or_parameters: Any) -> List[str]:
     return [lock for lock, _ in LOCKS if lock in names]
 
 
-def _rule(name: str, viewer: Viewer, pipe_or_parameters: Any) -> bool:
+# Keep the keys of unreadable registrations available to the SQL guard as hidden targets.
+_UNREADABLE_PARAMETERS: Dict[str, Any] = {}
+
+
+def _reservation(viewer: Viewer, instance: Any) -> Tuple[str, ...]:
+    if viewer.no_auth or viewer.is_admin or not viewer.signed_in:
+        return ()
+    from meerschaum.api.dash.connector_listing import connector_reservation
+    return connector_reservation(instance)
+
+
+def _rule(
+    name: str, viewer: Viewer, pipe_or_parameters: Any, reservation: Tuple[str, ...],
+) -> bool:
     if viewer.no_auth or (viewer.signed_in and viewer.is_admin):
         return True
-    if not viewer.signed_in:
+    if not viewer.signed_in or pipe_or_parameters is _UNREADABLE_PARAMETERS:
         return False
     try:
         parameters = pipe_access(pipe_or_parameters)
@@ -170,20 +183,32 @@ def _rule(name: str, viewer: Viewer, pipe_or_parameters: Any) -> bool:
         ### even when a stale object still has a cached parameters dictionary.
         return False
     func = getattr(core(), name)
-    return bool(func(viewer.principal, parameters))
+    return bool(func(viewer.principal, parameters, reservation=reservation))
 
 
-def can_see_pipe(viewer: Viewer, pipe_or_parameters: Any) -> bool:
+def pipe_visibility(viewer: Viewer, instance: Any) -> Callable[[Any], bool]:
+    """Resolve this instance's reservation once for a batch of visibility checks."""
+    reservation = _reservation(viewer, instance)
+    return lambda parameters: _can_see(viewer, parameters, reservation)
+
+
+def can_see_pipe(viewer: Viewer, pipe_or_parameters: Any, *, instance: Any) -> bool:
     """Whether the viewer may see the pipe (and it needs `pipes:read`)."""
+    return _can_see(viewer, pipe_or_parameters, _reservation(viewer, instance))
+
+
+def _can_see(
+    viewer: Viewer, pipe_or_parameters: Any, reservation: Tuple[str, ...],
+) -> bool:
     if not viewer.can('pipes:read'):
         return False
     if viewer.no_auth or viewer.is_admin:
-        return _rule('can_see', viewer, pipe_or_parameters)
+        return _rule('can_see', viewer, pipe_or_parameters, reservation)
     try:
         parameters = _parameters_of(pipe_or_parameters)
     except Exception:
         return False
-    if not _rule('can_see', viewer, parameters):
+    if not _rule('can_see', viewer, parameters, reservation):
         return False
     from meerschaum.api.dash.sql_guard import TARGET_KEYS, check_target
     return not any(
@@ -192,25 +217,35 @@ def can_see_pipe(viewer: Viewer, pipe_or_parameters: Any) -> bool:
     )
 
 
-def can_edit_pipe(viewer: Viewer, pipe_or_parameters: Any, permission: str = 'pipes:write') -> bool:
+def can_edit_pipe(
+    viewer: Viewer, pipe_or_parameters: Any, permission: str = 'pipes:write', *, instance: Any,
+) -> bool:
     """Whether the viewer may change the pipe (within `permission`)."""
-    if not viewer.can(permission) or not can_see_pipe(viewer, pipe_or_parameters):
+    if not viewer.can(permission):
         return False
-    return _rule('can_edit', viewer, pipe_or_parameters)
+    reservation = _reservation(viewer, instance)
+    return (
+        _can_see(viewer, pipe_or_parameters, reservation)
+        and _rule('can_edit', viewer, pipe_or_parameters, reservation)
+    )
 
 
-def can_manage_access(viewer: Viewer, pipe_or_parameters: Any) -> bool:
+def can_manage_access(viewer: Viewer, pipe_or_parameters: Any, *, instance: Any) -> bool:
     """Whether the viewer may change the pipe's access (its owner, team managers, admins)."""
-    if not can_see_pipe(viewer, pipe_or_parameters):
-        return False
-    return _rule('can_manage_access', viewer, pipe_or_parameters)
+    reservation = _reservation(viewer, instance)
+    return (
+        _can_see(viewer, pipe_or_parameters, reservation)
+        and _rule('can_manage_access', viewer, pipe_or_parameters, reservation)
+    )
 
 
-def can_lock(viewer: Viewer, pipe_or_parameters: Any) -> bool:
+def can_lock(viewer: Viewer, pipe_or_parameters: Any, *, instance: Any) -> bool:
     """Whether the viewer may lock and unlock the pipe (its owner, team managers, admins)."""
-    if not can_see_pipe(viewer, pipe_or_parameters):
-        return False
-    return _rule('can_lock', viewer, pipe_or_parameters)
+    reservation = _reservation(viewer, instance)
+    return (
+        _can_see(viewer, pipe_or_parameters, reservation)
+        and _rule('can_lock', viewer, pipe_or_parameters, reservation)
+    )
 
 
 def may_run_pipe_action(viewer: Viewer, pipe_or_parameters: Any, action: str) -> SuccessTuple:
@@ -219,11 +254,14 @@ def may_run_pipe_action(viewer: Viewer, pipe_or_parameters: Any, action: str) ->
     `drop`, `delete`, `copy`, `edit`): its permission, edit rights on the pipe, and its lock.
     """
     permission = PIPE_ACTION_PERMISSIONS.get(action, 'pipes:write')
-    if not can_see_pipe(viewer, pipe_or_parameters):
+    instance = pipe_or_parameters.instance_keys
+    if not can_see_pipe(viewer, pipe_or_parameters, instance=instance):
         return False, "This pipe is not available."
     if not viewer.can(permission):
         return False, f"Your account may not {action} pipes (`{permission}`)."
-    if action != 'copy' and not can_edit_pipe(viewer, pipe_or_parameters, permission):
+    if action != 'copy' and not can_edit_pipe(
+        viewer, pipe_or_parameters, permission, instance=instance,
+    ):
         return False, "Only its owner and its team's managers may change this pipe."
     refusal = lock_refusal(pipe_or_parameters, action)
     if refusal:
@@ -272,20 +310,26 @@ def check_parameters_change(
     """
     if viewer.no_auth:
         return True, ''
-    if not can_edit_pipe(viewer, old, 'pipes:write'):
+    instance = pipe.instance_keys
+    if not can_edit_pipe(viewer, old, 'pipes:write', instance=instance):
         return False, "Only its owner and its team's managers may change this pipe."
     old = dict(old or {})
     new = dict(new or {})
     if (old.get('access') or None) != (new.get('access') or None):
-        if not can_manage_access(viewer, old):
+        if not can_manage_access(viewer, old, instance=instance):
             return False, "Only the pipe's owner, its team's managers and administrators may change its access."
         try:
-            refusal = core().check_access_change(viewer.principal, pipe_access(old), pipe_access(new))
+            refusal = core().check_access_change(
+                viewer.principal, pipe_access(old), pipe_access(new),
+                reservation=_reservation(viewer, instance),
+            )
         except Exception as e:
             return False, str(e)
         if refusal:
             return False, str(refusal)
-    if (old.get('locks') or None) != (new.get('locks') or None) and not can_lock(viewer, old):
+    if (old.get('locks') or None) != (new.get('locks') or None) and not can_lock(
+        viewer, old, instance=instance,
+    ):
         return False, "Only the pipe's owner, its team's managers and administrators may lock or unlock it."
     connector_keys = str(getattr(pipe, 'connector_keys', '') or '')
     if sql_definition_changed(connector_keys, old, new) and not viewer.can('pipes:define_sql'):
@@ -300,10 +344,18 @@ def check_parameters_change(
 
 def visible_pipes(viewer: Viewer, pipes: Iterable[Any]) -> List[Any]:
     """The pipes the viewer may see (their parameters as listed; no new reads)."""
-    return [pipe for pipe in pipes if can_see_pipe(viewer, pipe.parameters if hasattr(pipe, 'parameters') else pipe)]
+    reservations = {}
+    visible = []
+    for pipe in pipes:
+        instance = pipe.instance_keys
+        if instance not in reservations:
+            reservations[instance] = _reservation(viewer, instance)
+        if _can_see(viewer, pipe.parameters, reservations[instance]):
+            visible.append(pipe)
+    return visible
 
 
-_refs_cache: Dict[Tuple[str, str], Tuple[float, Optional[Set[str]]]] = {}
+_refs_cache: Dict[Tuple[str, str, Optional[str], Tuple[str, ...]], Tuple[float, Optional[Set[str]]]] = {}
 _refs_lock = threading.Lock()
 
 
@@ -362,8 +414,7 @@ def registered_pipes(
                 if not parameters and not pipe.attributes.get('pipe_id') and pipe.get_id() is None:
                     raise ValueError('Pipe registration is unavailable.')
             except Exception:
-                ### Unreadable: treated as private to nobody but administrators.
-                parameters = {'access': {'visibility': 'private', 'owner': None}}
+                parameters = _UNREADABLE_PARAMETERS
         out.append((str(ck), str(mk), (None if lk is None else str(lk)), parameters))
     return out
 
@@ -379,7 +430,8 @@ def visible_refs(viewer: Viewer, instance: Any) -> Optional[Set[str]]:
     if not viewer.can('pipes:read'):
         return set()
     instance_keys = str(instance)
-    key = (str(viewer.username), instance_keys)
+    reservation = _reservation(viewer, instance_keys)
+    key = (str(viewer.username), instance_keys, viewer.acting_team, reservation)
     now = time.monotonic()
     with _refs_lock:
         entry = _refs_cache.get(key, None)
@@ -395,7 +447,7 @@ def visible_refs(viewer: Viewer, instance: Any) -> Optional[Set[str]]:
         ### An instance this API does not serve (or cannot read) shows nothing.
         pipes = []
     for ck, mk, lk, parameters in pipes:
-        if can_see_pipe(viewer, parameters):
+        if _can_see(viewer, parameters, reservation):
             refs.add(pipe_ref(instance_keys, ck, mk, lk))
     with _refs_lock:
         if len(_refs_cache) > 2048:
@@ -422,6 +474,7 @@ def visible_ref_subset(viewer: Viewer, refs: Iterable[str]) -> Set[str]:
         instance_visible = set()
         try:
             conn = get_instance(keys, strict=True)
+            reservation = _reservation(viewer, conn)
             for offset in range(0, len(members), 128):
                 chunk = members[offset:offset + 128]
                 wanted = set(chunk)
@@ -431,7 +484,7 @@ def visible_ref_subset(viewer: Viewer, refs: Iterable[str]) -> Set[str]:
                 )
                 instance_visible.update(
                     pipe_ref(keys, ck, mk, lk) for ck, mk, lk, parameters in rows
-                    if (str(ck), str(mk), str(lk)) in wanted and can_see_pipe(viewer, parameters)
+                    if (str(ck), str(mk), str(lk)) in wanted and _can_see(viewer, parameters, reservation)
                 )
             visible.update(instance_visible)
         except Exception:
@@ -482,9 +535,10 @@ def visible_pipelines(
     if not viewer.signed_in or not viewer.can('pipes:read'):
         return {}
     visible_definitions: Dict[str, Dict[str, Any]] = {}
+    reservation = _reservation(viewer, conn)
     for name, definition in definitions.items():
         parameters = registry.get(str(name))
-        if parameters is None or not can_see_pipe(viewer, parameters):
+        if parameters is None or not _can_see(viewer, parameters, reservation):
             continue
         definition = dict(definition)
         targets = [str(ref) for ref in (definition.get('targets') or [])]
@@ -528,7 +582,7 @@ def may_sync_pipeline(viewer: Viewer, name: str, instance: Any) -> SuccessTuple:
     if viewer.no_auth or viewer.is_admin:
         return True, ''
     parameters = pipeline_registry_parameters(name, instance)
-    if not parameters or not can_see_pipe(viewer, parameters):
+    if not parameters or not can_see_pipe(viewer, parameters, instance=instance):
         return False, f"Pipeline '{name}' is not available."
     if not viewer.can('pipes:write'):
         return False, "Your account may not sync pipes."
@@ -540,7 +594,7 @@ def may_sync_pipeline(viewer: Viewer, name: str, instance: Any) -> SuccessTuple:
     for ref in targets:
         instance_keys, ck, mk, lk = split_ref(ref)
         pipe = visible_pipe(ck, mk, lk, instance_keys, viewer=viewer)
-        if pipe is None or not can_edit_pipe(viewer, pipe):
+        if pipe is None or not can_edit_pipe(viewer, pipe, instance=pipe.instance_keys):
             return False, f"You may not change {pipe or ref}, a pipe of this Pipeline."
     return True, ''
 
@@ -595,7 +649,7 @@ def resolve_visible_pipe(
             parameters = pipe.get_parameters(apply_symlinks=False) or {}
     except Exception as e:
         return None, e
-    return (pipe if can_see_pipe(viewer, parameters) else None), None
+    return (pipe if can_see_pipe(viewer, parameters, instance=instance) else None), None
 
 
 def visible_pipe_from_meta(meta: Any, viewer: Optional[Viewer] = None) -> Optional[mrsm.Pipe]:

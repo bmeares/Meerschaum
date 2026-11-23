@@ -267,15 +267,19 @@ pub async fn resolve_pipe(
     // Over HTTP: only the pipes the caller can see.
     if cx.caller.api {
         let caller = caller_access(cx).await?;
-        if !caller.can_see_pipe(&pipe) {
+        if !caller.can_see_pipe(cx.state, &pipe) {
             return Err(hidden(&pipe));
         }
         if !caller.is_admin() {
             let index = access::pipe_index(cx.state, ik.as_deref())
                 .await
                 .map_err(|e| ToolError::other(api_error_str(&e)))?;
-            access::guard::check_pipe_target(conn.as_ref(), &pipe, &index.hidden_targets(&caller))
-                .map_err(|_| hidden(&pipe))?;
+            access::guard::check_pipe_target(
+                conn.as_ref(),
+                &pipe,
+                &index.hidden_targets(cx.state, &caller),
+            )
+            .map_err(|_| hidden(&pipe))?;
         }
     }
     Ok((conn, pipe))
@@ -290,7 +294,7 @@ pub async fn resolve_editable(
     let (conn, pipe) = resolve_pipe(cx, args).await?;
     if cx.caller.api {
         let caller = caller_access(cx).await?;
-        if !caller.can_edit(pipe.raw_parameters()) {
+        if !caller.can_edit_pipe(cx.state, &pipe) {
             return Err(ToolError::permission(
                 access::not_editable(&pipe).detail_text(),
             ));
@@ -382,6 +386,9 @@ pub async fn get_pipes(
     } else {
         None
     };
+    let access = caller
+        .as_ref()
+        .map(|caller| caller.for_instance(cx.state, &conn.connector_keys()));
     for entry in keys.entries() {
         let lk = normalize_location(entry.location_key.as_deref());
         let params = match &entry.extra {
@@ -406,7 +413,10 @@ pub async fn get_pipes(
                 .await
                 .map_err(|e| ToolError::other(api_error_str(&e)))?;
         }
-        if caller.as_ref().is_some_and(|c| !c.can_see_pipe(&pipe)) {
+        if access
+            .as_ref()
+            .is_some_and(|access| !access.can_see_pipe(&pipe))
+        {
             continue;
         }
         grouped
@@ -544,6 +554,7 @@ async fn call_builtin(name: &str, args: &Map, cx: &ToolCx<'_>) -> Result<Value, 
                     let index = access::pipe_index(cx.state, Some(&conn.connector_keys()))
                         .await
                         .map_err(|e| ToolError::other(api_error_str(&e)))?;
+                    let caller = caller.for_instance(cx.state, &index.instance_keys);
                     let blocked = index.pipes.iter().any(|p| {
                         !caller.can_edit(&p.parameters)
                             && !access::Locks::from_parameters(&p.parameters)
@@ -1267,8 +1278,12 @@ async fn edit_pipe(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
     if cx.caller.api {
         // `access` and `locks` need the rights to change them; SQL passes the SQL guard.
         let caller = caller_access(cx).await?;
-        new = access::guard::merge_edit(&caller, &old, new)
-            .map_err(|e| ToolError::permission(e.detail_text()))?;
+        new = access::guard::merge_edit(
+            &caller.for_instance(cx.state, pipe.instance_keys()),
+            &old,
+            new,
+        )
+        .map_err(|e| ToolError::permission(e.detail_text()))?;
         access::guard::check_parameters(cx.state, &caller, &conn, &pipe, Some(&old), &new)
             .await
             .map_err(|e| ToolError::permission(e.detail_text()))?;
@@ -1321,7 +1336,7 @@ async fn read_sql(args: &Map, cx: &ToolCx<'_>) -> Result<Value, ToolError> {
             let index = access::pipe_index(cx.state, Some(&ck))
                 .await
                 .map_err(|e| ToolError::other(api_error_str(&e)))?;
-            Some(index.hidden_targets(&caller))
+            Some(index.hidden_targets(cx.state, &caller))
         };
         sql_guard::check_sql(
             &query,

@@ -258,11 +258,13 @@ async fn visibility_index(
 
 /// Check the pipe's own access and the instance's index of protected resources.
 fn check_pipe_visibility(
+    state: &AppState,
     access: &Access,
     conn: &Arc<dyn InstanceConnector>,
     pipe: &Pipe,
     index: Option<&access::PipeIndex>,
 ) -> Result<(), ApiError> {
+    let access = access.for_instance(state, pipe.instance_keys());
     if !access.can_see_pipe(pipe) {
         return Err(access::hidden_pipe(pipe));
     }
@@ -273,8 +275,12 @@ fn check_pipe_visibility(
             pipe.location_key(),
         );
         if indexed.is_some_and(|p| !access.can_see_indexed(p))
-            || access::guard::check_pipe_target(conn.as_ref(), pipe, &index.hidden_targets(access))
-                .is_err()
+            || access::guard::check_pipe_target(
+                conn.as_ref(),
+                pipe,
+                &index.hidden_targets_for(&access),
+            )
+            .is_err()
         {
             return Err(access::hidden_pipe(pipe));
         }
@@ -293,7 +299,7 @@ async fn visible(
 ) -> Result<(Arc<dyn InstanceConnector>, Arc<PipeHandle>), ApiError> {
     let index = visibility_index(ctx, access).await?;
     let (conn, h) = handle(ctx, ck, mk, lk, refresh).await?;
-    check_pipe_visibility(access, &conn, &h.pipe, index.as_deref())?;
+    check_pipe_visibility(&ctx.state, access, &conn, &h.pipe, index.as_deref())?;
     Ok((conn, h))
 }
 
@@ -307,7 +313,7 @@ async fn editable(
     refresh: bool,
 ) -> Result<(Arc<dyn InstanceConnector>, Arc<PipeHandle>), ApiError> {
     let (conn, h) = visible(ctx, access, ck, mk, lk, refresh).await?;
-    if !access.can_edit(h.pipe.raw_parameters()) {
+    if !access.can_edit_pipe(&ctx.state, &h.pipe) {
         return Err(access::not_editable(&h.pipe));
     }
     Ok((conn, h))

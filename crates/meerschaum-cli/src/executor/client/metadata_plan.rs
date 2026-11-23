@@ -322,13 +322,14 @@ impl Snapshot {
             .map_err(|_| unavailable())?
             .map(|id| id.to_value());
         let caller = proof.caller().await?;
+        let access = caller.for_instance(&proof.state, self.pipe.instance_keys());
         if id.as_ref() != Some(&self.registration)
             || attributes.get("parameters").and_then(Value::as_map)
                 != Some(self.pipe.raw_parameters())
             || !(if pipeline {
-                caller.can_see(self.pipe.raw_parameters())
+                access.can_see(self.pipe.raw_parameters())
             } else {
-                caller.can_see_pipe(&self.pipe)
+                access.can_see_pipe(&self.pipe)
             })
         {
             return Err(unavailable());

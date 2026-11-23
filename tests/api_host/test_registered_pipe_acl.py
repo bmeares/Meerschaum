@@ -24,7 +24,7 @@ def refreshed(pipe, apply_symlinks=True, refresh=False, **kwargs):
     return original(pipe,apply_symlinks=apply_symlinks,refresh=refresh,**kwargs)
 def visible():
     return {mk for ck,mk,lk,parameters in access.registered_pipes(c)
-            if access.can_see_pipe(who,parameters)}
+            if access.can_see_pipe(who,parameters,instance=c)}
 with patch('meerschaum.utils.fetch_pipes_keys',return_value=keys), \
      patch.object(mrsm.Pipe,'get_parameters',new=refreshed):
     assert visible() == {'public'}

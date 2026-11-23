@@ -75,9 +75,10 @@ def hidden_tables(viewer: Any, instance: Any) -> HiddenTables:
     conn = instance if not isinstance(instance, str) else mrsm.get_connector(instance)
     carrier = mrsm.Pipe('mrsm', 'access', instance=conn, temporary=True)
     limit = pipe_metadata(carrier).get('identifier_byte_limit')
+    visible = access.pipe_visibility(viewer, conn)
     names = []
     for ck, mk, lk, parameters in access.registered_pipes(conn):
-        if access.can_see_pipe(viewer, parameters):
+        if visible(parameters):
             continue
         pipe = mrsm.Pipe(ck, mk, lk, instance=conn, parameters=parameters, temporary=True)
         names.extend(pipe_metadata(pipe)['targets'])

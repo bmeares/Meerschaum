@@ -78,7 +78,7 @@ for who, session in SESSIONS.items():
     rows = pipes_table.list_rows(conn, viewer=viewer, connector_keys=['ti:src']) if hasattr(pipes_table, 'list_rows') else []
     seen = sorted(
         mk for ck, mk, lk, parameters in access.registered_pipes(conn)
-        if ck == 'ti:src' and access.can_see_pipe(viewer, parameters)
+        if ck == 'ti:src' and access.can_see_pipe(viewer, parameters, instance=conn)
     )
     out[who] = {
         'isolated': viewer.is_isolated,
@@ -834,7 +834,7 @@ def snapshot(session, team_cookie=None):
         inst_sel = find_id(nav, 'pages-instance-select')
         pipes = sorted(
             mk for ck, mk, lk, parameters in access.registered_pipes(conn)
-            if ck == 'ti:src' and mk.startswith('sw_') and access.can_see_pipe(viewer, parameters)
+            if ck == 'ti:src' and mk.startswith('sw_') and access.can_see_pipe(viewer, parameters, instance=conn)
         )
         return {
             'is_admin': viewer.is_admin,
@@ -1002,3 +1002,73 @@ print('JSON:' + json.dumps({
     assert out['ok_unwritable'] is False
     assert 'chown -R meerschaum:meerschaum /meerschaum/config' in out['msg_unwritable']
     assert out['db_create_called'] is False
+
+
+def test_reserved_instance_shows_untagged_pipes_to_members_and_acting_admins(sandbox):
+    root, plugins = sandbox
+    reserved_config = json.dumps({
+        'flavor': 'sqlite',
+        'database': str(root / 'reserved-pipes.db'),
+        'teams': 'tidelands',
+    })
+    out = extract_json(run_python(root, plugins, SEED + '''
+import flask
+from meerschaum import api
+from meerschaum.api.dash import pipes_table
+from meerschaum.api.dash.callbacks.pipes import open_pipe_access
+
+team('tidelands', isolated=True, instance='sql:tidelands')
+member = sign_in('reserved-member', teams={'tidelands': 'member'})
+admin = sign_in('reserved-admin', user_type='admin')
+reserved = mrsm.get_connector('sql:tidelands')
+api.permissions_config.setdefault('instances', {}).update(
+    allow_multiple_instances=True,
+    allowed_instance_keys=[INSTANCE, str(reserved)],
+)
+legacy = mrsm.Pipe('ti:src', 'reserved_legacy', instance=reserved)
+assert legacy.register()[0]
+
+app = flask.Flask('reserved-pipes')
+
+def snapshot(session, acting_team=None):
+    cookie = f"mrsm-session-id={session['session-id']}"
+    if acting_team:
+        cookie += '; mrsm-team=' + acting_team
+    with app.test_request_context('/dash/pipes', headers={'Cookie': cookie}):
+        viewer = access.resolve_viewer(session)
+        rows = pipes_table.list_rows(reserved, viewer=viewer)
+        filtered = pipes_table.filter_scope(rows, 'teams', pipes_table.viewer_summary(viewer))
+        detail = access.visible_pipe('ti:src', 'reserved_legacy', instance_keys=str(reserved),
+                                     viewer=viewer)
+        everyone_label = None
+        if acting_team:
+            trigger('pipe-manage-access.n_clicks')
+            options = open_pipe_access(1, None, {
+                'connector_keys': 'ti:src', 'metric_key': 'reserved_legacy',
+                'instance_keys': str(reserved),
+            }, session)[3]
+            everyone_label = next(option['label'] for option in options
+                                  if option['value'] == 'Everyone')
+        return {
+            'isolated': viewer.is_isolated,
+            'acting_team': viewer.acting_team,
+            'rows': [[row['mk'], row['team']] for row in rows],
+            'my_teams': [row['mk'] for row in filtered],
+            'detail': detail is not None,
+            'everyone_label': everyone_label,
+        }
+
+print('JSON:' + json.dumps({
+    'member': snapshot(member),
+    'acting_admin': snapshot(admin, 'tidelands'),
+    'stored_access': legacy.get_parameters(apply_symlinks=False, refresh=True).get('access'),
+}))
+''', extra_env={'MRSM_SQL_TIDELANDS': reserved_config}))
+    assert out['acting_admin']['acting_team'] == 'tidelands'
+    assert out['acting_admin']['everyone_label'] == 'Everyone (including tidelands)'
+    for viewer in (out['member'], out['acting_admin']):
+        assert viewer['isolated']
+        assert viewer['rows'] == [['reserved_legacy', None]]
+        assert viewer['my_teams'] == ['reserved_legacy']
+        assert viewer['detail']
+    assert out['stored_access'] is None

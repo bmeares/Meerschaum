@@ -71,13 +71,14 @@ pub(super) async fn edit(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiR
             format!("Pipeline '{name}' is not registered."),
         ));
     };
-    if !caller.can_see(&old) {
+    let pipe_access = caller.for_instance(&ctx.state, &conn.connector_keys());
+    if !pipe_access.can_see(&old) {
         return Err(ApiError::new(
             404,
             format!("Pipeline '{name}' is not registered."),
         ));
     }
-    if !caller.can_edit(&old) {
+    if !pipe_access.can_edit(&old) {
         return Err(ApiError::new(
             403,
             format!(
@@ -93,7 +94,7 @@ pub(super) async fn edit(ctx: Ctx, Path(name): Path<String>, body: Body) -> ApiR
     } else {
         requested
     };
-    let mut new = access::guard::merge_edit(&caller, &old, requested)?;
+    let mut new = access::guard::merge_edit(&pipe_access, &old, requested)?;
     if let Some(Value::Map(definition)) = new.get_mut("pipeline") {
         let identity = old
             .get("pipeline")
@@ -193,10 +194,11 @@ pub(super) async fn rename(ctx: Ctx, Path(name): Path<String>, body: Body) -> Ap
         .get_pipe_attributes(&source)
         .await
         .map_err(|_| ApiError::new(503, "Cannot read Pipeline registration."))?;
+    let pipe_access = caller.for_instance(&ctx.state, &conn.connector_keys());
     let parameters = crate::state::parameters_of(&expected)
-        .filter(|parameters| caller.can_see(parameters))
+        .filter(|parameters| pipe_access.can_see(parameters))
         .ok_or_else(|| ApiError::new(404, "Pipeline was not found."))?;
-    if !caller.can_edit(&parameters) {
+    if !pipe_access.can_edit(&parameters) {
         return Err(ApiError::new(403, "You cannot rename this Pipeline."));
     }
     for operation in [
@@ -376,11 +378,12 @@ pub(super) async fn delete(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
     let caller = access::require(&ctx.state, &ctx.headers, &["pipes:delete"]).await?;
     let conn = connector(&ctx)?;
     let pipe = metadata(&ctx, &conn, &name)?;
+    let pipe_access = caller.for_instance(&ctx.state, &conn.connector_keys());
     let parameters = registration_parameters(&ctx.state, &conn, &name)
         .await?
-        .filter(|p| caller.can_see(p))
+        .filter(|p| pipe_access.can_see(p))
         .ok_or_else(|| ApiError::new(404, format!("Pipeline '{name}' is not registered.")))?;
-    if !caller.can_edit(&parameters) {
+    if !pipe_access.can_edit(&parameters) {
         return Err(ApiError::new(
             403,
             format!(

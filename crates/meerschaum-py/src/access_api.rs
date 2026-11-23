@@ -546,22 +546,24 @@ pub fn access_edit_refusal(
     Ok(access::lock_refusal(&core, &locks, LockOp::EditParameters))
 }
 
-/// `_core.access_can(rule, principal, access)`: `rule` is `see`, `edit`, `manage_access` or
+/// `_core.access_can(rule, principal, access, reservation)`: `rule` is `see`, `edit`, `manage_access` or
 /// `lock`.
 #[pyfunction]
-#[pyo3(signature = (rule, principal, access=None))]
+#[pyo3(signature = (rule, principal, access, reservation))]
 pub fn access_can(
     rule: &str,
     principal: &Bound<'_, PyAny>,
     access: Option<&Bound<'_, PyAny>>,
+    reservation: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<bool> {
     let p = principal_of(principal)?;
     let a = access_of(access)?;
+    let reservation = strings(reservation)?;
     Ok(match rule {
-        "see" => access::can_see(&p, &a),
-        "edit" => access::can_edit(&p, &a),
-        "manage_access" => access::can_manage_access(&p, &a),
-        "lock" => access::can_lock(&p, &a),
+        "see" => access::can_see(&p, &a, &reservation),
+        "edit" => access::can_edit(&p, &a, &reservation),
+        "manage_access" => access::can_manage_access(&p, &a, &reservation),
+        "lock" => access::can_lock(&p, &a, &reservation),
         other => {
             return Err(PyValueError::new_err(format!(
                 "Unknown rule '{other}': use see, edit, manage_access or lock."
@@ -882,17 +884,20 @@ pub fn access_is_member(principal: &Bound<'_, PyAny>, team: Option<&str>) -> PyR
     Ok(principal_of(principal)?.is_member(team))
 }
 
-/// `_core.access_check_access_change(principal, old, new)`: `None` when allowed, else why not.
+/// `_core.access_check_access_change(principal, old, new, reservation)`: `None` when allowed, else why not.
 #[pyfunction]
+#[pyo3(signature = (principal, old, new, reservation))]
 pub fn access_check_access_change(
     principal: &Bound<'_, PyAny>,
     old: Option<&Bound<'_, PyAny>>,
     new: Option<&Bound<'_, PyAny>>,
+    reservation: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<Option<String>> {
     Ok(access::check_access_change(
         &principal_of(principal)?,
         &access_of(old)?,
         &access_of(new)?,
+        &strings(reservation)?,
     )
     .err())
 }

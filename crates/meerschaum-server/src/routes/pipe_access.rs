@@ -24,7 +24,7 @@ use meerschaum_core::{Map, Pipe, Value};
 use serde_json::{Map as JsonMap, Value as Json, json};
 
 use super::{Ctx, body_bytes};
-use crate::access::{self, Access, Locks, PipeAccess, rules};
+use crate::access::{self, Access, InstanceAccess, Locks, PipeAccess, rules};
 use crate::envelope;
 use crate::error::{ApiError, ApiResult};
 use crate::json::{from_core, to_core};
@@ -41,7 +41,7 @@ pub fn routes(app: Router<AppState>) -> Router<AppState> {
 }
 
 /// The JSON of a pipe's access and locks, with what `caller` may do.
-pub fn access_fields(caller: &Access, parameters: &Map) -> JsonMap<String, Json> {
+pub fn access_fields(caller: &InstanceAccess<'_>, parameters: &Map) -> JsonMap<String, Json> {
     let pipe_access = PipeAccess::from_parameters(parameters);
     let locks = Locks::from_parameters(parameters);
     let mut fields = JsonMap::new();
@@ -77,7 +77,7 @@ async fn registered_visible(
         .await
         .map_err(|e| ApiError::exception("get_pipe_id", e))?
         .is_some();
-    if !registered || !caller.can_see_pipe(&h.pipe) {
+    if !registered || !caller.can_see_pipe(&ctx.state, &h.pipe) {
         return Err(ApiError::new(404, format!("{} is not registered.", h.pipe)));
     }
     Ok((conn, h.pipe.clone()))
@@ -110,7 +110,7 @@ pub async fn forget(state: &AppState, conn: &Arc<dyn InstanceConnector>) {
 /// The access `caller` asks for `pipe` (stored `parameters`) with the keys of `body` (any of
 /// `owner`, `team`, `visibility`, `edit`), checked: the new access.
 pub fn changed_access(
-    caller: &Access,
+    caller: &InstanceAccess<'_>,
     parameters: &Map,
     body: &Json,
 ) -> Result<PipeAccess, ApiError> {
@@ -129,8 +129,9 @@ pub fn changed_access(
         merged.insert(key.clone(), to_core(value));
     }
     let new = PipeAccess::parse(&Value::Map(merged)).map_err(|e| ApiError::new(400, e))?;
-    if !caller.no_auth {
-        rules::check_access_change(&caller.principal, &old, &new)
+    if !caller.no_auth() {
+        caller
+            .check_access_change(&old, &new)
             .map_err(|e| ApiError::new(403, e))?;
     }
     Ok(new)
@@ -162,12 +163,12 @@ pub fn requested_locks(body: &Json) -> Result<Locks, ApiError> {
 
 /// Refuse a lock change of `pipe` (stored `parameters`) by `caller` who may not lock it.
 pub fn check_may_lock(
-    caller: &Access,
+    caller: &InstanceAccess<'_>,
     pipe: &Pipe,
     parameters: &Map,
     lock: bool,
 ) -> Result<(), ApiError> {
-    if caller.no_auth || caller.can_lock(parameters) {
+    if caller.no_auth() || caller.can_lock(parameters) {
         return Ok(());
     }
     Err(ApiError::new(
@@ -189,7 +190,10 @@ async fn json_body(body: Body, limit: Option<usize>) -> Result<Json, ApiError> {
 async fn get_access(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> ApiResult {
     let caller = access::require(&ctx.state, &ctx.headers, &["pipes:read"]).await?;
     let (_, pipe) = registered_visible(&ctx, &caller, &ck, &mk, &lk).await?;
-    let fields = access_fields(&caller, pipe.raw_parameters());
+    let fields = access_fields(
+        &caller.for_instance(&ctx.state, pipe.instance_keys()),
+        pipe.raw_parameters(),
+    );
     Ok(envelope::ok(format!("The access of {pipe}."), fields))
 }
 
@@ -197,7 +201,11 @@ async fn patch_access(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiRes
     let caller = access::require(&ctx.state, &ctx.headers, &["pipes:write"]).await?;
     let body = json_body(body, ctx.state.config.limits.body).await?;
     let (conn, pipe) = registered_visible(&ctx, &caller, &ck, &mk, &lk).await?;
-    let new = changed_access(&caller, pipe.raw_parameters(), &body)?;
+    let new = changed_access(
+        &caller.for_instance(&ctx.state, pipe.instance_keys()),
+        pipe.raw_parameters(),
+        &body,
+    )?;
     // A connector reserved for some teams keeps its pipes with them.
     let old_team = PipeAccess::from_parameters(pipe.raw_parameters()).team;
     if !rules::same_team(old_team.as_deref(), new.team.as_deref()) {
@@ -216,7 +224,10 @@ async fn patch_access(ctx: Ctx, Path((ck, mk, lk)): Keys3, body: Body) -> ApiRes
     let parameters = registered(&conn, &pipe).await?;
     Ok(envelope::ok(
         res.message,
-        access_fields(&caller, &parameters),
+        access_fields(
+            &caller.for_instance(&ctx.state, pipe.instance_keys()),
+            &parameters,
+        ),
     ))
 }
 
@@ -230,7 +241,12 @@ async fn lock_or_unlock(
     let body = json_body(body, ctx.state.config.limits.body).await?;
     let requested = requested_locks(&body)?;
     let (conn, pipe) = registered_visible(&ctx, &caller, &keys.0, &keys.1, &keys.2).await?;
-    check_may_lock(&caller, &pipe, pipe.raw_parameters(), lock)?;
+    check_may_lock(
+        &caller.for_instance(&ctx.state, pipe.instance_keys()),
+        &pipe,
+        pipe.raw_parameters(),
+        lock,
+    )?;
     let res = if lock {
         conn.lock_pipe(&pipe, &requested).await
     } else {
@@ -243,7 +259,10 @@ async fn lock_or_unlock(
     let parameters = registered(&conn, &pipe).await?;
     Ok(envelope::ok(
         res.message,
-        access_fields(&caller, &parameters),
+        access_fields(
+            &caller.for_instance(&ctx.state, pipe.instance_keys()),
+            &parameters,
+        ),
     ))
 }
 

@@ -572,10 +572,11 @@ def update_keys_options(
         ### Only the pipes the viewer may see name their keys and tags here.
         viewer = access.resolve_viewer(ctx.states.get('session-store.data', None))
         instance_connector = get_web_connector(ctx.states)
+        can_see = access.pipe_visibility(viewer, instance_connector)
         _all_visible = [
             (ck, mk, lk, parameters)
             for ck, mk, lk, parameters in access.registered_pipes(instance_connector)
-            if access.can_see_pipe(viewer, parameters)
+            if can_see(parameters)
         ]
         _all_keys = [(ck, mk, lk) for ck, mk, lk, _ in _all_visible]
         _selected = access.visible_pipes(viewer, mrsm.get_pipes(
@@ -948,7 +949,7 @@ def update_pipe_accordion(item, session_store_data):
 
     ### Its editors (parameters, rows, parents and children) are for those who may change it.
     from meerschaum.api.dash import access
-    authenticated = access.can_edit_pipe(access.resolve_viewer(session_store_data), pipe)
+    authenticated = access.can_edit_pipe(access.resolve_viewer(session_store_data), pipe, instance=pipe.instance_keys)
     return accordion_items_from_pipe(pipe, active_items=[item], authenticated=authenticated)
 
 

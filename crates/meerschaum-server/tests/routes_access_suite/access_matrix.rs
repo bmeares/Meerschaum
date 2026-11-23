@@ -43,6 +43,7 @@ use meerschaum_server::{AppState, ServerConfig};
 use serde_json::{Value as Json, json};
 
 mod commands;
+mod instance_reservations;
 mod mcp;
 mod ownership;
 mod pipelines_and_runs;

@@ -321,10 +321,10 @@ impl PluginHost {
             pipe.set_parameters(parameters);
             pipe.temporary = false;
         }
-        if !access.can_see_pipe(&pipe) {
+        if !access.can_see_pipe(&api.state, &pipe) {
             return Err(host_error(access::hidden_pipe(&pipe).detail_text()));
         }
-        if writes && !access.can_edit(pipe.raw_parameters()) {
+        if writes && !access.can_edit_pipe(&api.state, &pipe) {
             return Err(host_error(access::not_editable(&pipe).detail_text()));
         }
         let index = access::pipe_index(&api.state, Some(pipe.instance_keys()))
@@ -332,8 +332,12 @@ impl PluginHost {
             .map_err(|e| host_error(e.detail_text()))?;
         // Internal tables stay unavailable even to administrator-owned narrow tokens, as
         // with API data routes and raw SQL. Administrators have no other hidden targets.
-        guard::check_pipe_target(instance.as_ref(), &pipe, &index.hidden_targets(access))
-            .map_err(|e| host_error(e.detail_text()))?;
+        guard::check_pipe_target(
+            instance.as_ref(),
+            &pipe,
+            &index.hidden_targets(&api.state, access),
+        )
+        .map_err(|e| host_error(e.detail_text()))?;
         Ok(pipe)
     }
 

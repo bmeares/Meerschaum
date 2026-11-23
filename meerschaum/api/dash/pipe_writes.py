@@ -264,7 +264,7 @@ def set_access(
         parameters = deepcopy(pipe.get_parameters(apply_symlinks=False, refresh=True) or {})
     except Exception as e:
         return False, f"Could not read {pipe}: {e}"
-    if not access.can_manage_access(viewer, parameters):
+    if not access.can_manage_access(viewer, parameters, instance=pipe.instance_keys):
         return False, "Only the pipe's owner, its team's managers and administrators may change its access."
     visibility = visibility if visibility in {value for value, _ in access.VISIBILITIES} else 'team'
     edit = edit if edit in {value for value, _ in access.EDIT_MODES} else 'team'
@@ -300,7 +300,7 @@ def set_locks(pipe: mrsm.Pipe, locks: List[str], viewer: Any = None) -> SuccessT
         parameters = pipe.get_parameters(apply_symlinks=False, refresh=True) or {}
     except Exception as e:
         return False, f"Could not read {pipe}: {e}"
-    if not access.can_lock(viewer, parameters):
+    if not access.can_lock(viewer, parameters, instance=pipe.instance_keys):
         return False, "Only the pipe's owner, its team's managers and administrators may lock or unlock it."
     known = [lock for lock, _ in access.LOCKS]
     wanted = [lock for lock in known if lock in set(locks or [])]

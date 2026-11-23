@@ -219,9 +219,10 @@ async fn detail(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
         let pipes = meerschaum_connector::teams::team_pipes(conn.as_ref(), &team.name)
             .await
             .map_err(|e| failed("team_pipes", e))?;
+        let pipe_access = caller.for_instance(&ctx.state, &conn.connector_keys());
         let visible = pipes
             .iter()
-            .filter(|p| caller.can_see(p.raw_parameters()))
+            .filter(|p| pipe_access.can_see(p.raw_parameters()))
             .count();
         fields.insert("pipes".into(), json!(visible));
         fields.insert(

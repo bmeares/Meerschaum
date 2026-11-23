@@ -265,7 +265,13 @@ async fn metadata(
     Ok(pipes)
 }
 
-fn hidden(conn: &dyn InstanceConnector, pipes: &[Pipe], caller: &Access) -> HiddenTables {
+fn hidden(
+    state: &AppState,
+    conn: &dyn InstanceConnector,
+    pipes: &[Pipe],
+    caller: &Access,
+) -> HiddenTables {
+    let caller = caller.for_instance(state, &conn.connector_keys());
     HiddenTables::new(
         pipes
             .iter()
@@ -332,6 +338,7 @@ fn resolve(
         defaults: defaults.clone(),
         entries: Vec::new(),
     };
+    let caller = caller.for_instance(state, root.instance_keys());
     let mut queue = vec![root.clone()];
     while let Some(pipe) = queue.pop() {
         if snapshot.entries.iter().any(|(stored, _)| stored == &pipe) {
@@ -628,7 +635,7 @@ async fn prepare_scoped(
         request.pipe.location_key.as_deref(),
     )
     .ok_or_else(ApiError::not_found)?;
-    if !caller.can_see_pipe(stored) {
+    if !caller.can_see_pipe(&ctx.state, stored) {
         return Err(ApiError::not_found());
     }
     let source_pipes = if request.source_keys == request.instance_keys {
@@ -636,7 +643,7 @@ async fn prepare_scoped(
     } else {
         metadata(&source, &ctx.state.config.pipe_defaults).await?
     };
-    let source_hidden = hidden(source.as_ref(), &source_pipes, &caller);
+    let source_hidden = hidden(&ctx.state, source.as_ref(), &source_pipes, &caller);
     let table_source =
         source.supports_registered_source_table() || home.supports_registered_source_table();
     if table_source {
@@ -674,10 +681,10 @@ async fn prepare_scoped(
         request.pipe.location_key.as_deref(),
     )
     .ok_or_else(ApiError::not_found)?;
-    if !caller.can_see_pipe(stored) {
+    if !caller.can_see_pipe(&ctx.state, stored) {
         return Err(ApiError::not_found());
     }
-    let source_hidden = hidden(source.as_ref(), &source_pipes, &caller);
+    let source_hidden = hidden(&ctx.state, source.as_ref(), &source_pipes, &caller);
     let connectors = ctx.state.connectors();
     let attributes = |keys: &str| {
         keys.split_once(':')
@@ -707,8 +714,9 @@ async fn prepare_scoped(
         if stored.registration_id().is_none() {
             return Err(ApiError::not_found());
         }
-        let home_hidden = hidden(home.as_ref(), &home_pipes, &caller);
-        super::pipes::check_data_destination(&caller, home.as_ref(), stored, &home_hidden)?;
+        let home_hidden = hidden(&ctx.state, home.as_ref(), &home_pipes, &caller);
+        let access = caller.for_instance(&ctx.state, stored.instance_keys());
+        super::pipes::check_data_destination(&access, home.as_ref(), stored, &home_hidden)?;
         // Templates may change the actual target; it must pass the same hidden/internal
         // table guard as the canonical raw registration.
         access::guard::check_pipe_target(home.as_ref(), &pipe, &home_hidden)?;

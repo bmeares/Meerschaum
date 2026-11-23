@@ -134,7 +134,7 @@ impl Controller {
         }
         let mut pipe = change.pipe.clone();
         pipe.set_parameters(change.after.clone());
-        if !current.can_see_pipe(&pipe) || !current.can_edit(pipe.raw_parameters()) {
+        if !current.can_see_pipe(&state, &pipe) || !current.can_edit_pipe(&state, &pipe) {
             return Err("Native inference lost its current object permission.".into());
         }
         guard::check_source_connector(&state, &current, pipe.connector_keys())
@@ -175,7 +175,7 @@ impl Controller {
         final_source
             .require(&["pipes:write"], &[])
             .map_err(|error| error.detail_text())?;
-        if !final_source.can_see_pipe(&pipe) || !final_source.can_edit(pipe.raw_parameters()) {
+        if !final_source.can_see_pipe(&state, &pipe) || !final_source.can_edit_pipe(&state, &pipe) {
             return Err("Native inference lost its final object permission.".into());
         }
         guard::check_connector_teams(&state, &final_source, pipe.instance_keys())

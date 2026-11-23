@@ -18,6 +18,7 @@ async fn visible_keys(ctx: &Ctx, access: &Access, keys: PipesKeys) -> Result<Pip
         return Ok(keys);
     }
     let index = access::pipe_index(&ctx.state, ctx.instance_keys().as_deref()).await?;
+    let access = access.for_instance(&ctx.state, &index.instance_keys);
     let visible = |e: &meerschaum_connector::PipeKeysEntry| {
         if e.connector_keys == "mrsm" {
             return false;
@@ -134,7 +135,7 @@ pub(super) async fn fetch_pipes_keys(ctx: Ctx) -> ApiResult {
 pub(super) async fn get_pipes(ctx: Ctx) -> ApiResult {
     let (access, operation) = authorize_catalog(&ctx).await?;
     let q = &ctx.query;
-    let ik = q.opt_str("instance_keys").filter(|s| !s.is_empty());
+    let ik = ctx.instance_keys().filter(|s| !s.is_empty());
     let conn = ctx.state.get_api_connector(ik.as_deref())?;
     // `get_pipes(connector_keys=..., ...)` with the raw strings as one-element filters.
     let one = |k: &str| {
@@ -156,6 +157,8 @@ pub(super) async fn get_pipes(ctx: Ctx) -> ApiResult {
         .fetch_pipes_keys(&query)
         .await
         .map_err(|e| ApiError::exception("fetch_pipes_keys", e))?;
+    let instance_keys = conn.connector_keys();
+    let access = access.for_instance(&ctx.state, &instance_keys);
     // PARITY: these pipes are built from `get_pipes()` and their attributes are the local
     // ones: no `pipe_id`, and `instance_keys: null` (`api/routes/_pipes.py:223`).
     let mut out = serde_json::Map::new();
@@ -193,6 +196,7 @@ pub(super) async fn get_pipes(ctx: Ctx) -> ApiResult {
         };
         let listed_pipe = Pipe::builder(&entry.connector_keys, &entry.metric_key)
             .location(lk.as_deref())
+            .instance(&instance_keys)
             .parameters(params.to_map())
             .build()
             .map_err(|e| ApiError::exception("Pipe", e))?;
@@ -230,6 +234,7 @@ pub(super) async fn get_pipes_by_connector(ctx: Ctx, Path(ck): Path<String>) -> 
         return Err(not_found());
     };
     let conn = ctx.state.get_api_connector(ik.as_deref())?;
+    let access = access.for_instance(&ctx.state, &conn.connector_keys());
     let mut out = serde_json::Map::new();
     for (mk, locations) in metrics {
         let seen: Vec<_> = locations
@@ -257,6 +262,8 @@ pub(super) async fn get_pipes_by_connector_and_metric(
     let access = authorize(&ctx, PIPES_READ).await?;
     let ik = ctx.instance_keys();
     let dict = ctx.state.pipes(ik.as_deref(), true).await?;
+    let conn = ctx.state.get_api_connector(ik.as_deref())?;
+    let access = access.for_instance(&ctx.state, &conn.connector_keys());
     let visible = |locations: &indexmap::IndexMap<Option<String>, Arc<PipeHandle>>| {
         locations.values().any(|h| access.can_see_pipe(&h.pipe))
     };
@@ -266,7 +273,6 @@ pub(super) async fn get_pipes_by_connector_and_metric(
     let Some(locations) = metrics.get(&mk).filter(|l| visible(l)) else {
         return Err(ApiError::new(404, format!("Metric '{mk}' not found.")));
     };
-    let conn = ctx.state.get_api_connector(ik.as_deref())?;
     let seen: Vec<_> = locations
         .iter()
         .filter(|(_, h)| access.can_see_pipe(&h.pipe))
@@ -278,6 +284,8 @@ pub(super) async fn get_pipe_by_keys(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> Api
     let access = authorize_metadata(&ctx, &ck, &mk, &lk).await?;
     let ik = ctx.instance_keys();
     let dict = ctx.state.pipes(ik.as_deref(), true).await?;
+    let conn = ctx.state.get_api_connector(ik.as_deref())?;
+    let access = access.for_instance(&ctx.state, &conn.connector_keys());
     let visible = |locations: &indexmap::IndexMap<Option<String>, Arc<PipeHandle>>| {
         locations.values().any(|h| access.can_see_pipe(&h.pipe))
     };
@@ -297,7 +305,6 @@ pub(super) async fn get_pipe_by_keys(ctx: Ctx, Path((ck, mk, lk)): Keys3) -> Api
             ),
         ));
     };
-    let conn = ctx.state.get_api_connector(ik.as_deref())?;
     let attrs = pipe_attributes(&conn, &h.pipe).await?;
     Ok(ok_json(&from_core(&Value::Map(attrs))))
 }

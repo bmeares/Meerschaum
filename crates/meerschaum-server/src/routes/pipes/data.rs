@@ -48,6 +48,7 @@ async fn visible_registration(
         .registered_pipe(&conn, &pipe, ik.as_deref())
         .await?;
     check_pipe_visibility(
+        &ctx.state,
         access,
         &conn,
         registered.as_ref().map_or(&pipe, |h| &h.pipe),

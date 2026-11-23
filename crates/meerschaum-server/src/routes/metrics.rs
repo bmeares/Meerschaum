@@ -107,13 +107,14 @@ async fn read(ctx: Ctx) -> ApiResult {
     // This is a fresh registry read, rather than an access cache shared only by one worker.
     let registry = ctx.state.pipes(instance.as_deref(), true).await?;
     let index = access::index_from_dict(&conn.connector_keys(), &registry, conn.as_ref());
-    let hidden = index.hidden_targets(&caller);
+    let pipe_access = caller.for_instance(&ctx.state, &index.instance_keys);
+    let hidden = index.hidden_targets_for(&pipe_access);
     let mut visible_refs = Vec::new();
     let mut visible_pipelines = Vec::new();
     for (connector, metrics) in registry.iter() {
         for (metric, locations) in metrics {
             for (location, handle) in locations {
-                if !caller.can_see(handle.pipe.parameters())
+                if !pipe_access.can_see(handle.pipe.parameters())
                     || !guard::may_use_connector(&ctx.state, &caller, connector)
                 {
                     continue;
@@ -123,7 +124,7 @@ async fn read(ctx: Ctx) -> ApiResult {
                         visible_pipelines.push(name.clone());
                     }
                 } else if meerschaum_connector::sync_status::is_recorded(&handle.pipe) {
-                    if !caller.can_see_pipe(&handle.pipe)
+                    if !pipe_access.can_see_pipe(&handle.pipe)
                         || guard::check_pipe_target(conn.as_ref(), &handle.pipe, &hidden).is_err()
                     {
                         continue;
@@ -150,7 +151,7 @@ async fn read(ctx: Ctx) -> ApiResult {
                 .unwrap_or_default(),
             _ => meerschaum_core::Map::new(),
         };
-        if caller.can_see(&parameters)
+        if pipe_access.can_see(&parameters)
             && let Some(name) = &entry.location_key
         {
             visible_pipelines.push(name.clone());
@@ -215,6 +216,7 @@ async fn record(ctx: Ctx, body: Body) -> ApiResult {
     let current = meerschaum_connector::sync_metrics::registrations(conn.as_ref())
         .await
         .map_err(|_| ApiError::new(503, "Cannot read Pipe registrations."))?;
+    let pipe_access = caller.for_instance(&ctx.state, &conn.connector_keys());
     for metric in &mut batch.metrics {
         let pipe = Pipe::builder(&metric.connector_keys, &metric.metric_key)
             .location(metric.location_key.as_deref())
@@ -235,10 +237,10 @@ async fn record(ctx: Ctx, body: Body) -> ApiResult {
         let Some(registered) = registered else {
             return Err(ApiError::new(404, "Pipe was not found."));
         };
-        if !caller.can_see(registered.pipe.parameters()) {
+        if !pipe_access.can_see(registered.pipe.parameters()) {
             return Err(ApiError::new(404, "Pipe was not found."));
         }
-        if !caller.can_edit(registered.pipe.parameters()) {
+        if !pipe_access.can_edit(registered.pipe.parameters()) {
             return Err(access::not_editable(&pipe));
         }
         let key = meerschaum_connector::sync_metrics::pipe_key(

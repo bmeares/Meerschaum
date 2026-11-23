@@ -10,8 +10,8 @@
 //!   (`meerschaum_connector::locks`); `-y`, `--force` and `--allow-protected` never bypass them.
 //!
 //! The model is open by default: a pipe without an `access` key belongs to the team Everyone,
-//! which every user is a member of, and anyone who can see a pipe may change it within their
-//! permissions. On an instance where nobody sets `access` or `locks`, everything behaves as before.
+//! whose members include the teams named in the instance connector's reservation. Anyone who can
+//! see a pipe may change it within their permissions unless its edit mode or locks restrict them.
 //!
 //! # Permissions and roles
 //!

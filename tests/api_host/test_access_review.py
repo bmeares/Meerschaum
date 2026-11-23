@@ -20,11 +20,11 @@ with mock.patch.object(access, 'pipeline_registry', return_value=[]):
     definitions = access.visible_pipelines('sql:apihosttest', viewer=viewer,
         definitions={'private-pipeline': {'targets': []}})
 print('JSON:' + json.dumps({
-    'read': access.can_see_pipe(viewer, Unreadable()),
-    'write': access.can_edit_pipe(viewer, Unreadable()),
-    'manage': access.can_manage_access(viewer, Unreadable()),
-    'missing': access.can_edit_pipe(viewer, None),
-    'legacy': access.can_see_pipe(viewer, {}),
+    'read': access.can_see_pipe(viewer, Unreadable(), instance='sql:apihosttest'),
+    'write': access.can_edit_pipe(viewer, Unreadable(), instance='sql:apihosttest'),
+    'manage': access.can_manage_access(viewer, Unreadable(), instance='sql:apihosttest'),
+    'missing': access.can_edit_pipe(viewer, None, instance='sql:apihosttest'),
+    'legacy': access.can_see_pipe(viewer, {}, instance='sql:apihosttest'),
     'pipelines': definitions,
     'explicit_empty': access.user_rights(None, {'scopes': []})['explicit'],
 }))
@@ -162,9 +162,9 @@ manager = access.make_viewer('manager', teams={'Everyone': 'manager'})
 member = access.make_viewer('member')
 private = {'access': {'owner': 'owner', 'visibility': 'private'}}
 print('JSON:' + json.dumps({
-    'manager': [access.can_see_pipe(manager, private), access.can_manage_access(manager, private),
+    'manager': [access.can_see_pipe(manager, private, instance='sql:apihosttest'), access.can_manage_access(manager, private, instance='sql:apihosttest'),
                 access.can_see_email(manager, 'another-user', [])],
-    'member': [access.can_see_pipe(member, private), access.can_manage_access(member, private),
+    'member': [access.can_see_pipe(member, private, instance='sql:apihosttest'), access.can_manage_access(member, private, instance='sql:apihosttest'),
                access.can_see_email(member, 'another-user', [])],
 }))
 '''))

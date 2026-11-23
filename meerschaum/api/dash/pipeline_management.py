@@ -126,10 +126,10 @@ def pipeline_rights(viewer, name, registry):
         return {key: True for key in rights}
     try:
         parameters = access.pipeline_registry_parameters(name, registry)
-        if parameters and not access.can_see_pipe(viewer, parameters):
+        if parameters and not access.can_see_pipe(viewer, parameters, instance=registry):
             return rights
         members_ok = access.may_sync_pipeline(viewer, name, registry)[0] if parameters else True
-        editable = access.can_edit_pipe(viewer, parameters or {}, 'pipes:write')
+        editable = access.can_edit_pipe(viewer, parameters or {}, 'pipes:write', instance=registry)
     except Exception:
         return rights
     rights.update({
@@ -141,7 +141,7 @@ def pipeline_rights(viewer, name, registry):
         'rename': editable,
         'clear': members_ok and viewer.can('pipes:delete'),
         'drop': members_ok and viewer.can('pipes:drop'),
-        'delete': access.can_edit_pipe(viewer, parameters or {}, 'pipes:delete'),
+        'delete': access.can_edit_pipe(viewer, parameters or {}, 'pipes:delete', instance=registry),
     })
     return rights
 
