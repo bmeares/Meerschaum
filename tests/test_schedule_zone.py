@@ -20,6 +20,22 @@ import pytest
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+@pytest.mark.parametrize('clause', ['', ' tz Etc/UTC jitter 0'])
+def test_quarterly_cron_fires_on_the_first_matching_date(clause):
+    from datetime import datetime
+    from meerschaum.utils.schedule import parse_schedule
+
+    trigger = parse_schedule(
+        '0 3 1 1,4,7,10 *' + clause,
+        datetime.fromisoformat('2026-11-24T17:09:07+00:00'),
+    )
+    january = datetime.fromisoformat('2027-01-01T03:00:00+00:00')
+    april = datetime.fromisoformat('2027-04-01T03:00:00+00:00')
+    assert trigger.next() == january
+    assert trigger.next() == april
+    assert trigger.next_after(january) == april
+
+
 def _show_schedules(schedule: str, tz: str, tmp_path, count: int = 2, nopretty: bool = True):
     root = tmp_path / 'root'
     plugins = tmp_path / 'plugins'

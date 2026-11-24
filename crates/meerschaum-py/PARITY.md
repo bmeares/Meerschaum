@@ -1812,6 +1812,17 @@ databases); the rows below are the deliberate differences and the gaps the compa
 | 51-SEC-005 | A job inherits the launching process's `MRSM_CONFIG` / `MRSM_PATCH` (a Compose project's `config:` block) in its environment, and a `systemd` unit writes them as `Environment=MRSM_CONFIG=...` (`jobs/systemd.py`) | The text goes to an owner-only file in the job's directory (`jobs/<name>/.mrsm_config.json` / `.mrsm_patch.json`, or next to the unit in `systemd/services/<name>/`) and the job gets `MRSM_CONFIG_FILE` / `MRSM_PATCH_FILE`; its `MRSM__COMPOSE_CONFIG` loses the `config:` block. Written at each launch / unit write, removed with the job; a user's own `_FILE` is passed on, another job's file is copied | Credentials out of `/proc/<pid>/environ` and unit files (owner decision, 5.1). `config_files` unit tests, `supervise.rs::a_job_reads_its_configuration_from_a_file_in_its_directory`, `systemd_executor.rs::a_unit_names_its_configuration_in_files` (the v4 reference unit is compared with the file's contents put back) |
 | 51-SEC-006 | Every child process inherits the whole environment (`subprocess` with `os.environ`): editors, SQL clients, pip / uv, probes, ... get `MRSM_CONFIG`, `MRSM_PATCH` and every `MRSM_<TYPE>_<LABEL>` | Incidental children that are not Meerschaum (editors, SQL clients, installers, `cargo`, `systemctl`, `ps`, probes, `clear`) start without `MRSM_CONFIG`, `MRSM_PATCH`, their `_FILE` forms and the connector variables (an `MRSM_<TYPE>_<LABEL>` holding a URI or JSON object; `meerschaum_core::child_env`, Python `meerschaum.config.environment.get_child_env`). Commands the user asks for (`sh`, `os`, `!command`, the unknown-word fallthrough, a job's command), Meerschaum's own children and the stack's `docker compose` keep them, as in v4 | Credentials stay with Meerschaum (owner decision, 5.1). `child_env` unit tests, `crates/meerschaum-cli/tests/shell_cli_suite/child_env.rs`, `tests/test_config_secrets.py::test_processes_that_are_not_meerschaum_inherit_no_secret` |
 
+## 5.1.5 five-field cron dates
+
+The 4.1.4 scheduler advanced past a rejected date at the original wall-clock time.
+From November 24 at 17:09 UTC, `0 3 1 1,4,7,10 *` consequently skipped January 1
+at 03:00 and returned April 1. The approved 5.1.5 correction begins each new date
+at midnight for plain and zoned five-field expressions. Named frequencies such as
+`mon` keep their starting clock. The schedule fixture retains v4's original fires
+and records `calendar_fires` where a v4 enumeration from midnight includes an earlier
+eligible fire. The Rust corpus checks those sequences and restart times. The SDK
+regression exercises the quarterly expression with and without a zone.
+
 ## 5.1: schedule starting times with a zone abbreviation
 
 | ID | v4 behavior | v5 behavior | Reason and coverage |

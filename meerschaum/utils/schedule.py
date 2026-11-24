@@ -198,7 +198,9 @@ class _CronTrigger:
         year: str = '*',
         second: str = '0',
         microsecond: int = 0,
+        five_field: bool = False,
     ):
+        self._five_field = five_field
         self.start_time = start_time
         self.timezone = start_time.tzinfo
         self._minutes = _expand_cron_field(str(minute), 0, 59)
@@ -257,10 +259,13 @@ class _CronTrigger:
                 self._last_fire_time = candidate
                 return candidate
             if not self._date_matches(candidate):
+                clock = candidate.timetz()
+                if self._five_field:
+                    clock = clock.replace(hour=0, minute=0)
                 candidate = datetime.fromtimestamp(
                     datetime.combine(
                         candidate.date() + timedelta(days=1),
-                        candidate.timetz(),
+                        clock,
                     ).timestamp(),
                     self.timezone,
                 )
@@ -517,7 +522,7 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
                 trigger = _CronTrigger(
                     starting_ts,
                     minute=cron_parts[0], hour=cron_parts[1], day=cron_parts[2],
-                    month=cron_parts[3], day_of_week=cron_parts[4],
+                    month=cron_parts[3], day_of_week=cron_parts[4], five_field=True,
                 )
         triggers.append(trigger)
 

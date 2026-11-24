@@ -44,6 +44,23 @@ fn fires(schedule: &str, now: &str, n: usize) -> Vec<String> {
 }
 
 #[test]
+fn a_crontab_search_starts_at_midnight_after_a_rejected_date() {
+    for clause in ["", " tz Etc/UTC jitter 0", " tz utc", " jitter 0"] {
+        let schedule = format!("0 3 1 1,4,7,10 *{clause}");
+        let (mut trigger, _) = parse(&schedule, "2026-11-24T17:09:07Z", "UTC");
+        let january = at("2027-01-01T03:00:00Z");
+        let april = at("2027-04-01T03:00:00Z");
+        assert_eq!(trigger.next(), Some(january), "{schedule}");
+        assert_eq!(trigger.next(), Some(april), "{schedule}");
+        assert_eq!(
+            trigger.next_after(at("2026-12-31T23:59:59Z")),
+            Some(january)
+        );
+        assert_eq!(trigger.next_after(january), Some(april));
+    }
+}
+
+#[test]
 fn tz_local_is_the_host_zone() {
     let s = "daily starting 2027-03-12 21:00 tz local";
     let now = "2027-03-12T12:00:00Z";
