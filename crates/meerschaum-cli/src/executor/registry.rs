@@ -80,10 +80,7 @@ impl Registry {
     fn lock(&self) -> Result<std::fs::File, String> {
         create_private_dir(&self.root)
             .map_err(|_| "Could not create executor identity storage.")?;
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(self.root.join("lock"))
+        let file = meerschaum_core::file_lock::open(self.root.join("lock"))
             .map_err(|_| "Could not open the executor identity lock.")?;
         fs4::FileExt::lock(&file).map_err(|_| "Could not lock executor identity storage.")?;
         Ok(file)
@@ -289,6 +286,33 @@ impl Registry {
 mod tests {
     use super::*;
     use meerschaum_core::{Map, Value};
+
+    #[test]
+    fn registry_lock_excludes_a_second_holder_without_changing_the_file() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = Registry::new(root.path());
+        create_private_dir(&registry.root).unwrap();
+        let path = registry.root.join("lock");
+        std::fs::write(&path, b"existing lock file").unwrap();
+        let permissions = std::fs::metadata(&path).unwrap().permissions();
+
+        let first = registry.lock().unwrap();
+        let second = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        assert!(matches!(
+            fs4::FileExt::try_lock(&second),
+            Err(fs4::TryLockError::WouldBlock)
+        ));
+        drop(first);
+        fs4::FileExt::try_lock(&second).unwrap();
+        drop(second);
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"existing lock file");
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions(), permissions);
+    }
 
     #[test]
     fn missing_private_registry_never_regenerates_an_initialized_deployment() {

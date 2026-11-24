@@ -14,10 +14,7 @@ pub async fn lock(directory: PathBuf, identity: uuid::Uuid) -> Result<std::fs::F
     tokio::task::spawn_blocking(move || {
         meerschaum_core::team_scope::create_private_dir(&directory).map_err(|_| StorageError)?;
         let stripe = u16::from_be_bytes([identity.as_bytes()[0], identity.as_bytes()[1]]) % 1024;
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(directory.join(format!("{stripe:04x}.lock")))
+        let file = meerschaum_core::file_lock::open(directory.join(format!("{stripe:04x}.lock")))
             .map_err(|_| StorageError)?;
         let until = Instant::now() + Duration::from_secs(5);
         loop {

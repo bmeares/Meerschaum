@@ -41,6 +41,7 @@ pub mod connect;
 pub mod debug;
 pub mod dtypes;
 pub mod execution;
+pub mod file_lock;
 pub mod holder;
 pub mod job_access;
 pub mod pipe;

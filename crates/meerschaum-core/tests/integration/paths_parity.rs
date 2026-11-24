@@ -8,6 +8,34 @@ use meerschaum_core::Value;
 use meerschaum_core::config::paths::{Paths, posix};
 
 #[test]
+fn plugin_directory_lists_follow_platform_rules() {
+    let root = tempfile::tempdir().unwrap();
+    let dirs = |value: &str, windows: bool| {
+        let env = |name: &str| match name {
+            "MRSM_ROOT_DIR" => Some(root.path().to_string_lossy().to_string()),
+            "MRSM_PLUGINS_DIR" => Some(value.to_string()),
+            _ => None,
+        };
+        Paths::from_env(&env, root.path(), windows, None).map(|paths| paths.plugins_dirs)
+    };
+    let cases: Vec<(String, String, Vec<String>)> =
+        serde_json::from_str(include_str!("plugin_directory_lists.json")).unwrap();
+    for (platform, value, mut expected) in cases {
+        let windows = platform == "windows";
+        expected.retain(|path| !path.is_empty());
+        if expected.is_empty() {
+            assert!(dirs(&value, windows).is_err());
+        } else {
+            let json = serde_json::to_string(&expected).unwrap();
+            assert_eq!(
+                dirs(&value, windows).unwrap(),
+                dirs(&json, windows).unwrap()
+            );
+        }
+    }
+}
+
+#[test]
 fn paths_match_python() {
     let fixture = common::load_fixture("paths.json");
     for (case, data) in fixture.as_map().unwrap() {

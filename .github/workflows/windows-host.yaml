@@ -1,0 +1,35 @@
+# Run the release wheel checks before merging changes to Windows plugin and host startup.
+name: Windows plugin host
+'on':
+  pull_request:
+    paths:
+      - '.github/workflows/windows-host.yaml'
+      - '.github/workflows/wheel-platform.yaml'
+      - 'meerschaum/worker/**'
+      - 'meerschaum/api/host/**'
+      - 'meerschaum/config/_paths.py'
+      - 'meerschaum/utils/misc.py'
+      - 'crates/meerschaum-core/src/config/paths.rs'
+      - 'crates/meerschaum-core/src/file_lock.rs'
+      - 'crates/meerschaum-cli/src/executor/registry.rs'
+      - 'crates/meerschaum-cli/src/server/mod.rs'
+      - 'crates/meerschaum-server/src/executor/storage.rs'
+      - 'crates/meerschaum-worker/src/**'
+      - 'crates/meerschaum-server/src/host/**'
+      - 'scripts/ci/smoke_windows_host.py'
+      - 'tests/test_windows_worker_pipe.py'
+      - 'tests/api_host/test_windows_parent_pipe.py'
+permissions:
+  contents: read
+concurrency:
+  group: windows-host-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  installed-wheel:
+    uses: ./.github/workflows/wheel-platform.yaml
+    with:
+      os: windows-latest
+      target: x86_64-pc-windows-msvc
+      manylinux: 'off'
+      smoke-os: windows-latest
+      artifact: windows-pr-wheel

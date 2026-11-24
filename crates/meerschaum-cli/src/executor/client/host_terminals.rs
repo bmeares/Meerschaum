@@ -47,10 +47,7 @@ impl Catalog {
     ) -> Result<T, TerminalStorageError> {
         use std::io::Read;
         create_private_dir(&self.0).map_err(|_| "Could not prepare host terminal storage.")?;
-        let lock = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(self.0.join("lock"))
+        let lock = meerschaum_core::file_lock::open(self.0.join("lock"))
             .map_err(|_| "Could not open the host terminal catalog lock.")?;
         fs4::FileExt::try_lock(&lock).map_err(|error| match error {
             fs4::TryLockError::WouldBlock => TerminalStorageError::Busy,
@@ -982,7 +979,7 @@ mod tests {
         let path = runtime.catalog.0.join("catalog.json");
         let before = std::fs::read(&path).unwrap();
         let lock = std::fs::OpenOptions::new()
-            .append(true)
+            .write(true)
             .open(runtime.catalog.0.join("lock"))
             .unwrap();
         fs4::FileExt::lock(&lock).unwrap();

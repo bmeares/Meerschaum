@@ -499,11 +499,7 @@ impl InstallLock {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if let Ok(file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-        {
+        if let Ok(file) = meerschaum_core::file_lock::open(&path) {
             // Never hold the in-process table while waiting on another process.
             drop(held);
             let _ = fs4::FileExt::lock(&file);
@@ -954,11 +950,7 @@ pub fn record_request(venv_root: &Path, install_name: &str, requester: &str) -> 
         return false;
     }
     let path = venv_root.join(REQUESTS_FILE_NAME);
-    let lock_file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(venv_root.join(".mrsm_requests.lock"))
-        .ok();
+    let lock_file = meerschaum_core::file_lock::open(venv_root.join(".mrsm_requests.lock")).ok();
     if let Some(file) = &lock_file {
         let _ = fs4::FileExt::lock(file);
     }

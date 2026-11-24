@@ -1,0 +1,12 @@
+[
+  ["windows", "D:\\shared", ["D:\\shared"]],
+  ["windows", "D:\\first:c:/second", ["D:\\first", "c:/second"]],
+  ["windows", "C:/first;D:\\second", ["C:/first", "D:\\second"]],
+  ["windows", "C:\\first;C:\\second", ["C:\\first", "C:\\second"]],
+  ["windows", "\\\\?\\c:\\first:D:\\", ["\\\\?\\c:\\first", "D:\\"]],
+  ["windows", "d:/first:\\\\server\\share;relative", ["d:/first", "\\\\server\\share", "relative"]],
+  ["windows", "first::second", ["first", "", "second"]],
+  ["windows", ";;", ["", "", ""]],
+  ["unix", "first;part:/second", ["first;part", "/second"]],
+  ["unix", ":/first::relative:", ["", "/first", "", "relative", ""]]
+]

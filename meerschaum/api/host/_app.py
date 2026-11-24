@@ -251,6 +251,25 @@ class ProxyTokenMiddleware:
 PARENT_GONE_GRACE_SECONDS: float = 10.0
 
 
+def _read_parent_pipe(fd: int) -> bytes:
+    """Wait for bytes or closure on the parent pipe while the host imports native modules."""
+    if sys.platform != 'win32':
+        return os.read(fd, 4096)
+    import _winapi
+    import msvcrt
+    import time
+
+    # A blocking CRT read holds stdin's descriptor lock while a native module may need it
+    # during initialization. Only read from the Windows handle when the parent supplied data.
+    handle = msvcrt.get_osfhandle(fd)
+    while True:
+        available, _ = _winapi.PeekNamedPipe(handle)
+        if available:
+            data, _ = _winapi.ReadFile(handle, min(available, 4096))
+            return data
+        time.sleep(0.25)
+
+
 def exit_with_parent() -> Optional[threading.Thread]:
     """
     When the Rust server started this host (`MRSM_API_HOST_PARENT_PIPE=1`), watch stdin, whose
@@ -271,7 +290,7 @@ def exit_with_parent() -> Optional[threading.Thread]:
             fd = 0
         while True:
             try:
-                chunk = os.read(fd, 4096)
+                chunk = _read_parent_pipe(fd)
             except InterruptedError:
                 continue
             except OSError:

@@ -222,10 +222,7 @@ impl Catalog {
         next: Uuid,
         operation: Option<meerschaum_server::executor::pipe_operation::GraphOperation>,
     ) -> Result<u64, String> {
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(self.directory.join("catalog.lock"))
+        let file = meerschaum_core::file_lock::open(self.directory.join("catalog.lock"))
             .map_err(|_| "Could not open the canonical callback lock.")?;
         Self::lock_with_deadline(&file, false)?;
         let mut records = self.read()?;
