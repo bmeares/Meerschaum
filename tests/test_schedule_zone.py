@@ -36,6 +36,32 @@ def test_quarterly_cron_fires_on_the_first_matching_date(clause):
     assert trigger.next_after(january) == april
 
 
+def test_cron_started_between_repeated_wall_minutes():
+    from datetime import datetime, timedelta
+    from meerschaum.utils.schedule import parse_schedule
+
+    start = datetime.fromisoformat('2027-11-07T05:50:01+00:00')
+    trigger = parse_schedule('15,45 * * * sun tz America/New_York', start)
+    first = datetime.fromisoformat('2027-11-07T06:15:00+00:00')
+    second = datetime.fromisoformat('2027-11-07T06:45:00+00:00')
+    assert trigger.next() == first
+    assert trigger.next() == second
+    assert trigger.next_after(start - timedelta(seconds=1)) == first
+    assert trigger.next_after(first) == second
+
+
+def test_cron_started_at_the_first_instant_after_a_gap():
+    from datetime import datetime
+    from meerschaum.utils.schedule import parse_schedule
+
+    transition = datetime.fromisoformat('2027-03-14T07:00:00+00:00')
+    trigger = parse_schedule('30 2 * * * tz America/New_York', transition)
+    next_day = datetime.fromisoformat('2027-03-15T06:30:00+00:00')
+    assert trigger.next() == transition
+    assert trigger.next() == next_day
+    assert trigger.next_after(transition) == next_day
+
+
 def _show_schedules(schedule: str, tz: str, tmp_path, count: int = 2, nopretty: bool = True):
     root = tmp_path / 'root'
     plugins = tmp_path / 'plugins'

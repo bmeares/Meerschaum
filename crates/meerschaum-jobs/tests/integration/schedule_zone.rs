@@ -522,6 +522,82 @@ fn cron_with_a_specific_or_a_wildcard_hour() {
 }
 
 #[test]
+fn cron_started_inside_a_fold_includes_future_occurrences_of_earlier_wall_minutes() {
+    for (expr, now, first, second) in [
+        (
+            "15,45 * * * sun tz America/New_York",
+            "2027-11-07T05:50:01Z",
+            "2027-11-07T06:15:00Z",
+            "2027-11-07T06:45:00Z",
+        ),
+        (
+            "15,45 */1 * * sun tz America/New_York",
+            "2027-11-07T05:21:00Z",
+            "2027-11-07T05:45:00Z",
+            "2027-11-07T06:15:00Z",
+        ),
+        (
+            "35 * * * sun tz Australia/Lord_Howe",
+            "2027-04-03T14:50:00Z",
+            "2027-04-03T15:05:00Z",
+            "2027-04-03T16:05:00Z",
+        ),
+        (
+            "15,45 1 * * sun tz America/New_York",
+            "2027-11-07T05:50:01Z",
+            "2027-11-14T06:15:00Z",
+            "2027-11-14T06:45:00Z",
+        ),
+    ] {
+        let (mut trigger, _) = parse(expr, now, "UTC");
+        assert_eq!(trigger.next(), Some(at(first)), "{expr}");
+        assert_eq!(trigger.next(), Some(at(second)), "{expr}");
+        assert_eq!(
+            trigger.next_after(at(now) - Duration::seconds(1)),
+            Some(at(first)),
+            "{expr}"
+        );
+        assert_eq!(trigger.next_after(at(now)), Some(at(first)), "{expr}");
+        assert_eq!(trigger.next_after(at(first)), Some(at(second)), "{expr}");
+    }
+}
+
+#[test]
+fn cron_started_at_a_forward_transition_includes_shifted_fires_once() {
+    for (expr, transition, first, second) in [
+        (
+            "30 2 * * * tz America/New_York",
+            "2027-03-14T07:00:00Z",
+            "2027-03-14T07:00:00Z",
+            "2027-03-15T06:30:00Z",
+        ),
+        (
+            "15 2 * * * tz Australia/Lord_Howe",
+            "2027-10-02T15:30:00Z",
+            "2027-10-02T15:30:00Z",
+            "2027-10-03T15:15:00Z",
+        ),
+        (
+            "30 * * * * tz America/New_York",
+            "2027-03-14T07:00:00Z",
+            "2027-03-14T07:30:00Z",
+            "2027-03-14T08:30:00Z",
+        ),
+    ] {
+        let (mut trigger, _) = parse(expr, transition, "UTC");
+        assert_eq!(trigger.next(), Some(at(first)), "{expr}");
+        assert_eq!(trigger.next(), Some(at(second)), "{expr}");
+        let (mut earlier, _) = parse(expr, "2027-01-01T00:00:00Z", "UTC");
+        assert_eq!(
+            earlier.next_after(at(transition) - Duration::nanoseconds(1)),
+            Some(at(first)),
+            "{expr}"
+        );
+        assert_eq!(earlier.next_after(at(first)), Some(at(second)), "{expr}");
+    }
+}
+
+#[test]
 fn cron_next_after_inside_a_repeated_hour() {
     // `after` in the first 01:xx: the next fires are the rest of the first occurrence, then the
     // second occurrence from 01:00 (which a walk from `after` alone would miss).

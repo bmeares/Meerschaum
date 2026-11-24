@@ -1823,6 +1823,13 @@ and records `calendar_fires` where a v4 enumeration from midnight includes an ea
 eligible fire. The Rust corpus checks those sequences and restart times. The SDK
 regression exercises the quarterly expression with and without a zone.
 
+For a zoned cron expression with a wildcard hour, the repeated-hour rule applies
+even when the first search begins partway through the fold. A Sunday schedule at
+minutes 15 and 45 started at 01:50 EDT fires at 01:15 EST after the clock turns
+back. At the instant a spring gap ends, a specific-hour cron can fire its shifted
+time. Resuming strictly after that instant advances to the following fire. These
+cases follow the documented v5 [clock-change policy](../../docs/zensical/reference/background-jobs/schedules.md#clock-changes).
+
 ## 5.1: schedule starting times with a zone abbreviation
 
 | ID | v4 behavior | v5 behavior | Reason and coverage |

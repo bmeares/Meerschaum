@@ -81,6 +81,9 @@ As in 4.x, a zone abbreviation after the starting time is accepted:
 
 Abbreviations are matched in capitals only (`edt` is an error), and never on Windows, where 4.x does not match them either.
 
+The bundled time zone tables have a finite range. For example, `America/New_York` has
+daylight saving transitions through 2099. Later dates use the last recorded offset.
+
 ### Clock changes
 
 A zoned schedule steps on the wall clock, so `every 12 hours starting 09:00 tz local` runs at 09:00 and 21:00 all year. When the clock changes:
