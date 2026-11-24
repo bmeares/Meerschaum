@@ -2,34 +2,20 @@
 #[allow(unused_imports)]
 use crate::compile_single_file;
 use std::{
-    process::{Command, Output, Stdio},
-    time::{Duration, Instant},
+    process::{Command, Output},
+    time::Duration,
 };
 fn run(root: &std::path::Path, plugins: &std::path::Path, args: &[&str]) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_mrsm-cli"));
+    command
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("HOME", root)
         .env("MRSM_ROOT_DIR", root)
         .env("MRSM_PLUGINS_DIR", plugins)
         .env("MRSM_NO_UPDATE_CHECK", "1")
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let start = Instant::now();
-    loop {
-        if child.try_wait().unwrap().is_some() {
-            return child.wait_with_output().unwrap();
-        }
-        if start.elapsed() > Duration::from_secs(60) {
-            child.kill().unwrap();
-            let output = child.wait_with_output().unwrap();
-            panic!("native plugin call timed out: {}", text(&output));
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
+        .args(args);
+    crate::process::output_with_timeout(&mut command, Duration::from_secs(60))
 }
 fn text(output: &Output) -> String {
     format!(
@@ -168,6 +154,13 @@ fn single_file_actions_run_and_appear_in_help_without_rebuilding() {
         fn count_words(action: Vec<String>) -> (bool, String) {
             (true, format!("{} words", action.len()))
         }
+        #[make_action]
+        fn verbose() -> (bool, &'static str) {
+            use std::io::Write;
+            std::io::stdout().write_all(&vec![b'x'; 2 * 1024 * 1024]).unwrap();
+            std::io::stderr().write_all(&vec![b'y'; 2 * 1024 * 1024]).unwrap();
+            (true, "finished writing")
+        }
         #[make_action(name = "salute", daemon = false)]
         fn renamed() -> (bool, &'static str) { (true, "renamed action") }
     "#,
@@ -196,6 +189,12 @@ fn single_file_actions_run_and_appear_in_help_without_rebuilding() {
         assert!(text.contains(expected), "{text}");
         assert!(!text.contains("Building native plugin"), "{text}");
     }
+
+    // Exceed the pipe capacity on every platform, even when the help text fits in it.
+    let output = run(root.path(), plugins.path(), &["verbose", "--nopretty"]);
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains(&"x".repeat(2 * 1024 * 1024)));
+    assert!(String::from_utf8_lossy(&output.stderr).contains(&"y".repeat(2 * 1024 * 1024)));
 }
 
 #[test]
