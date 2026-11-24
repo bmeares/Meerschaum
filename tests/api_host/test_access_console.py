@@ -259,6 +259,15 @@ out['access'] = mrsm.Pipe('ac:src', 'ac_dialogs', instance=conn).get_parameters(
 moved = callbacks.save_pipe_access(1, 'ac-member', 'ops', 'team', 'team', meta, SESSIONS['manager'])
 out['move_manager'] = str(moved[1])
 
+sign_in('__no_owner__')
+for label in ('__no_owner__', 'No owner'):
+    trigger('pipe-manage-access.n_clicks')
+    choices = callbacks.open_pipe_access(1, None, meta, SESSIONS['admin'])[1]
+    value = next(option['value'] for option in choices if option['label'] == label)
+    trigger('pipe-access-save.n_clicks')
+    assert callbacks.save_pipe_access(1, value, 'data', 'team', 'team', meta, SESSIONS['admin'])[0] is False
+    out[label] = access.read_pipe_parameters(pipe, refresh=True, require_registration=True)['access'].get('owner')
+
 ### Locks…: the owner locks it against syncs; another member of the team sees it but may not
 ### (the browser asks anyway); a viewer outside the team does not even see it.
 pipe = make('ac_lockable', {'team': 'data', 'owner': 'ac-member'})
@@ -289,6 +298,8 @@ out['sync_after'] = store is not callbacks.dash.no_update
 print('JSON:' + json.dumps(out, default=str))
 '''))
     assert out['open_member'] == 'prevented'
+    assert out['__no_owner__'] == '__no_owner__'
+    assert out['No owner'] is None
     assert out['open_manager'][0] is True and out['open_manager'][1] == 'data'
     assert out['open_manager'][2] == 'team' and 'data' in out['open_manager'][3]
     assert "Only the pipe's owner, its team's managers and administrators" in out['save_member']
@@ -399,7 +410,14 @@ def call(fn, *args):
 
 ### Teams: an administrator creates one; a manager may not; a manager fills their own team.
 trigger('teams-new-submit.n_clicks')
-out['create_admin'] = call(cu.submit_new_team, 1, 'ac-crew', 'instance', None, None, None, False, [], [], False, 0, SESSIONS['admin'])[0]
+instance_options, default_instance = cu.fill_new_team(True, SESSIONS['admin'])[2:4]
+assert next(o['label'] for o in instance_options if o['value'] == default_instance) == 'None'
+out['create_admin'] = call(cu.submit_new_team, 1, 'ac-crew', 'instance', None, None, default_instance, False, [], [], False, 0, SESSIONS['admin'])[0]
+out['created_settings'] = cu.team_setup.get_team_attributes('ac-crew')
+for instance in (str(conn), default_instance):
+    saved = cu.submit_team_settings(1, {'team': 'ac-crew'}, instance, False, [], [], False, 0, SESSIONS['admin'])
+    assert saved[0] is False
+    out[instance] = cu.team_setup.get_team_attributes('ac-crew').get('instance')
 out['create_manager'] = str(call(cu.submit_new_team, 1, 'ac-crew2', 'instance', None, None, None, False, [], [], False, 0, SESSIONS['manager'])[1])
 out['teams'] = team_records.team_names(conn)
 trigger('teams-new-submit.n_clicks')
@@ -432,6 +450,8 @@ print('JSON:' + json.dumps(out, default=str))
     assert member['email_column'] is False and member['emails'] == []
     assert out['other']['emails'] == [] and 'ac-member' not in out['other']['users']
     assert out['create_admin'] is False and 'ac-crew' in out['teams']
+    assert 'instance' not in out['created_settings']
+    assert out['sql:apihosttest'] == 'sql:apihosttest' and out['None'] is None
     assert 'Only administrators' in out['create_manager'] and 'ac-crew2' not in out['teams']
     assert 'built-in team' in out['create_everyone']
     assert out['add_by_manager'] is True and out['data_members'].get('ac-viewer') == 'member'

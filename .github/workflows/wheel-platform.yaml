@@ -165,6 +165,9 @@ jobs:
         path: smoke-src
         sparse-checkout: |-
           scripts/docker/smoke_facade.py
+          scripts/ci/smoke_windows_host.py
+          scripts/ci/upgrade_state.py
+          docs/zensical/changelog/v5.md
           scripts/ci/artifacts.py
           scripts/check_packaging.py
           Cargo.toml
@@ -196,11 +199,14 @@ jobs:
       working-directory: smoke-src
     - name: Install the wheel into a fresh venv
       run: |
-        ls -l dist
-        python -m venv "$RUNNER_TEMP/venv"
+        set -- dist/*.whl
+        [[ $# == 1 && -f "$1" ]] || { echo 'Expected exactly one candidate wheel in dist/.' >&2; exit 1; }
+        echo "CANDIDATE_WHEEL=$1" >> "$GITHUB_ENV"
+        python -m venv --clear "$RUNNER_TEMP/venv"
         if [ -d "$RUNNER_TEMP/venv/Scripts" ]; then bindir=Scripts; else bindir=bin; fi
         echo "VENV_BIN=$RUNNER_TEMP/venv/$bindir" >> "$GITHUB_ENV"
-        "$RUNNER_TEMP/venv/$bindir/python" -m pip install --no-index --find-links dist meerschaum
+        "$RUNNER_TEMP/venv/$bindir/python" -m pip install --no-index --no-deps "$1"
+        "$RUNNER_TEMP/venv/$bindir/python" -m pip check
         "$RUNNER_TEMP/venv/$bindir/python" -m pip list
     - name: Import the package and the extension
       run: |
@@ -298,6 +304,44 @@ jobs:
         # pip/setuptools/wheel (ensurepip) are not Meerschaum's; anything else is a leak.
         extra="$(grep -viE '^(pip|setuptools|wheel|meerschaum)$' "$RUNNER_TEMP/installed.txt" || true)"
         if [ -n "$extra" ]; then echo "unexpected dependencies: $extra" >&2; exit 1; fi
+    - name: Upgrade the previous installed wheel on persisted state
+      if: matrix.python == '3.11'
+      run: |
+        script="$GITHUB_WORKSPACE/smoke-src/scripts/ci/upgrade_state.py"
+        current=$("$VENV_BIN/python" -I -c 'import importlib.metadata as md; print(md.version("meerschaum"))')
+        previous=$(python "$script" previous --version "$current" --changelog smoke-src/docs/zensical/changelog/v5.md)
+        cd "$RUNNER_TEMP"
+        python -m venv --clear before
+        if [ -d before/Scripts ]; then oldbin=before/Scripts; else oldbin=before/bin; fi
+        "$oldbin/pip" install --only-binary=:all: "meerschaum==$previous"
+        export MRSM_ROOT_DIR="$RUNNER_TEMP/upgrade-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/upgrade-plugins"
+        export MRSM_SQL_UPGRADE="sqlite:///$MRSM_ROOT_DIR/state.db" MRSM_NO_AUTO_INSTALL=1
+        export MRSM_CONFIG='{"meerschaum":{"instance":"sql:upgrade","executor":"local"}}'
+        mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
+        "$oldbin/python" -I "$script" seed
+        "$VENV_BIN/python" -I "$script" verify
+        "$VENV_BIN/python" -I "$script" reopen
+    - name: Exercise the Windows loopback API host from the installed wheel
+      if: runner.os == 'Windows' && matrix.python == '3.14'
+      run: |
+        "$VENV_BIN/python" -m pip install "${CANDIDATE_WHEEL}[dash]"
+        cd "$RUNNER_TEMP"
+        "$VENV_BIN/python" -I "$GITHUB_WORKSPACE/smoke-src/scripts/ci/smoke_windows_host.py"
+    - name: Install CPython 3.15 for the Linux ABI3 smoke
+      if: inputs.target == 'x86_64-unknown-linux-gnu' && matrix.python == '3.14'
+      uses: actions/setup-python@v7
+      with: {python-version: '3.15'}
+    - name: Exercise the installed ABI3 wheel on CPython 3.15
+      if: inputs.target == 'x86_64-unknown-linux-gnu' && matrix.python == '3.14'
+      run: |
+        python -m venv --clear "$RUNNER_TEMP/py315"
+        "$RUNNER_TEMP/py315/bin/python" -m pip install --no-index --no-deps "$CANDIDATE_WHEEL"
+        "$RUNNER_TEMP/py315/bin/python" -m pip check
+        export MRSM_ROOT_DIR="$RUNNER_TEMP/root315" MRSM_PLUGINS_DIR="$RUNNER_TEMP/plugins315"
+        mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
+        cd "$RUNNER_TEMP"
+        export PATH="$RUNNER_TEMP/py315/bin:$PATH"
+        py315/bin/python -I "$GITHUB_WORKSPACE/smoke-src/scripts/docker/smoke_facade.py"
   smoke-musl:
     name: smoke (musllinux ${{ inputs.wheel-arch }}, Alpine)
     needs: build
@@ -311,6 +355,8 @@ jobs:
         sparse-checkout: |-
           scripts/docker/smoke_facade.py
           scripts/docker/smoke_wheel_alpine.sh
+          scripts/ci/upgrade_state.py
+          docs/zensical/changelog/v5.md
           scripts/ci/artifacts.py
           scripts/check_packaging.py
           Cargo.toml
@@ -345,6 +391,8 @@ jobs:
         ls -l dist
         docker run --rm \
           -v "$PWD/dist:/dist:ro" \
+          -v "$PWD/smoke-src/scripts/ci/upgrade_state.py:/upgrade_state.py:ro" \
+          -v "$PWD/smoke-src/docs/zensical/changelog/v5.md:/changelog.md:ro" \
           -v "$PWD/smoke-src/scripts/docker/smoke_wheel_alpine.sh:/smoke.sh:ro" \
           -v "$PWD/smoke-src/scripts/docker/smoke_facade.py:/smoke_facade.py:ro" \
           alpine:3.22 sh /smoke.sh
@@ -382,8 +430,11 @@ jobs:
       working-directory: smoke-src
     - name: Install the free-threaded wheel (cp314t)
       run: |
-        python -m venv "$RUNNER_TEMP/venv"
-        "$RUNNER_TEMP/venv/bin/python" -m pip install --no-index --find-links dist meerschaum
+        set -- dist/*.whl
+        [[ $# == 1 && -f "$1" ]] || { echo 'Expected exactly one candidate wheel in dist/.' >&2; exit 1; }
+        python -m venv --clear "$RUNNER_TEMP/venv"
+        "$RUNNER_TEMP/venv/bin/python" -m pip install --no-index --no-deps "$1"
+        "$RUNNER_TEMP/venv/bin/python" -m pip check
     - name: _core imports without re-enabling the GIL
       run: |
         export MRSM_ROOT_DIR="$RUNNER_TEMP/mrsm-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/mrsm-plugins"

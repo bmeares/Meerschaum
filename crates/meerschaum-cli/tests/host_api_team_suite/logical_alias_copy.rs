@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::process::{Command, Output, Stdio};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use axum::http::HeaderMap;
 use meerschaum_cli::executor::profiles::{Inputs, Prepared, prepare_with_runtime};
@@ -54,25 +54,11 @@ async fn command(prepared: &Prepared, arguments: &[&str], probe: bool) -> Output
             .env_remove("TMUX")
             .env_remove("TMUX_PANE")
             .args(arguments)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stdin(Stdio::null());
         if probe {
             command.env(meerschaum_cli::team::execution::PROBE_ENV, "1");
         }
-        let mut child = command.spawn().unwrap();
-        let deadline = Instant::now() + Duration::from_secs(20);
-        loop {
-            match child.try_wait().unwrap() {
-                Some(_) => return child.wait_with_output().unwrap(),
-                None if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
-                None => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    panic!("owned logical alias copy did not finish within 20 seconds");
-                }
-            }
-        }
+        crate::common::process::output_with_timeout(&mut command, Duration::from_secs(20))
     })
     .await
     .unwrap()

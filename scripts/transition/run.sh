@@ -26,9 +26,12 @@ SCRATCH="${MRSM_TRANSITION_DIR:-$HOME/.cache/mrsm-transition}"
 export MRSM_TRANSITION_DIR="$SCRATCH"
 flavors="sqlite"
 wheel=""
+report_args=()
+report_names=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --flavors) flavors="$2"; shift ;;
+    --strict) report_args+=(--strict) ;;
     --wheel) wheel="$2"; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -47,15 +50,17 @@ PY="${PYTHON:-python3}"
 failed=0
 first=1
 for f in ${flavors//,/ }; do
+  report_names+=("run-$f")
   extra=""
   [ $first -eq 1 ] && extra="--extras"
   first=0
   "$PY" "$HERE/run_all.py" "run-$f" "$f" $extra || failed=1
 done
 if [ -n "$wheel" ]; then
+  report_names+=(run-pip run-wheel)
   "$PY" "$HERE/run_pip.py" "$wheel" || failed=1
   MRSM_TRANSITION_V5_PY="$SCRATCH/venv-up/bin/python" MRSM_TRANSITION_V5_WHEEL=1 \
     "$PY" "$HERE/run_all.py" run-wheel sqlite --extras || failed=1
 fi
-"$PY" "$HERE/report.py" || failed=1
+"$PY" "$HERE/report.py" "${report_args[@]}" "${report_names[@]}" || failed=1
 exit $failed

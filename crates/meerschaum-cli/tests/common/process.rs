@@ -2,7 +2,47 @@
 #![allow(dead_code)]
 
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Output};
+use std::time::{Duration, Instant};
+
+/// Capture both streams while enforcing the child process deadline.
+/// File-backed output lets verbose commands finish even on hosts with small pipe buffers.
+pub fn output_with_timeout(command: &mut Command, timeout: Duration) -> Output {
+    let stdout = tempfile::NamedTempFile::new().unwrap();
+    let stderr = tempfile::NamedTempFile::new().unwrap();
+    let mut child = command
+        .stdout(stdout.reopen().unwrap())
+        .stderr(stderr.reopen().unwrap())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break Some(status);
+        }
+        if Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let stdout = std::fs::read(stdout.path()).unwrap();
+    let stderr = std::fs::read(stderr.path()).unwrap();
+    let status = status.unwrap_or_else(|| {
+        panic!(
+            "{:?} timed out after {timeout:?}:\n{}{}",
+            command.get_program(),
+            String::from_utf8_lossy(&stdout),
+            String::from_utf8_lossy(&stderr),
+        )
+    });
+    Output {
+        status,
+        stdout,
+        stderr,
+    }
+}
 
 /// Abort a spawned Tokio task automatically on drop.
 pub struct AbortOnDrop<T = ()>(pub tokio::task::JoinHandle<T>);

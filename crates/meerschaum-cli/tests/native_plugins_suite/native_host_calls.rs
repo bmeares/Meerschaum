@@ -346,24 +346,7 @@ impl Home {
     }
 
     fn run(&self, args: &[&str]) -> Output {
-        let mut child = self
-            .command()
-            .args(args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let start = Instant::now();
-        loop {
-            if child.try_wait().unwrap().is_some() {
-                return child.wait_with_output().unwrap();
-            }
-            if start.elapsed() > Duration::from_secs(120) {
-                child.kill().unwrap();
-                panic!("`mrsm {}` timed out", args.join(" "));
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        crate::process::output_with_timeout(self.command().args(args), Duration::from_secs(120))
     }
 
     /// Run `mrsm <args> -i sql:local` and return its output, failing the test on an error.

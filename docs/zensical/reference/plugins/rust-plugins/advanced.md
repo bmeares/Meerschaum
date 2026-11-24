@@ -194,7 +194,9 @@ fn sync(pipe: &Pipe) -> Result<SuccessTuple> {
 | `host::config(&["meerschaum", "instance"])` | `Value` | `get_config('meerschaum', 'instance')` |
 | `host::mint_token(...)`, `revoke_token(id)`, `draining()` | `MintedToken` / `SuccessTuple` / `bool` | Route token lifecycle & shutdown ([rules](routes-and-mcp.md#tokens-and-draining)) |
 
-**Parameterized SQL & transactions:** Named `:param` binds accept JSON scalars, `null`, arrays (native PostgreSQL `= ANY(:ids)`), and typed helpers (`Bound::to_sql_param()`, `host::sql_timestamptz`, `sql_timestamp`, `sql_date`, `sql_bytes`, `sql_json`). With `lock_key: Some(key)`, `host::transaction` acquires `pg_advisory_xact_lock` on Postgres or `BEGIN IMMEDIATE` on SQLite, commits on `Ok`, and rolls back on `Err` or panic:
+**Parameterized SQL & transactions:** Named `:param` binds accept JSON scalars, `null`, arrays (native PostgreSQL `= ANY(:ids)`), and typed helpers (`Bound::to_sql_param()`, `host::sql_timestamptz`, `sql_timestamp`, `sql_date`, `sql_bytes`, `sql_json`). With `lock_key: Some(key)`, `host::transaction` acquires `pg_advisory_xact_lock` on Postgres or `BEGIN IMMEDIATE` on SQLite, commits on `Ok`, and rolls back on `Err` or panic.
+
+Using `?` on `tx.exec_sql_with(...)` only handles the outer error, since a statement can still return `success == false`. Check the result's `success` field and return `Error::Message(result.message)` when it is `false` so the transaction rolls back.
 
 ```rust
 let next_id: i64 = host::transaction("sql:main", Some("cmdq:1"), |tx| {
@@ -203,7 +205,10 @@ let next_id: i64 = host::transaction("sql:main", Some("cmdq:1"), |tx| {
         &json!({"since": host::sql_timestamptz("2026-09-25T00:00:00+00:00")}),
     )?;
     let id = rows[0]["next_id"].as_i64().unwrap_or(1);
-    tx.exec_sql_with("INSERT INTO cmd_queue (id) VALUES (:id)", &json!({"id": id}))?;
+    let result = tx.exec_sql_with("INSERT INTO cmd_queue (id) VALUES (:id)", &json!({"id": id}))?;
+    if !result.success {
+        return Err(Error::Message(result.message));
+    }
     Ok(id)
 })?;
 ```

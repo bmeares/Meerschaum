@@ -32,7 +32,7 @@ if [ ! -x "$venv/bin/python" ] || \
     -r requirements/sql-oracle.txt -r requirements/sql-duckdb.txt -r scripts/ci/requirements-browser.txt pytest pytest-xdist httpx httpx2 uv
   echo "$deps_hash" > "$venv/.deps-hash"
 fi
-if [ "${MRSM_TEST_CONSOLE:-0}" = 1 ]; then
+if [ "${MRSM_TEST_CONSOLE:-0}" = 1 ] || [ "${MRSM_TEST_CONSOLE_CREDENTIALS:-0}" = 1 ]; then
   "$venv/bin/python" -m playwright install chromium
   "$venv/bin/python" - <<'PY'
 from playwright.sync_api import sync_playwright

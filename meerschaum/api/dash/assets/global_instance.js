@@ -27,7 +27,7 @@
     }
 
     function setTeam(team) {
-        if (!team) {
+        if (!team || team === 'All teams') {
             document.cookie = TEAM_COOKIE + '=; path=/; max-age=0; SameSite=Lax';
             return;
         }

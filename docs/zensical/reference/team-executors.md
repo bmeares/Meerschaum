@@ -48,12 +48,12 @@ mrsm stack up -d
 Meerschaum spins up a dedicated container, isolated bridge network, and private volumes (`/meerschaum` and `/var/lib/meerschaum/factory`). Grant changes apply live; image, limit, or network changes need `mrsm stack up -d`.
 
 !!! tip "Override the executor image"
-    Stack executors default to `bmeares/meerschaum:5.1.4-full` (matching your main API release). Pin a custom image in `stack.yaml`:
+    Stack team executors default to `bmeares/meerschaum:5.1.5-full`, matching the main API release. To pin a custom image, set `executor.image` in `stack.yaml`.
 
     ```yaml
     # mrsm edit config stack
     executor:
-      image: registry.example/meerschaum-executor:5.1.4
+      image: registry.example/meerschaum-executor:5.1.5
     ```
 
 ## Choose a deployment

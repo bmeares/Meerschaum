@@ -967,8 +967,8 @@ def update_pipe_fetch(n_clicks, text, meta, session_data):
 # Manage > Access… and Locks…
 # ------------------------------------------------------------------------------------------------
 
-#: The Owner select's "No owner" (a select shows an empty value as no choice at all).
-NO_OWNER = '__no_owner__'
+#: The space distinguishes this choice from every valid username.
+NO_OWNER = 'No owner'
 
 
 def owner_options(viewer: Any, parameters: Dict[str, Any], instance: Any) -> List[Dict[str, str]]:
@@ -977,7 +977,7 @@ def owner_options(viewer: Any, parameters: Dict[str, Any], instance: Any) -> Lis
     managers; otherwise the owner may only keep or give up ownership.
     """
     from meerschaum.api import get_api_connector
-    none = {'label': 'No owner', 'value': NO_OWNER}
+    none = {'label': NO_OWNER, 'value': NO_OWNER}
     current_owner = access.access_fields(parameters).get('owner')
     if access.can_assign_pipe_owner(viewer, parameters, instance=instance):
         try:

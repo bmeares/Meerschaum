@@ -180,22 +180,10 @@ impl Drop for Endpoint {
 fn output(mut command: Command) -> std::process::Output {
     command
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
         .env_remove("TMUX")
         .env_remove("TMUX_PANE");
     runtime::sanitize_command(&mut command);
-    let mut child = command.spawn().unwrap();
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while child.try_wait().unwrap().is_none() {
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            panic!("The owned graph transport child exceeded its deadline.");
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    child.wait_with_output().unwrap()
+    crate::common::process::output_with_timeout(&mut command, Duration::from_secs(20))
 }
 
 #[test]

@@ -7,6 +7,8 @@ Test SQL utility functions.
 """
 
 import datetime
+import os
+from uuid import uuid4
 import pytest
 import meerschaum as mrsm
 from tests.connectors import conns, get_flavors
@@ -51,6 +53,28 @@ def test_exists(flavor: str):
     conn.exec(f"DROP TABLE {tbl_name}", silent=True)
     assert table_exists(tbl, conn, debug=True) is False
  
+
+@pytest.mark.parametrize("flavor", [f for f in get_flavors() if f in ('postgis', 'timescaledb_ha')])
+def test_postgis_column_dimensions(flavor: str):
+    from meerschaum.utils.sql import get_postgis_geo_columns_types
+
+    conn = conns[flavor]
+    table = f"geometry_dims_{uuid4().hex}"
+    assert conn.exec(
+        f"CREATE TABLE {table} (g geometry, z geometry(LineStringZ,4326), "
+        "m geometry(PointM), zm geometry(PointZM), gg geography(PointZ,4326))"
+    ) is not None
+    try:
+        assert get_postgis_geo_columns_types(conn, table) == {
+            'g': 'GEOMETRY',
+            'z': 'GEOMETRY(LINESTRINGZ, 4326)',
+            'm': 'GEOMETRY(POINTM)',
+            'zm': 'GEOMETRY(POINTZM)',
+            'gg': 'GEOGRAPHY(POINTZ, 4326)',
+        }
+    finally:
+        conn.exec(f"DROP TABLE {table}")
+
 
 @pytest.mark.parametrize(
     "uri,expected_attributes", [
@@ -245,3 +269,42 @@ def test_find_top_level_select_index_skips_comments_and_strings():
     assert find_top_level_select_index("WITH a AS (SELECT 1)") == -1
 
 
+
+
+@pytest.mark.parametrize('flavor', [f for f in get_flavors() if f in ('postgis', 'timescaledb_ha')])
+def test_postgis_existing_row_updates_z(flavor, record_property):
+    conn = conns[flavor]
+    record_property('revision', os.environ.get('GITHUB_SHA', 'working-tree'))
+    record_property('backend', conn.value('SELECT version()'))
+    record_property('postgis', conn.value('SELECT postgis_full_version()'))
+    suffix = uuid4().hex
+    source, target = f'lines_{suffix}', f'routes_{suffix}'
+    query = f'SELECT id, ST_Multi(ST_Collect(g)) AS g FROM {source} GROUP BY id'
+    pipe = mrsm.Pipe(
+        conn, target, instance=conn, target=target, columns={'id': 'id'},
+        dtypes={'g': 'geometry[MULTILINESTRINGZ, 4326]'},
+        parameters={'sql': query},
+    )
+    assert pipe.register()[0]
+    try:
+        for sql in (
+            f'CREATE TABLE {source} (id bigint, g geometry(LineStringZ,4326))',
+            f"INSERT INTO {source} VALUES (1, 'SRID=4326;LINESTRING Z(0 0 1,1 1 2)')",
+            f'CREATE TABLE {target} (id bigint PRIMARY KEY, g geometry(MultiLineStringZ,4326))',
+        ):
+            assert conn.exec(sql) is not None
+        assert pipe.sync()[0]
+        assert conn.value(f'SELECT ST_AsEWKT(g) FROM {target}') == 'SRID=4326;MULTILINESTRING((0 0 1,1 1 2))'
+        assert conn.exec(f'UPDATE {source} SET g = ST_Translate(g, 0, 0, 10)') is not None
+        for expected_updates in (1, 0):
+            result = pipe.sync()
+            assert result.success, result.message
+            assert result.updated == expected_updates
+            assert conn.value(f'SELECT COUNT(*) FROM {target}') == 1
+            ewkt = conn.value(f'SELECT ST_AsEWKT(g) FROM {target}')
+            assert ewkt == 'SRID=4326;MULTILINESTRING((0 0 11,1 1 12))'
+        record_property('geometry_after_repeat', ewkt)
+        record_property('repeat_updates', result.updated)
+    finally:
+        pipe.delete()
+        conn.exec(f'DROP TABLE IF EXISTS {source}')

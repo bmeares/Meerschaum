@@ -44,6 +44,23 @@ fn fires(schedule: &str, now: &str, n: usize) -> Vec<String> {
 }
 
 #[test]
+fn a_crontab_search_starts_at_midnight_after_a_rejected_date() {
+    for clause in ["", " tz Etc/UTC jitter 0", " tz utc", " jitter 0"] {
+        let schedule = format!("0 3 1 1,4,7,10 *{clause}");
+        let (mut trigger, _) = parse(&schedule, "2026-11-24T17:09:07Z", "UTC");
+        let january = at("2027-01-01T03:00:00Z");
+        let april = at("2027-04-01T03:00:00Z");
+        assert_eq!(trigger.next(), Some(january), "{schedule}");
+        assert_eq!(trigger.next(), Some(april), "{schedule}");
+        assert_eq!(
+            trigger.next_after(at("2026-12-31T23:59:59Z")),
+            Some(january)
+        );
+        assert_eq!(trigger.next_after(january), Some(april));
+    }
+}
+
+#[test]
 fn tz_local_is_the_host_zone() {
     let s = "daily starting 2027-03-12 21:00 tz local";
     let now = "2027-03-12T12:00:00Z";
@@ -501,6 +518,82 @@ fn cron_with_a_specific_or_a_wildcard_hour() {
     for (base, now, want) in cases {
         let s = format!("{base} tz America/New_York");
         assert_eq!(fires(&s, now, want.len()), *want, "{s}");
+    }
+}
+
+#[test]
+fn cron_started_inside_a_fold_includes_future_occurrences_of_earlier_wall_minutes() {
+    for (expr, now, first, second) in [
+        (
+            "15,45 * * * sun tz America/New_York",
+            "2027-11-07T05:50:01Z",
+            "2027-11-07T06:15:00Z",
+            "2027-11-07T06:45:00Z",
+        ),
+        (
+            "15,45 */1 * * sun tz America/New_York",
+            "2027-11-07T05:21:00Z",
+            "2027-11-07T05:45:00Z",
+            "2027-11-07T06:15:00Z",
+        ),
+        (
+            "35 * * * sun tz Australia/Lord_Howe",
+            "2027-04-03T14:50:00Z",
+            "2027-04-03T15:05:00Z",
+            "2027-04-03T16:05:00Z",
+        ),
+        (
+            "15,45 1 * * sun tz America/New_York",
+            "2027-11-07T05:50:01Z",
+            "2027-11-14T06:15:00Z",
+            "2027-11-14T06:45:00Z",
+        ),
+    ] {
+        let (mut trigger, _) = parse(expr, now, "UTC");
+        assert_eq!(trigger.next(), Some(at(first)), "{expr}");
+        assert_eq!(trigger.next(), Some(at(second)), "{expr}");
+        assert_eq!(
+            trigger.next_after(at(now) - Duration::seconds(1)),
+            Some(at(first)),
+            "{expr}"
+        );
+        assert_eq!(trigger.next_after(at(now)), Some(at(first)), "{expr}");
+        assert_eq!(trigger.next_after(at(first)), Some(at(second)), "{expr}");
+    }
+}
+
+#[test]
+fn cron_started_at_a_forward_transition_includes_shifted_fires_once() {
+    for (expr, transition, first, second) in [
+        (
+            "30 2 * * * tz America/New_York",
+            "2027-03-14T07:00:00Z",
+            "2027-03-14T07:00:00Z",
+            "2027-03-15T06:30:00Z",
+        ),
+        (
+            "15 2 * * * tz Australia/Lord_Howe",
+            "2027-10-02T15:30:00Z",
+            "2027-10-02T15:30:00Z",
+            "2027-10-03T15:15:00Z",
+        ),
+        (
+            "30 * * * * tz America/New_York",
+            "2027-03-14T07:00:00Z",
+            "2027-03-14T07:30:00Z",
+            "2027-03-14T08:30:00Z",
+        ),
+    ] {
+        let (mut trigger, _) = parse(expr, transition, "UTC");
+        assert_eq!(trigger.next(), Some(at(first)), "{expr}");
+        assert_eq!(trigger.next(), Some(at(second)), "{expr}");
+        let (mut earlier, _) = parse(expr, "2027-01-01T00:00:00Z", "UTC");
+        assert_eq!(
+            earlier.next_after(at(transition) - Duration::nanoseconds(1)),
+            Some(at(first)),
+            "{expr}"
+        );
+        assert_eq!(earlier.next_after(at(first)), Some(at(second)), "{expr}");
     }
 }
 

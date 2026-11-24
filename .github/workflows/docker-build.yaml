@@ -280,6 +280,15 @@ jobs:
           runpy.run_path("/smoke_facade.py", run_name="__main__")
           '
 
+      - name: Replace the prior full image on its persisted volume
+        if: inputs.candidate_run_id != '' && !inputs.v4_only && matrix.arch == 'amd64'
+        env:
+          FULL_IMAGE: ${{ steps.build.outputs.full_image }}
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml","rb"))["workspace"]["package"]["version"])')
+          prior=$(python3 scripts/ci/upgrade_state.py previous --version "$version" --changelog docs/zensical/changelog/v5.md)
+          scripts/docker/smoke_upgrade.sh "$FULL_IMAGE" "bmeares/meerschaum:$prior-full"
+
       - name: Record the tested candidate digests
         if: ${{ inputs.candidate_run_id != '' && !inputs.v4_only && inputs.size_gate == 'enforce' }}
         run: |

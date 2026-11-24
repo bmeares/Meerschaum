@@ -7,18 +7,11 @@
 
 use std::time::{Duration, Instant};
 
+use meerschaum_connector::testing::bound_local_socket;
 use meerschaum_connector_sql::SqlError;
 use meerschaum_connector_sql::driver::SqlDriver;
 use meerschaum_connector_sql::driver::connect::{self, ConnectErrorKind};
 use meerschaum_connector_sql::uri::ConnectionSpec;
-
-/// A local TCP port nothing listens on.
-fn closed_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
-    port
-}
 
 fn spec(scheme: &str, host: &str, port: u16, query: &str) -> ConnectionSpec {
     let uri = format!("{scheme}://scratch:not-a-secret@{host}:{port}/scratchdb{query}");
@@ -44,7 +37,7 @@ async fn first_failure(spec: &ConnectionSpec) -> (connect::ConnectError, Duratio
 #[tokio::test]
 async fn refused_connections_fail_at_once_for_every_network_flavor() {
     for scheme in ["postgresql", "mysql", "mssql"] {
-        let port = closed_port();
+        let (_socket, port) = bound_local_socket();
         // The default timeout is 5 s; a refused port must not wait for it (nor sqlx's 30 s).
         let spec = spec(scheme, "127.0.0.1", port, "");
         let (error, elapsed) = first_failure(&spec).await;
@@ -62,7 +55,7 @@ async fn refused_connections_fail_at_once_for_every_network_flavor() {
 
 #[tokio::test]
 async fn driver_connect_also_fails_fast() {
-    let port = closed_port();
+    let (_socket, port) = bound_local_socket();
     let spec = spec("postgresql", "127.0.0.1", port, "");
     let started = Instant::now();
     let error = SqlDriver::connect(&spec).await.unwrap_err();
@@ -90,13 +83,13 @@ async fn timeouts_are_remembered_briefly() {
 async fn a_refused_connection_is_retried_every_time() {
     // The server may come up between two calls: after a refusal, a listener appears on the
     // port and the next call must attempt again (it no longer sees "refused").
-    let port = closed_port();
+    let (socket, port) = bound_local_socket();
     let spec = spec("postgresql", "127.0.0.1", port, "?connect_timeout=1");
     let driver = SqlDriver::connect_lazy(&spec).unwrap();
     let first = connect_error(driver.exec("SELECT 1").await.unwrap_err());
     assert_eq!(first.kind(), ConnectErrorKind::Refused);
     // Accepts connections but never speaks the protocol.
-    let listener = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+    let listener = socket.listen(1).unwrap();
     let second = connect_error(driver.exec("SELECT 1").await.unwrap_err());
     assert_eq!(second.kind(), ConnectErrorKind::Timeout, "{second}");
     drop(listener);
@@ -220,7 +213,7 @@ async fn a_reachable_database_connects_and_later_queries_skip_the_gate() {
 #[tokio::test]
 async fn oracle_wrong_password_and_refused_fail_with_clear_messages() {
     wrong_password("MRSM_TEST_ORACLE_URI").await;
-    let port = closed_port();
+    let (_socket, port) = bound_local_socket();
     let spec = spec("oracle", "127.0.0.1", port, "");
     let (error, elapsed) = first_failure(&spec).await;
     assert_eq!(error.kind(), ConnectErrorKind::Refused, "{error}");

@@ -220,11 +220,9 @@ def server():
     instance = Server('w16s-api', native=False)
     try:
         instance.start()
-    except Exception as e:
+        yield instance
+    finally:
         instance.stop()
-        pytest.skip(f"cannot start a loopback API server: {e}")
-    yield instance
-    instance.stop()
 
 
 @pytest.fixture(scope='module')

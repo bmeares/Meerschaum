@@ -27,6 +27,7 @@ LIVE_MODULES = {
     'tests/test_index_queries.py': 'postgres',
 }
 LIVE_TESTS = {
+    'tests/console/test_member_token.py::test_member_token_lifecycle': 'mssql-valkey',
     'tests/test_access.py::test_valkey_teams_locks_and_users': 'mssql-valkey',
     'tests/test_utils_cache.py::test_valkey_backend_is_shared': 'mssql-valkey',
     'tests/test_instance_features.py::test_protected_from_valkey_and_api_uris': 'mssql-valkey',

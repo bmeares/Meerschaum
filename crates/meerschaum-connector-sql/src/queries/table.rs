@@ -849,15 +849,22 @@ pub const POSTGIS_CATALOG_QUERY: &str = "SELECT CASE WHEN COALESCE(\
      AND has_table_privilege(to_regclass('geography_columns'), 'SELECT'), FALSE) \
      THEN 1 ELSE 0 END AS \"exists\"";
 
+/// The geometry catalog strips Z and ZM from the subtype, but retains M. The geography
+/// catalog already returns the full subtype.
+pub const POSTGIS_GEOMETRY_SUBTYPE: &str = "\"type\" || CASE \
+    WHEN coord_dimension = 4 THEN 'ZM' \
+    WHEN coord_dimension = 3 AND right(\"type\", 1) <> 'M' THEN 'Z' \
+    ELSE '' END";
+
 /// The PostGIS `geometry_columns` / `geography_columns` lookup (`utils/sql.py:3106`).
 pub fn get_postgis_geo_columns_types_query(table: &str, schema: Option<&str>) -> Result<String> {
     clean(table)?;
     clean(schema.unwrap_or("None"))?;
     let schema = schema.filter(|s| !s.is_empty()).unwrap_or("public");
-    let truncated_schema_name = truncate_item_name(schema, Flavor::Postgis);
-    let truncated_table_name = truncate_item_name(table, Flavor::Postgis);
+    let truncated_schema_name = truncate_item_name(schema, Flavor::Postgis).replace('\'', "''");
+    let truncated_table_name = truncate_item_name(table, Flavor::Postgis).replace('\'', "''");
     Ok(format!(
-        "SELECT \"f_geometry_column\" AS \"column\", 'GEOMETRY' AS \"func\", \"type\", geom.\"srid\"\n\
+        "SELECT \"f_geometry_column\" AS \"column\", 'GEOMETRY' AS \"func\", {POSTGIS_GEOMETRY_SUBTYPE} AS \"type\", geom.\"srid\"\n\
          FROM \"geometry_columns\" AS geom\n\
          WHERE \"f_table_schema\" = '{truncated_schema_name}'\n    \
          AND \"f_table_name\" = '{truncated_table_name}'\n\

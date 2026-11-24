@@ -111,7 +111,7 @@ class Token:
             _user = mrsm.core.User(
                 username,
                 user_id=self._user_id,
-                instance=str(self.instance_connector),
+                instance=self.instance_connector,
             )
             self._user = _user
             return _user

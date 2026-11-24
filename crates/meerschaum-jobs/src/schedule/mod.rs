@@ -583,7 +583,6 @@ fn parse_schedule_unjittered(
                     anchor.second().to_string()
                 };
                 fields.microsecond = anchor.nanosecond() / 1000;
-                Trigger::Cron(new_cron(starting_ts, start.as_ref(), zone, fields)?)
             } else {
                 let cron_parts: Vec<&str> = part.split_whitespace().collect();
                 if cron_parts.len() != 5 {
@@ -594,8 +593,14 @@ fn parse_schedule_unjittered(
                 fields.day = cron_parts[2].into();
                 fields.month = cron_parts[3].into();
                 fields.day_of_week = cron_parts[4].into();
-                Trigger::Cron(new_cron(starting_ts, start.as_ref(), zone, fields)?)
             }
+            Trigger::Cron(CronTrigger::for_schedule(
+                starting_ts,
+                start.as_ref(),
+                zone,
+                fields,
+                !is_named,
+            )?)
         };
         triggers.push(trigger);
     }
@@ -640,19 +645,6 @@ pub fn parse_start_time_clauses(
         .flatten();
     let info = parse_start(&base, now, env, &mut warnings, zone.as_ref())?;
     Ok((info.fire, warnings))
-}
-
-/// A `_CronTrigger`, matched on `zone`'s wall clock when there is one.
-fn new_cron(
-    starting_ts: Fire,
-    start: Option<&Start>,
-    zone: Option<ScheduleZone>,
-    fields: CronFields,
-) -> Result<CronTrigger, ScheduleError> {
-    match (start, zone) {
-        (Some(start), Some(zone)) => CronTrigger::new_zoned(start, zone, fields),
-        _ => CronTrigger::new(starting_ts, fields),
-    }
 }
 
 /// What a `starting` clause names.

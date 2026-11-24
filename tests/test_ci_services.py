@@ -252,3 +252,19 @@ def test_compose_keeps_legacy_defaults_and_isolates_explicit_port_maps(tmp_path)
                 assert int(binding['published']) == LEGACY_PORTS[name]
         assert all(volume['name'].startswith(state['project'] + '_')
                    for volume in config['volumes'].values())
+
+
+@pytest.mark.parametrize('testcase,valid', [
+    ('', False), ('<skipped/>', False), ('<failure/>', False), ('<properties/>', True),
+])
+def test_required_browser_run_cannot_be_skipped(tmp_path, testcase, valid):
+    from scripts.ci.services import verify_results
+    report = tmp_path / 'results.xml'
+    case = ('<testcase classname="tests.console.test_member_token" name="test_member_token_lifecycle">'
+            + testcase + '</testcase>') if testcase else ''
+    report.write_text('<testsuite>' + case + '</testsuite>')
+    if valid:
+        verify_results('mssql-valkey', report)
+    else:
+        with pytest.raises(ValueError, match='completed, passing'):
+            verify_results('mssql-valkey', report)

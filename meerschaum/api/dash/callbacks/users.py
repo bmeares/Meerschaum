@@ -63,6 +63,7 @@ def _parse_username_from_pathname(pathname: Optional[str]) -> Optional[str]:
 
 HIDDEN = {'display': 'none'}
 SHOWN: Dict[str, Any] = {}
+NO_INSTANCE = 'None'
 
 
 def _session_id(session_store_data) -> Optional[str]:
@@ -780,9 +781,8 @@ def _members_body(team: Dict[str, Any], who: access.Viewer) -> Any:
     return build_team_members_editor(team, user_names)
 
 
-def _options(values: List[str], none_label: Optional[str] = None) -> List[Dict[str, str]]:
-    options = [{'label': none_label, 'value': ''}] if none_label else []
-    return options + [{'label': value, 'value': value} for value in values]
+def _options(values: List[str]) -> List[Dict[str, str]]:
+    return [{'label': value, 'value': value} for value in values]
 
 
 @dash_app.callback(
@@ -814,7 +814,7 @@ def fill_new_team(is_open, session_store_data):
     ]
     return (
         _options(bases), (team_setup.default_base() or ''),
-        _options(team_setup.instance_choices(), 'None'), '',
+        _options([NO_INSTANCE, *team_setup.instance_choices()]), NO_INSTANCE,
         _options(team_setup.connector_choices()), [],
         _options(team_setup.plugin_choices()), [],
         storage, ('database' if bases else 'instance'),
@@ -883,7 +883,7 @@ def submit_new_team(
         storage=str(storage or 'instance'),
         base=(base or None),
         database_name=(database_name or None),
-        instance=(instance or None),
+        instance=None if instance in ('', NO_INSTANCE) else instance,
         connectors=(connectors or []),
         plugins=(plugins or []),
         plugins_write=bool(plugins_write),
@@ -952,7 +952,7 @@ def open_team_settings(action_clicks, cancel_clicks, session_store_data):
         {'team': team['name']},
         [],
         described,
-        _options(instances, 'None'), (settings['instance'] or ''),
+        _options([NO_INSTANCE, *instances]), (settings['instance'] or NO_INSTANCE),
         settings['isolated'],
         _options(connectors), settings['connectors'],
         _options(plugins), settings['plugins'],
@@ -991,7 +991,7 @@ def submit_team_settings(
     success, message = team_setup.edit_team_settings(
         team['name'],
         isolated=bool(isolated),
-        instance=(instance or None),
+        instance=None if instance in ('', NO_INSTANCE) else instance,
         connectors=(connectors or []),
         plugins=(plugins or []),
         plugins_write=bool(plugins_write),

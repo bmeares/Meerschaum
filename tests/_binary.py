@@ -174,11 +174,9 @@ last_problem = ''
 
 def binary_or_skip():
     """The verified binary's path, or `pytest.skip` saying why there is none."""
-    import pytest
-
     binary = find_binary()
     if binary is None:
-        pytest.skip(
+        skip_or_fail(
             last_problem
             or f"No standalone `mrsm` (build it: cargo build -p meerschaum --bin mrsm; or set {ENV})."
         )

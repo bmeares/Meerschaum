@@ -6,6 +6,8 @@ mod compile_single_file;
 mod native_examples;
 #[path = "../plugin_lifecycle_support/mod.rs"]
 mod plugin_lifecycle_support;
+#[path = "../common/process.rs"]
+mod process;
 #[allow(dead_code)]
 #[path = "../python_support/mod.rs"]
 mod python_support;

@@ -695,26 +695,10 @@ fn a_created_jobs_environment_is_the_servers_plus_the_compose_stamps() {
 /// never returns (the websocket never ends, or the result never arrives) is killed and fails
 /// the test.
 fn run_with_deadline(client: &Home, endpoints: &[(&str, u16)], args: &[&str]) -> Output {
-    let mut child = client
-        .command(endpoints)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(60);
-    loop {
-        if child.try_wait().unwrap().is_some() {
-            return child.wait_with_output().unwrap();
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let out = child.wait_with_output().unwrap();
-            panic!("{args:?} did not return within 60 s:\n{}", text(&out));
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    crate::common::process::output_with_timeout(
+        client.command(endpoints).args(args).stdin(Stdio::null()),
+        Duration::from_secs(60),
+    )
 }
 
 #[test]

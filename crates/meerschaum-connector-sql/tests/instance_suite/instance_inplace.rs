@@ -90,6 +90,56 @@ async fn rowcount(c: &Ctx, pipe: &Pipe) -> i64 {
     c.rowcount(pipe, DataQuery::default()).await.unwrap()
 }
 
+#[tokio::test]
+#[ignore = "requires an owned MRSM_TEST_POSTGIS_URI"]
+async fn postgis_inplace_updates_preserve_geometry_dimensions() {
+    let c = ctx("postgis", "geometry_dims")
+        .await
+        .expect("set MRSM_TEST_POSTGIS_URI to a disposable PostGIS instance");
+    let source = format!("{}_lines", c.prefix);
+    let target = format!("{}_multi", c.prefix);
+    let definition = format!("SELECT id, ST_Multi(ST_Collect(g)) AS g FROM {source} GROUP BY id");
+    let pipe = c.pipe(
+        &c.conn.keys(),
+        "routes",
+        None,
+        &serde_json::json!({
+            "target": target,
+            "columns": {"id": "id"},
+            "dtypes": {"g": "geometry[MULTILINESTRINGZ, 4326]"},
+            "sql": definition,
+        })
+        .to_string(),
+    );
+    ok(c.conn.register_pipe(&pipe).await);
+    for sql in [
+        format!(
+            "CREATE TABLE {source} (id bigint, g geometry(LineStringZ,4326), m geometry(PointM), zm geometry(PointZM))"
+        ),
+        format!("INSERT INTO {source} (id, g) VALUES (1, 'SRID=4326;LINESTRING Z(0 0 1,1 1 2)')"),
+        format!("CREATE TABLE {target} (id bigint PRIMARY KEY, g geometry(MultiLineStringZ,4326))"),
+        format!("INSERT INTO {target} {definition}"),
+        format!("UPDATE {source} SET g = ST_Translate(g, 0, 0, 10) WHERE id = 1"),
+    ] {
+        c.conn.exec(&sql).await.expect(&sql);
+    }
+    inplace(&c, &pipe, Bound::None).await;
+    assert_eq!(
+        c.conn
+            .value(&format!("SELECT ST_AsEWKT(g) FROM {target} WHERE id = 1"))
+            .await,
+        Some(meerschaum_connector_sql::driver::SqlValue::Text(
+            "SRID=4326;MULTILINESTRING((0 0 11,1 1 12))".into()
+        ))
+    );
+    let types = c.conn.get_table_cols_types(&source, None).await;
+    assert_eq!(types["g"], "GEOMETRY(LINESTRINGZ, 4326)");
+    assert_eq!(types["m"], "GEOMETRY(POINTM)");
+    assert_eq!(types["zm"], "GEOMETRY(POINTZM)");
+    c.delete(&pipe).await;
+    c.conn.exec(&format!("DROP TABLE {source}")).await.unwrap();
+}
+
 async fn row_for(c: &Ctx, pipe: &Pipe, id: &str) -> Doc {
     let reg = c.registered(pipe).await;
     let mut p = pipe.clone();

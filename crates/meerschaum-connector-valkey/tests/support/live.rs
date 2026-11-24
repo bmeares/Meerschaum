@@ -43,13 +43,13 @@ pub async fn database() -> Option<Database> {
 #[tokio::test]
 async fn live_tests_take_turns_on_the_shared_database() {
     let first = turn().await;
-    let waiting = tokio::time::timeout(std::time::Duration::from_millis(50), turn()).await;
+    let mut second = std::pin::pin!(turn());
+    let waiting = tokio::time::timeout(std::time::Duration::from_millis(50), &mut second).await;
     assert!(
         waiting.is_err(),
         "a second live test started while the first held the database"
     );
     drop(first);
-    let _second = tokio::time::timeout(std::time::Duration::from_secs(5), turn())
-        .await
-        .expect("the database is free again once the first live test ends");
+    // Other live tests may be ahead of the second turn in the queue.
+    let _second = second.await;
 }

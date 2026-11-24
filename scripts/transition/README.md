@@ -59,7 +59,7 @@ v4's `read()` rolled back W17O-007a), `DIFF` (a difference still to classify) or
 | pip (`--wheel`) | `pip install -U <wheel>` over 4.1.4 leaves no v4 module behind, the console scripts run v5, the base wheel declares no dependencies, the `api`/`dash` extras are enough to import `meerschaum.api` with `MRSM_NO_AUTO_INSTALL=1`; then sqlite is rerun with the installed wheel |
 
 Run directories are under `<scratch>/work/run-<flavor>/` (`out/findings.json`, the v4 / v5 server logs,
-snapshots). `report.py` prints every non-`PASS` finding and exits 1 on a `FAIL`.
+snapshots). `report.py` prints every non-`PASS` finding and exits 1 on a `FAIL`. Pass `--strict` to `run.sh` or `report.py` to fail on unexplained differences and empty findings as well. Known dtype differences marked `EXPECTED` are accepted.
 
 ## Isolation
 

@@ -158,6 +158,7 @@ jobs:
       MRSM_NO_AUTO_INSTALL: '1'
       MRSM_NO_UPDATE_CHECK: '1'
       MRSM_TEST_CONSOLE: ${{ matrix.shard == 'core' && (inputs.run_console || github.event_name == 'schedule') && '1' || '0' }}
+      MRSM_TEST_CONSOLE_CREDENTIALS: ${{ matrix.shard == 'mssql-valkey' && '1' || '0' }}
       # A failing console test leaves its tabs (screenshot, DOM, console, network) and server logs here.
       MRSM_TEST_CONSOLE_DIAG_DIR: ${{ github.workspace }}/.ci-artifacts/console-diagnostics
       PYTHONPATH: ${{ github.workspace }}
@@ -194,6 +195,15 @@ jobs:
           github-token: ${{ github.token }}
       - name: Prepare the environment from complete verified artifacts
         run: bash scripts/ci/prepare_pytest.sh
+      - name: Compare persisted v4 state on the installed release wheel
+        if: inputs.profile == 'release' && matrix.shard == 'core'
+        env:
+          MRSM_TRANSITION_DIR: ${{ runner.temp }}/mrsm-upgrade-${{ github.run_id }}-${{ github.run_attempt }}
+          MRSM_TRANSITION_V4_PY: ${{ github.workspace }}/.venv-ref/bin/python
+          MRSM_TRANSITION_V5_PY: ${{ github.workspace }}/.venv-test/bin/python
+          MRSM_TRANSITION_V5_NO_AUTO_INSTALL: '1'
+          MRSM_TRANSITION_V5_WHEEL: '1'
+        run: "$PYTHON_BIN scripts/transition/check_release.py"
       - name: Prove collection is disjoint and complete
         if: ${{ matrix.shard == 'core' }}
         run: python scripts/ci/services.py validate --root "$RUNNER_TEMP/mrsm-collection-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
@@ -201,7 +211,10 @@ jobs:
         run: |
           shard_tmp="$(mktemp -d "$RUNNER_TEMP/t.XXXXXX")"
           trap 'rm -rf -- "$shard_tmp"' EXIT
-          TMPDIR="$shard_tmp" python scripts/ci/services.py run --shard "${{ matrix.shard }}" --root "$RUNNER_TEMP/mrsm-tests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.shard }}" --workers "${{ matrix.workers }}" -- -o faulthandler_timeout=300
+          TMPDIR="$shard_tmp" python scripts/ci/services.py run --shard "${{ matrix.shard }}" --root "$RUNNER_TEMP/mrsm-tests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.shard }}" --workers "${{ matrix.workers }}" -- -o faulthandler_timeout=300 -o junit_family=xunit1 --junitxml="$RUNNER_TEMP/mrsm-tests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.shard }}/results.xml"
+      - name: Require completed service-backed acceptance tests
+        if: matrix.shard == 'postgres' || matrix.shard == 'mssql-valkey'
+        run: python scripts/ci/services.py verify-results --shard "${{ matrix.shard }}" --report "$RUNNER_TEMP/mrsm-tests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.shard }}/results.xml"
       - name: Clean up only this shard's owned services after failure or cancellation
         if: ${{ always() }}
         run: python scripts/ci/services.py cleanup --root "$RUNNER_TEMP/mrsm-tests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.shard }}"
@@ -222,6 +235,8 @@ jobs:
             ${{ runner.temp }}/mrsm-tests-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}/.ci-services.json
             ${{ runner.temp }}/mrsm-tests-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}/collection.json
             ${{ runner.temp }}/mrsm-tests-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}/users-collection.json
+            ${{ runner.temp }}/mrsm-tests-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}/results.xml
+            ${{ runner.temp }}/mrsm-upgrade-${{ github.run_id }}-${{ github.run_attempt }}/work/run-release/out/findings.json
             ${{ runner.temp }}/mrsm-collection-${{ github.run_id }}-${{ github.run_attempt }}/*.json
             ${{ runner.temp }}/mrsm-collection-${{ github.run_id }}-${{ github.run_attempt }}/*.log
           include-hidden-files: true

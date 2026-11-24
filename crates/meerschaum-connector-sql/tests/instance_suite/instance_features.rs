@@ -7,6 +7,7 @@
 use crate::common;
 use crate::common::*;
 use meerschaum_connector::schema::SchemaChangeKind;
+use meerschaum_connector::testing::bound_local_socket;
 use meerschaum_connector::{DataQuery, InstanceConnector, PipesKeysQuery};
 use meerschaum_connector_sql::SqlConnector;
 use meerschaum_connector_sql::instance::InstanceSettings;
@@ -378,9 +379,7 @@ async fn reads_report_database_errors_and_missing_tables_are_empty() {
     );
 
     // An unreachable database is an error, not a missing table.
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
+    let (_socket, port) = bound_local_socket();
     let spec = ConnectionSpec::from_uri(
         &format!("postgresql://nobody:not-a-secret@127.0.0.1:{port}/nodb"),
         Some("f2_dead"),

@@ -9,6 +9,7 @@ use meerschaum_connector::retry::{
     CollectEvents, RetryEvents, RetryOptions, RetryOutcome, RetryWaiter, SleepWaiter, Wait,
     retry_connect,
 };
+use meerschaum_connector::testing::bound_local_socket;
 use meerschaum_connector_sql::SqlConnector;
 use meerschaum_connector_sql::instance::InstanceSettings;
 use meerschaum_connector_sql::instance::retry::SqlRetryProbe;
@@ -16,13 +17,6 @@ use meerschaum_connector_sql::uri::ConnectionSpec;
 use std::sync::Arc;
 
 const PASSWORD: &str = "retry-not-a-secret";
-
-fn closed_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
-    port
-}
 
 fn lazy(uri: &str) -> Arc<SqlConnector> {
     let spec = ConnectionSpec::from_uri(uri, Some("rs_retry"), None).unwrap();
@@ -68,7 +62,7 @@ async fn a_reachable_sqlite_file_connects_on_the_first_try() {
 
 #[tokio::test]
 async fn a_closed_port_fails_each_attempt_with_the_drivers_message() {
-    let port = closed_port();
+    let (_socket, port) = bound_local_socket();
     let connector = lazy(&format!(
         "postgresql://scratch:{PASSWORD}@127.0.0.1:{port}/scratchdb"
     ));
@@ -91,7 +85,7 @@ async fn a_closed_port_fails_each_attempt_with_the_drivers_message() {
 
 #[tokio::test]
 async fn warn_off_hides_the_failures() {
-    let port = closed_port();
+    let (_socket, port) = bound_local_socket();
     let connector = lazy(&format!(
         "postgresql://scratch:{PASSWORD}@127.0.0.1:{port}/scratchdb"
     ));

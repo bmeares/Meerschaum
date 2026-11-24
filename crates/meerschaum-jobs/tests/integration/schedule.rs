@@ -396,7 +396,10 @@ fn schedule_corpus_matches_python() {
                 let got: Vec<Option<Fire>> = (0..n).map(|_| trigger.next()).collect();
                 let v4 = case.get("fires").and_then(Value::as_list).unwrap();
                 let want = match dev.and_then(|d| d.from.map(|from| (d, from))) {
-                    None => Value::List(v4.clone()),
+                    None => case
+                        .get("calendar_fires")
+                        .cloned()
+                        .unwrap_or_else(|| Value::List(v4.clone())),
                     Some((d, from)) => {
                         // v4 up to the clock change, v5's own values from there.
                         assert_eq!(from + d.fires.len(), n, "{label}: deviation length");
@@ -432,7 +435,12 @@ fn schedule_corpus_matches_python() {
                         .map(|(_, v5)| {
                             Value::List(v5.iter().map(|f| Value::Str(f.to_string())).collect())
                         })
-                        .unwrap_or_else(|| na.get("fires").cloned().unwrap_or(Value::Null));
+                        .unwrap_or_else(|| {
+                            na.get("calendar_fires")
+                                .or_else(|| na.get("fires"))
+                                .cloned()
+                                .unwrap_or(Value::Null)
+                        });
                     if fires(&got) != want {
                         mismatches.push(format!(
                             "{label}: next_after({}) {:?} != {want:?}",

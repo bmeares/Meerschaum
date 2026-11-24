@@ -9,8 +9,9 @@
 #[allow(unused_imports)]
 use crate::plugin_lifecycle_support;
 use crate::plugin_lifecycle_support::{
-    Home, Repo, archive, closed_port, install_native_demo, traversal_archive,
+    Home, Repo, archive, install_native_demo, traversal_archive,
 };
+use meerschaum_connector::testing::bound_local_socket;
 
 const NO_PYTHON: (&str, &str) = ("MRSM_PYTHON", "/nonexistent/mrsm-test-python");
 
@@ -584,7 +585,7 @@ fn install_plugins_reports_a_missing_archive_and_an_unreachable_repository() {
     assert!(run.success, "{text}");
     assert!(!home.plugins.join("nosuch.py").exists());
 
-    let port = closed_port();
+    let (_socket, port) = bound_local_socket();
     let run = home.run_with(
         &["install", "plugins", "foo", "-r", "api:dead"],
         &[("MRSM_API_DEAD", &format!("http://127.0.0.1:{port}"))],

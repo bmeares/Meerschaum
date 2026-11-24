@@ -18,6 +18,7 @@ import signal
 import socket
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
@@ -35,7 +36,7 @@ PRESERVE = {
     'MRSM_TEST_SKIP_INSTALL', 'MRSM_TEST_DUCKDB_LIB', 'MRSM_TEST_PYTHON',
     'MRSM_TEST_CURRENT_PYTHON', 'MRSM_TEST_CONSOLE', 'MRSM_TEST_CONSOLE_VENV_DIR',
     'MRSM_TEST_CONSOLE_NATIVE_FIXTURE', 'MRSM_TEST_CONSOLE_NATIVE_MANIFEST',
-    'MRSM_TEST_CONSOLE_NATIVE_PROFILE', 'MRSM_TEST_CONSOLE_DIAG_DIR', 'MRSM_TEST_CONSOLE_NETNS',
+    'MRSM_TEST_CONSOLE_CREDENTIALS', 'MRSM_TEST_CONSOLE_NATIVE_PROFILE', 'MRSM_TEST_CONSOLE_DIAG_DIR', 'MRSM_TEST_CONSOLE_NETNS',
 }
 PYTEST_IGNORES = ('portable/', 'test_root/', 'tests/data/', 'docs/', 'target/')
 
@@ -304,6 +305,21 @@ def validate(args):
     return 0
 
 
+def verify_results(shard, path):
+    required = {
+        'mssql-valkey': [('tests.console.test_member_token', 'test_member_token_lifecycle')],
+        'postgres': [('tests.test_sql', f'test_postgis_existing_row_updates_z[{flavor}]')
+                     for flavor in ('postgis', 'timescaledb_ha')],
+    }
+    results = ET.parse(path).findall('.//testcase')
+    for module, name in required.get(shard, []):
+        cases = [case for case in results if case.get('classname') == module and case.get('name') == name]
+        if len(cases) != 1 or any(cases[0].find(tag) is not None for tag in ('skipped', 'error', 'failure')):
+            raise ValueError(f'{module}.{name}: required a completed, passing test')
+        properties = {p.get('name'): p.get('value') for p in cases[0].findall('properties/property')}
+        print(f'{module}.{name} passed {json.dumps(properties, sort_keys=True)}')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -321,6 +337,9 @@ def main():
     owner.add_argument('--root', type=Path, required=True)
     owner.add_argument('--project', required=True)
     owner.add_argument('--shard', choices=tuple(SHARDS), required=True)
+    evidence = sub.add_parser('verify-results')
+    evidence.add_argument('--shard', choices=tuple(SHARDS), required=True)
+    evidence.add_argument('--report', type=Path, required=True)
     sub.add_parser('plan')
     args = parser.parse_args()
     try:
@@ -328,6 +347,9 @@ def main():
             return run(args)
         if args.command == 'validate':
             return validate(args)
+        if args.command == 'verify-results':
+            verify_results(args.shard, args.report)
+            return 0
         if args.command == 'cleanup':
             cleanup(args.root)
             return 0

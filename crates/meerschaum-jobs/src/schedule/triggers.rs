@@ -442,6 +442,7 @@ impl Default for CronFields {
 /// The fields a `_CronTrigger` matches, expanded.
 #[derive(Debug, Clone)]
 struct CronMatcher {
+    restart_at_midnight: bool,
     minutes: Vec<i64>,
     hours: Vec<i64>,
     days: Vec<i64>,
@@ -476,8 +477,63 @@ impl CronMatcher {
             && self.seconds.contains(&(c.second() as i64))
     }
 
+    fn next_date(&self, wall: NaiveDateTime) -> Option<NaiveDateTime> {
+        // A five-field expression supplies its own clock. A named frequency such as
+        // `mon` inherits the starting clock when advancing over a rejected date.
+        let time = if self.restart_at_midnight {
+            NaiveTime::from_hms_nano_opt(0, 0, self.min_second(), wall.nanosecond())?
+        } else {
+            wall.time()
+        };
+        Some(wall.date().succ_opt()?.and_time(time))
+    }
+
     fn min_second(&self) -> u32 {
         self.seconds.first().copied().unwrap_or(0) as u32
+    }
+
+    /// First wall candidate to enumerate at an inclusive instant. A fold may repeat earlier
+    /// wall minutes, and at a forward transition missing wall minutes may fire right now.
+    fn zoned_candidate(
+        &self,
+        start: Start,
+        zone: ScheduleZone,
+        policy: Policy,
+        microsecond: u32,
+        step_seconds: i64,
+    ) -> Option<NaiveDateTime> {
+        let mut wall = start.wall;
+        if policy == Policy::cron(true)
+            && (self.restart_at_midnight || self.date_matches(&wall))
+            && let crate::zoned::WallTime::Repeated(first, second) = zone.resolve(wall)
+            && first == start.fire
+        {
+            let earlier = wall.checked_sub_signed(second - first)?;
+            // A named frequency inherits its clock when jumping over a rejected date.
+            wall = if self.restart_at_midnight {
+                earlier
+            } else {
+                earlier.max(wall.date().and_time(NaiveTime::MIN))
+            };
+        } else if policy == Policy::cron(false)
+            && start.fire.nanosecond() == 0
+            && wall == zone.wall(&start.fire)
+            && let Some(previous) = start.fire.checked_sub_signed(Duration::seconds(1))
+            && let Some(next_wall) = zone
+                .wall(&previous)
+                .checked_add_signed(Duration::seconds(1))
+        {
+            // At the transition itself, include the skipped minutes that shift to this instant.
+            wall = wall.min(next_wall);
+        }
+        let mut candidate = wall.with_nanosecond(microsecond * 1000)?;
+        if step_seconds == 60 {
+            candidate = candidate.with_second(self.min_second())?;
+        }
+        if candidate < wall {
+            candidate = candidate.checked_add_signed(Duration::seconds(step_seconds))?;
+        }
+        Some(candidate)
     }
 }
 
@@ -517,6 +573,7 @@ impl CronTrigger {
             tz: *start_time.offset(),
             start_time,
             m: CronMatcher {
+                restart_at_midnight: true,
                 minutes,
                 hours,
                 days,
@@ -536,30 +593,32 @@ impl CronTrigger {
 
     /// Match the fields against `zone`'s wall clock. An hour field that is a wildcard or a step
     /// fires through a repeated hour twice and not inside a gap; a specific hour fires once.
-    pub(super) fn new_zoned(
-        start: &Start,
-        zone: ScheduleZone,
+    pub(super) fn for_schedule(
+        starting_ts: Fire,
+        start: Option<&Start>,
+        zone: Option<ScheduleZone>,
         f: CronFields,
+        restart_at_midnight: bool,
     ) -> Result<Self, ScheduleError> {
         let wildcard_hour = f.hour.contains('*') || f.hour.contains('/');
-        let mut trigger = CronTrigger::new(start.fire, f)?;
+        let mut trigger = CronTrigger::new(starting_ts, f)?;
+        trigger.m.restart_at_midnight = restart_at_midnight;
+        let (Some(start), Some(zone)) = (start, zone) else {
+            return Ok(trigger);
+        };
+        let policy = Policy::cron(wildcard_hour);
         let walls = CronWalls {
             m: trigger.m.clone(),
             step_seconds: trigger.step_seconds,
-            candidate: CronWalls::first_candidate(
-                start.wall,
+            candidate: trigger.m.zoned_candidate(
+                *start,
+                zone,
+                policy,
                 trigger.microsecond,
                 trigger.step_seconds,
-                trigger.m.min_second(),
             ),
         };
-        trigger.zoned = Some(Box::new(Zoned::new(
-            zone,
-            Policy::cron(wildcard_hour),
-            start,
-            walls,
-            false,
-        )));
+        trigger.zoned = Some(Box::new(Zoned::new(zone, policy, start, walls, false)));
         Ok(trigger)
     }
 
@@ -588,16 +647,16 @@ impl CronTrigger {
             }
             Some(last) => self.step(last),
         };
-        // PARITY: a rejected date jumps to the next day at the *same time of day*, so e.g. `mon`
-        // first fires on Monday at the start's wall-clock time, not at midnight.
         for _ in 0..cron_max_iterations(self.step_seconds) {
             if self.m.matches(&candidate) {
                 self.last = Some(candidate);
                 return Some(candidate);
             }
             if !self.m.date_matches(&candidate) {
-                let date = candidate.date_naive().succ_opt()?;
-                candidate = combine(date, candidate.time(), self.tz)?;
+                candidate = self
+                    .tz
+                    .from_local_datetime(&self.m.next_date(candidate.naive_local())?)
+                    .single()?;
                 continue;
             }
             candidate = self.step(candidate);
@@ -610,25 +669,18 @@ impl CronTrigger {
             if after < z.start {
                 return z.restart();
             }
-            let wall_after = z.stream.zone.wall(&after);
-            let mut candidate = wall_after
-                .with_nanosecond(self.microsecond * 1000)
-                .unwrap_or(wall_after);
-            if self.step_seconds == 60 {
-                candidate = candidate
-                    .with_second(self.m.min_second())
-                    .unwrap_or(candidate);
-            }
-            if candidate <= wall_after {
-                candidate += Duration::seconds(self.step_seconds);
-            }
-            // A wildcard hour fires a repeated hour's second occurrences after its first ones:
-            // walk the hours before `after` on its (matching) date again so they are not missed.
-            if z.stream.policy == Policy::cron(true) && self.m.date_matches(&candidate) {
-                let midnight = candidate.date().and_time(NaiveTime::MIN);
-                candidate = (candidate - Duration::hours(3)).max(midnight);
-            }
-            z.walls.candidate = Some(candidate);
+            let fire = after.checked_add_signed(Duration::nanoseconds(1))?;
+            let start = Start {
+                fire,
+                wall: z.stream.zone.wall(&fire),
+            };
+            z.walls.candidate = self.m.zoned_candidate(
+                start,
+                z.stream.zone,
+                z.stream.policy,
+                self.microsecond,
+                self.step_seconds,
+            );
             z.stream.reset(Some(z.start), Some(after), None);
             return z.next();
         }
@@ -660,39 +712,17 @@ struct CronWalls {
     candidate: Option<NaiveDateTime>,
 }
 
-impl CronWalls {
-    /// v4's first candidate: the start with the trigger's microsecond (and smallest second),
-    /// stepped once when that is before the start.
-    fn first_candidate(
-        start: NaiveDateTime,
-        microsecond: u32,
-        step_seconds: i64,
-        min_second: u32,
-    ) -> Option<NaiveDateTime> {
-        let mut c = start.with_nanosecond(microsecond * 1000).unwrap_or(start);
-        if step_seconds == 60 {
-            c = c.with_second(min_second).unwrap_or(c);
-        }
-        if c < start {
-            c += Duration::seconds(step_seconds);
-        }
-        Some(c)
-    }
-}
-
 impl WallSource for CronWalls {
     fn next_wall(&mut self) -> Option<NaiveDateTime> {
         let mut candidate = self.candidate?;
         let step = Duration::seconds(self.step_seconds);
-        // PARITY: a rejected date jumps to the next day at the same time of day (see
-        // `CronTrigger::next`).
         for _ in 0..cron_max_iterations(self.step_seconds) {
             if self.m.matches(&candidate) {
                 self.candidate = candidate.checked_add_signed(step);
                 return Some(candidate);
             }
             if !self.m.date_matches(&candidate) {
-                candidate = NaiveDateTime::new(candidate.date().succ_opt()?, candidate.time());
+                candidate = self.m.next_date(candidate)?;
                 continue;
             }
             candidate = candidate.checked_add_signed(step)?;

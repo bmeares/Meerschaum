@@ -1,4 +1,4 @@
-//! Shared checks of the access model on an instance (feature `testing`): every instance
+//! Shared connector test fixtures and access model checks (feature `testing`): every instance
 //! connector crate runs them in its own tests, so locks, the team store and the user lookups
 //! behave the same on SQL, Valkey and custom instance connectors.
 //!
@@ -15,6 +15,16 @@ use meerschaum_kernel::value::{DateTimeValue, Value as KValue};
 
 use crate::pipe_ops::{self, Doc};
 use crate::traits::{DataQuery, InstanceConnector, SyncOptions};
+
+/// Reserve a loopback port that refuses connections until the returned socket starts listening.
+pub fn bound_local_socket() -> (tokio::net::TcpSocket, u16) {
+    let socket = tokio::net::TcpSocket::new_v4().expect("IPv4 socket");
+    socket
+        .bind(([127, 0, 0, 1], 0).into())
+        .expect("bind loopback");
+    let port = socket.local_addr().expect("bound address").port();
+    (socket, port)
+}
 
 #[track_caller]
 fn ok(t: SuccessTuple) -> SuccessTuple {

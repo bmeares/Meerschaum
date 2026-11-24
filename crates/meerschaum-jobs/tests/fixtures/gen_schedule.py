@@ -231,6 +231,17 @@ def iso(dt):
     return dt.isoformat() if dt is not None else None
 
 
+def record_calendar_fires(record, parse_schedule, expr, cutoff):
+    """Ask v4 for the same cron sequence from midnight, discarding fires before the cutoff."""
+    trigger = parse_schedule(expr, now=cutoff.replace(hour=0, minute=0, second=0, microsecond=0))
+    first = trigger.next()
+    while first is not None and first < cutoff:
+        first = trigger.next()
+    fires = [iso(first)] + [iso(trigger.next()) for _ in record['fires'][1:]]
+    if fires != record['fires']:
+        record['calendar_fires'] = fires
+
+
 def evaluate(parse_schedule, expr, now, num_fires=NUM_FIRES):
     case = {'schedule': expr, 'now': now.isoformat()}
     try:
@@ -249,6 +260,11 @@ def evaluate(parse_schedule, expr, now, num_fires=NUM_FIRES):
             })
     except Exception as e:
         case['error'] = {'type': type(e).__name__, 'message': str(e)}
+    if expr in CRONS and 'error' not in case:
+        record_calendar_fires(case, parse_schedule, expr, now)
+        for check in case['next_after']:
+            after = datetime.fromisoformat(check['after'])
+            record_calendar_fires(check, parse_schedule, expr, max(now, after + datetime.resolution))
     return case
 
 
