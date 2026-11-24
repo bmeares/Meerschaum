@@ -8,6 +8,7 @@ use crate::common::{Canned, MockServer};
 use meerschaum_connector::retry::{
     CollectEvents, RetryOptions, RetryOutcome, SleepWaiter, retry_connect,
 };
+use meerschaum_connector::testing::bound_local_socket;
 use meerschaum_connector_api::APIConnector;
 use meerschaum_connector_api::client::retry::ApiRetryProbe;
 use meerschaum_core::{Map, Value};
@@ -230,9 +231,7 @@ async fn an_error_status_from_chaining_is_a_failed_attempt_asked_again() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_closed_port_exhausts_the_attempts() {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
+    let (_socket, port) = bound_local_socket();
     let conn = connector(port);
     let started = Instant::now();
     let (outcome, lines) = run(&mut probe(&conn, true, true), &options(2)).await;

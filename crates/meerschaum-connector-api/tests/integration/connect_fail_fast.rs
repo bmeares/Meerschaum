@@ -2,6 +2,7 @@
 
 use std::time::{Duration, Instant};
 
+use meerschaum_connector::testing::bound_local_socket;
 use meerschaum_connector_api::APIConnector;
 use meerschaum_connector_api::client::RequestOptions;
 use meerschaum_core::{Map, Value};
@@ -19,9 +20,7 @@ fn connector(host: &str, port: u16, extra: &[(&str, Value)]) -> APIConnector {
 
 #[tokio::test]
 async fn a_refused_connection_names_the_connector_and_the_cause() {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
+    let (_socket, port) = bound_local_socket();
     let api = connector("127.0.0.1", port, &[]);
     let started = Instant::now();
     let error = api

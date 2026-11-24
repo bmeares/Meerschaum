@@ -1347,12 +1347,7 @@ mod entry_seam_tests {
     use meerschaum_kernel::enforce::PipeInput;
     use meerschaum_kernel::{Column, Frame};
 
-    fn unreachable_lazy_postgres() -> SqlConnector {
-        // Bind and drop an ephemeral localhost listener to obtain a port that fails immediately
-        // with ECONNREFUSED rather than timing out.
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
-        let port = listener.local_addr().expect("local addr").port();
-        drop(listener);
+    fn unreachable_lazy_postgres(port: u16) -> SqlConnector {
         let spec = ConnectionSpec::from_attributes(&ConnectorAttributes {
             flavor: Some(Flavor::Postgresql),
             host: Some("127.0.0.1".into()),
@@ -1389,7 +1384,8 @@ mod entry_seam_tests {
 
     #[tokio::test]
     async fn lazy_connector_enforces_schema_discovery_on_inherent_and_facade_methods() {
-        let conn = unreachable_lazy_postgres();
+        let (_socket, port) = meerschaum_connector::testing::bound_local_socket();
+        let conn = unreachable_lazy_postgres(port);
         let mut pipe = Pipe::builder("sql:lazy_pg", "seam_check")
             .instance("sql:lazy_pg")
             .parameters(

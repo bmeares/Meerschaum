@@ -498,14 +498,6 @@ fn serve(
     let _ = stream.write_all(&body);
 }
 
-/// A TCP port nobody listens on.
-pub fn closed_port() -> u16 {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
-    port
-}
-
 /// The built `native_demo` example library (a C-ABI plugin with no `setup`).
 pub fn native_demo_library() -> PathBuf {
     static BUILT: OnceLock<()> = OnceLock::new();

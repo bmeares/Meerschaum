@@ -8,6 +8,7 @@ use meerschaum_connector::retry::{
     CollectEvents, RetryEvents, RetryOptions, RetryOutcome, RetryWaiter, SleepWaiter, Wait,
     retry_connect,
 };
+use meerschaum_connector::testing::bound_local_socket;
 use meerschaum_connector_valkey::retry::ValkeyRetryProbe;
 use meerschaum_core::{Map, Value};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -24,13 +25,6 @@ fn attributes(port: u16, extra: &[(&str, Value)]) -> Map {
         attributes.insert((*k).into(), v.clone());
     }
     attributes
-}
-
-/// Reserve a port that refuses connections until the socket starts listening.
-fn bound_socket() -> TcpSocket {
-    let socket = TcpSocket::new_v4().unwrap();
-    socket.bind(([127, 0, 0, 1], 0).into()).unwrap();
-    socket
 }
 
 fn options(max_retries: u64) -> RetryOptions {
@@ -124,8 +118,7 @@ async fn a_reachable_server_connects_and_the_connection_is_kept() {
 
 #[tokio::test]
 async fn a_closed_port_fails_each_attempt_with_the_connectors_message() {
-    let socket = bound_socket();
-    let port = socket.local_addr().unwrap().port();
+    let (_socket, port) = bound_local_socket();
     let mut probe = ValkeyRetryProbe::new("retry", attributes(port, &[]), None);
     let (outcome, lines, elapsed) = run(&mut probe, &options(2)).await;
     assert_eq!(outcome, RetryOutcome::Exhausted);
@@ -156,8 +149,7 @@ impl RetryWaiter for StartServerOnRetry {
 
 #[tokio::test]
 async fn a_server_that_starts_between_attempts_is_picked_up() {
-    let socket = bound_socket();
-    let port = socket.local_addr().unwrap().port();
+    let (socket, port) = bound_local_socket();
     let mut probe = ValkeyRetryProbe::new("retry", attributes(port, &[]), None);
     let opts = RetryOptions {
         max_retries: 2,
@@ -186,8 +178,7 @@ async fn an_existing_connection_is_used_without_connecting_again() {
     let live = first.live();
     // The address is dead now, but the probe holds a connection: it pings that one.
     server.abort();
-    let socket = bound_socket();
-    let port = socket.local_addr().unwrap().port();
+    let (_socket, port) = bound_local_socket();
     let mut second = ValkeyRetryProbe::new("retry", attributes(port, &[]), live);
     let (outcome, lines, _) = run(&mut second, &options(1)).await;
     assert_eq!(outcome, RetryOutcome::Connected, "{lines:?}");

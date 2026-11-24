@@ -120,6 +120,7 @@ rustix = { version = "1", default-features = false, features = ["std", "event", 
 signal-hook = { version = "0.4", features = ["extended-siginfo"] }
 
 [dev-dependencies]
+meerschaum-connector = { workspace = true, features = ["testing"] }
 bytes = "1"
 tower = { version = "0.5", features = ["util"] }
 tempfile = "3"
