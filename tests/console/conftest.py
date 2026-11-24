@@ -204,6 +204,9 @@ def pytest_collection_modifyitems(config, items):
     )
     here = str(pathlib.Path(__file__).parent)
     for item in items:
+        if (item.path.name == 'test_member_token.py'
+                and os.environ.get('MRSM_TEST_CONSOLE_CREDENTIALS') == '1'):
+            continue
         if str(item.fspath).startswith(here):
             item.add_marker(skip)
 

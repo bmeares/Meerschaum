@@ -217,3 +217,41 @@ def test_scheduled_job_fires_in_its_zone(tmp_path):
         assert state['last_fire'].endswith('+09:00'), state
     finally:
         mrsm('delete', 'job', name, '-f', '-y')
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='requires POSIX TZ and tzset')
+@pytest.mark.parametrize('abbreviation', ['EST', 'EDT'])
+def test_python_local_abbreviation_honors_both_clock_changes(abbreviation, tmp_path):
+    from datetime import datetime, timezone
+    import time
+    from meerschaum.utils.schedule import parse_schedule
+
+    previous = os.environ.get('TZ')
+    try:
+        os.environ['TZ'] = 'America/New_York'
+        time.tzset()
+        cases = [
+            ('daily starting 2027-03-13 02:30', ['2027-03-13T07:30', '2027-03-14T07:00']),
+            ('hourly starting 2027-11-07 00:30',
+             ['2027-11-07T04:30', '2027-11-07T05:30', '2027-11-07T06:30']),
+        ]
+        for stem, expected in cases:
+            schedule = f'{stem} {abbreviation}'
+            trigger = parse_schedule(schedule)
+            instants = [trigger.next() for _ in expected]
+            assert [t.astimezone(timezone.utc).isoformat(timespec='minutes') for t in instants] == [
+                t + '+00:00' for t in expected
+            ]
+            cli = _show_schedules(schedule, 'America/New_York', tmp_path, count=len(expected))
+            assert cli.returncode == 0, cli.stderr
+            assert all(t.isoformat(sep=' ') in cli.stdout for t in instants)
+        between = datetime(2027, 11, 7, 6, tzinfo=timezone.utc)
+        assert parse_schedule(schedule).next_after(between) == datetime(
+            2027, 11, 7, 6, 30, tzinfo=timezone.utc,
+        )
+    finally:
+        if previous is None:
+            del os.environ['TZ']
+        else:
+            os.environ['TZ'] = previous
+        time.tzset()

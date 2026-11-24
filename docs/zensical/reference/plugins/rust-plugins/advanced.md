@@ -203,7 +203,10 @@ let next_id: i64 = host::transaction("sql:main", Some("cmdq:1"), |tx| {
         &json!({"since": host::sql_timestamptz("2026-09-25T00:00:00+00:00")}),
     )?;
     let id = rows[0]["next_id"].as_i64().unwrap_or(1);
-    tx.exec_sql_with("INSERT INTO cmd_queue (id) VALUES (:id)", &json!({"id": id}))?;
+    let result = tx.exec_sql_with("INSERT INTO cmd_queue (id) VALUES (:id)", &json!({"id": id}))?;
+    if !result.success {
+        return Err(Error::Message(result.message));
+    }
     Ok(id)
 })?;
 ```

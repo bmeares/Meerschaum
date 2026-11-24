@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 import traceback
 from datetime import date, datetime, timezone, timedelta
 
@@ -390,8 +391,12 @@ def schedule_function(
 _V5_CLAUSE_PATTERN = re.compile(r'(?:^|\s)(?:tz|jitter)\s+\S', flags=re.IGNORECASE)
 
 
-def _has_v5_clauses(schedule: str) -> bool:
-    return bool(_V5_CLAUSE_PATTERN.search(str(schedule)))
+def _uses_native_scheduler(schedule: str) -> bool:
+    if _V5_CLAUSE_PATTERN.search(str(schedule)):
+        return True
+    start = _canonicalize_starting_keyword(schedule).partition(STARTING_KEYWORD)[2]
+    words = start.split()
+    return bool(words and words[-1].isupper() and words[-1] in time.tzname)
 
 
 def _from_iso(text: Optional[str]) -> Optional[datetime]:
@@ -443,11 +448,11 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
     Parse a schedule string into a stateful object with a ``next()`` method.
 
     A schedule ending in `tz <zone>` (`local`, `utc` or an IANA name) or `jitter <duration>`
-    (both v5) is parsed by the native scheduler, the one `mrsm start job -s` runs.
+    or starting in a local zone abbreviation follows the native job scheduler.
     """
     from meerschaum.utils.misc import items_str, is_int
 
-    if _has_v5_clauses(schedule):
+    if _uses_native_scheduler(schedule):
         return _parse_native(schedule, now)
 
     schedule = _canonicalize_starting_keyword(schedule)
@@ -521,7 +526,7 @@ def parse_start_time(schedule: str, now: Optional[datetime] = None) -> datetime:
     Return the explicit starting datetime in ``schedule``, or ``now``. Under a v5 `tz <zone>`
     clause, a time without a zone of its own is read on that zone's clock.
     """
-    if _has_v5_clauses(schedule):
+    if _uses_native_scheduler(schedule):
         from meerschaum.jobs import _native
         start, warnings = _native.core().jobs_parse_start_time(str(schedule), _aware_iso(now))
         for message in warnings:

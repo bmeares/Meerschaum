@@ -54,17 +54,20 @@ def config(run, F, flavor):
 
 
 def snapshots(run, F, tag, ignore=()):
-    outs = {}
     for which in ('v4', 'v5'):
         p = run.py(which, HERE / 'snapshot.py', run.work / 'spec_pipes.json', run.out / f'snap_{tag}_{which}.pkl', timeout=900)
         if p.returncode:
             F.add('pipes', f'snapshot {tag} under {which}', 'FAIL', p.stderr[-600:])
+            return
     r = run.py('v5', HERE / 'compare.py', run.out / f'snap_{tag}_v4.pkl', run.out / f'snap_{tag}_v5.pkl')
     lines = r.stdout.splitlines()
     nd = len([l for l in lines if l.startswith('DIFF')])
     ne = len([l for l in lines if l.startswith('EXPECTED')])
     detail = '\n'.join(l for l in lines if l.startswith(('DIFF', 'EXPECTED', '   ')))
     name = f'[{tag}] get_data()/dtypes/rowcount/sync_time/parameters/columns_types: v4 vs v5 on the same tables'
+    if r.returncode or not lines or lines[-1] != f'diffs: {nd} expected: {ne}':
+        F.add('pipes', name, 'FAIL', f'Incomplete comparison (exit {r.returncode}): {r.stderr[-600:]}')
+        return
     if nd:
         F.add('pipes', name, 'DIFF', detail)
     elif ne:

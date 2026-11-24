@@ -14,6 +14,7 @@ import json
 import os
 import pathlib
 import shutil
+import sqlite3
 import subprocess
 import sys
 import textwrap
@@ -64,6 +65,21 @@ HOSTED = textwrap.dedent(
         Ok(SuccessTuple {
             success: synced.success,
             message: format!("parent rows {}", counted[0]["n"]),
+        })
+    }
+
+    #[make_action]
+    fn append_pair(action: Vec<String>) -> Result<SuccessTuple> {
+        host::transaction("sql:local", None, |tx| {
+            for id in action {
+                let result = tx.exec_sql_with(
+                    "INSERT INTO queue (id) VALUES (:id)", &json!({"id": id}),
+                )?;
+                if !result.success {
+                    return Err(Error::Message(result.message));
+                }
+            }
+            Ok(SuccessTuple::ok("saved"))
         })
     }
 
@@ -165,3 +181,16 @@ def test_native_plugin_host_calls_from_python(tmp_path):
     assert result['plugins_file'] == {'hosted': {'factor': 100, 'runs': 2}}, result
     # Python's live config sees the native write too.
     assert result['runs'] == 2, result
+
+    with sqlite3.connect(tmp_path / 'local.db') as db:
+        db.execute('CREATE TABLE queue (id INTEGER PRIMARY KEY)')
+    for ids, expected_status in [(['1', '2'], 0), (['3', '1'], 1)]:
+        action = subprocess.run(
+            [sys.executable, '-m', 'meerschaum', 'append', 'pair', *ids],
+            cwd=root, env=env, capture_output=True, text=True, timeout=90,
+        )
+        assert action.returncode == expected_status, action.stdout + action.stderr
+        if expected_status:
+            assert 'UNIQUE' in action.stdout + action.stderr
+        with sqlite3.connect(tmp_path / 'local.db') as db:
+            assert db.execute('SELECT id FROM queue ORDER BY id').fetchall() == [(1,), (2,)]

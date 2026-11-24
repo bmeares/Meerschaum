@@ -36,7 +36,7 @@
  "tests/api_host/test_team_isolation.py": 1004,
  "tests/console/test_console.py": 1144,
  "tests/test_actions_facade.py": 1083,
- "tests/test_api_connector.py": 1276,
+ "tests/test_api_connector.py": 1274,
  "tests/test_native_sync.py": 1592,
  "tests/test_pipe_methods_native.py": 1361,
  "tests/test_pipes_dtypes.py": 1461,

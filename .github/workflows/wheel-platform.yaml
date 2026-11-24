@@ -165,6 +165,9 @@ jobs:
         path: smoke-src
         sparse-checkout: |-
           scripts/docker/smoke_facade.py
+          scripts/ci/smoke_windows_host.py
+          scripts/ci/upgrade_state.py
+          docs/zensical/changelog/v5.md
           scripts/ci/artifacts.py
           scripts/check_packaging.py
           Cargo.toml
@@ -298,6 +301,42 @@ jobs:
         # pip/setuptools/wheel (ensurepip) are not Meerschaum's; anything else is a leak.
         extra="$(grep -viE '^(pip|setuptools|wheel|meerschaum)$' "$RUNNER_TEMP/installed.txt" || true)"
         if [ -n "$extra" ]; then echo "unexpected dependencies: $extra" >&2; exit 1; fi
+    - name: Upgrade the previous installed wheel on persisted state
+      if: inputs.target == 'x86_64-unknown-linux-gnu' && matrix.python == '3.11'
+      run: |
+        script="$GITHUB_WORKSPACE/smoke-src/scripts/ci/upgrade_state.py"
+        current=$("$VENV_BIN/python" -I -c 'import importlib.metadata as md; print(md.version("meerschaum"))')
+        previous=$(python "$script" previous --version "$current" --changelog smoke-src/docs/zensical/changelog/v5.md)
+        cd "$RUNNER_TEMP"
+        python -m venv before
+        before/bin/pip install --only-binary=:all: "meerschaum==$previous"
+        export MRSM_ROOT_DIR="$RUNNER_TEMP/upgrade-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/upgrade-plugins"
+        export MRSM_SQL_UPGRADE="sqlite:///$MRSM_ROOT_DIR/state.db" MRSM_NO_AUTO_INSTALL=1
+        export MRSM_CONFIG='{"meerschaum":{"instance":"sql:upgrade","executor":"local"}}'
+        mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
+        before/bin/python -I "$script" seed
+        "$VENV_BIN/python" -I "$script" verify
+        "$VENV_BIN/python" -I "$script" reopen
+    - name: Exercise the Windows loopback API host from the installed wheel
+      if: runner.os == 'Windows' && matrix.python == '3.14'
+      run: |
+        wheel=$(ls dist/*.whl)
+        "$VENV_BIN/python" -m pip install "$wheel[dash]"
+        cd "$RUNNER_TEMP"
+        "$VENV_BIN/python" -I "$GITHUB_WORKSPACE/smoke-src/scripts/ci/smoke_windows_host.py"
+    - name: Install CPython 3.15 for the Linux ABI3 smoke
+      if: inputs.target == 'x86_64-unknown-linux-gnu' && matrix.python == '3.14'
+      uses: actions/setup-python@v7
+      with: {python-version: '3.15'}
+    - name: Exercise the installed ABI3 wheel on CPython 3.15
+      if: inputs.target == 'x86_64-unknown-linux-gnu' && matrix.python == '3.14'
+      run: |
+        python -m venv "$RUNNER_TEMP/py315"
+        "$RUNNER_TEMP/py315/bin/pip" install --no-index --find-links dist meerschaum
+        export MRSM_ROOT_DIR="$RUNNER_TEMP/root315" MRSM_PLUGINS_DIR="$RUNNER_TEMP/plugins315"
+        mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
+        cd "$RUNNER_TEMP"
+        py315/bin/python -I "$GITHUB_WORKSPACE/smoke-src/scripts/docker/smoke_facade.py"
   smoke-musl:
     name: smoke (musllinux ${{ inputs.wheel-arch }}, Alpine)
     needs: build

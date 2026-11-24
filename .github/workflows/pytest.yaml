@@ -158,6 +158,7 @@ jobs:
       MRSM_NO_AUTO_INSTALL: '1'
       MRSM_NO_UPDATE_CHECK: '1'
       MRSM_TEST_CONSOLE: ${{ matrix.shard == 'core' && (inputs.run_console || github.event_name == 'schedule') && '1' || '0' }}
+      MRSM_TEST_CONSOLE_CREDENTIALS: ${{ matrix.shard == 'mssql-valkey' && '1' || '0' }}
       # A failing console test leaves its tabs (screenshot, DOM, console, network) and server logs here.
       MRSM_TEST_CONSOLE_DIAG_DIR: ${{ github.workspace }}/.ci-artifacts/console-diagnostics
       PYTHONPATH: ${{ github.workspace }}

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import json
+from pathlib import Path
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -122,11 +123,9 @@ def server():
     instance.env['MRSM_SQL_W17BOTHERDEFAULT'] = f"sqlite:///{instance.root / 'other.db'}"
     try:
         instance.start()
-    except Exception as e:
+        yield instance
+    finally:
         instance.stop()
-        pytest.skip(f"cannot start a loopback API server: {e}")
-    yield instance
-    instance.stop()
 
 
 @pytest.fixture(scope='module')
@@ -268,3 +267,43 @@ for label in ('a', 'b'):
 def pathlib_repo():
     import pathlib
     return pathlib.Path(__file__).resolve().parent.parent
+
+
+def test_refreshed_user_keeps_the_explicit_database(tmp_path):
+    """A connector label may also name a different database in the registry."""
+    from meerschaum.connectors import SQLConnector
+    from meerschaum.connectors import parse
+    from meerschaum.core import User, Token
+
+    label = 'owner_' + uuid.uuid4().hex[:8]
+    named = mrsm.get_connector('sql', label, flavor='sqlite', database=str(tmp_path / 'named.db'))
+    explicit = SQLConnector(label=label, flavor='sqlite', database=str(tmp_path / 'explicit.db'))
+    user = User('owner', instance=explicit, attributes={'source': 'explicit'})
+    assert explicit.register_user(user)[0]
+    assert user.get_attributes(refresh=True) == {'source': 'explicit'}
+    loaded = Token('reader', instance=explicit, user_id=explicit.get_user_id(user)).user
+    assert loaded.username == 'owner'
+    assert loaded.get_attributes(refresh=True) == {'source': 'explicit'}
+    assert User('owner', instance=str(named)).instance_connector is named
+    assert User('owner').instance_connector is parse.parse_instance_keys(None)
+
+
+def test_required_server_fixture_propagates_startup_failure(monkeypatch):
+    from tests import _binary, test_api_connector
+    from tests.console.conftest import Server
+
+    stopped = []
+
+    def fail_start(instance):
+        raise RuntimeError('synthetic loopback startup failure')
+
+    monkeypatch.setattr(_binary, 'binary_or_skip', lambda: 'test-binary')
+    monkeypatch.setattr(Server, '__init__', lambda self, *a, **kw: self.__dict__.update(
+        root=Path('.'), env={},
+    ))
+    monkeypatch.setattr(Server, 'start', fail_start)
+    monkeypatch.setattr(Server, 'stop', lambda self: stopped.append(self))
+    for fixture in (server, test_api_connector.server):
+        with pytest.raises(RuntimeError, match='synthetic loopback startup failure'):
+            next(fixture.__wrapped__())
+    assert len(stopped) == 2

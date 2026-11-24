@@ -65,3 +65,11 @@ def test_explicit_diagnostic_lane_cannot_weaken_full_validation():
     assert shards(test_plan.plan([], requested='oracle')) == {'oracle'}
     with pytest.raises(ValueError, match='Unknown shard'):
         test_plan.plan([], requested='typo')
+
+
+@pytest.mark.parametrize('path', [
+    'meerschaum/api/dash/callbacks/tokens.py', 'meerschaum/api/dash/viewer.py',
+    'meerschaum/api/__init__.py', 'meerschaum/core/User/_User.py',
+])
+def test_credentials_use_the_service_backed_browser_lane(path):
+    assert 'mssql-valkey' in shards(test_plan.plan([path]))

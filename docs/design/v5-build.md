@@ -42,7 +42,9 @@ nightly/release calls cannot select a partial matrix. `rust / summary`, `pytest 
 tracked files (every tracked file for a dispatch or an unknown diff). Locally:
 `scripts/rust/ci.sh guardrails`.
 
-Console browser tests run once in the core lane on nightly and release candidates. The pinned
+The isolated-member token scenario runs on the MSSQL/Valkey lane using an owned Valkey,
+a separate API instance and a team data instance. Changes to token, team, instance and cache
+handling select that lane. The full console browser suite runs in the core lane on nightly and release candidates. The pinned
 Playwright package and Chromium must launch successfully; unavailable browser dependencies fail
 these required runs. Their native plugin fixture travels as a separate verified artifact from
 the existing CLI producer, tied to that CLI's bytes and current SDK. Consumers need no cached
@@ -522,3 +524,17 @@ observable v4 behavior, and the reference-test rewrites that go with them, requi
 approval. Record the trigger, before/after behavior, compatibility impact, evidence and decision
 in the [bug and behavior review ledger](../../crates/meerschaum-py/PARITY.md#bug-and-behavior-review-ledger)
 before changing reference expectations. A proposed fix is not an approved deviation.
+
+
+## Acceptance evidence for user-facing changes
+
+Write down a user's action and its observable result before reviewing the implementation.
+For a regression, run the same scenario on the previous release and the candidate. For a
+new feature, temporarily change a decision the test depends on and verify the expected
+failure. Exercise combinations implicated by previous incidents explicitly. Use pairwise
+selection to bound the remaining role, store, platform and existing-state combinations.
+
+A required service-backed check must reach the assertion against its owned service.
+Record the tested artifact revision, service version and final observable value in the
+job output. Record optional skips separately. A process exit before the assertion, an
+unexplained upgrade difference or a missing required backend fails the release check.

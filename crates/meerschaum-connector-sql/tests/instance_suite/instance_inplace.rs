@@ -91,10 +91,11 @@ async fn rowcount(c: &Ctx, pipe: &Pipe) -> i64 {
 }
 
 #[tokio::test]
+#[ignore = "requires an owned MRSM_TEST_POSTGIS_URI"]
 async fn postgis_inplace_updates_preserve_geometry_dimensions() {
-    let Some(c) = ctx("postgis", "geometry_dims").await else {
-        return;
-    };
+    let c = ctx("postgis", "geometry_dims")
+        .await
+        .expect("set MRSM_TEST_POSTGIS_URI to a disposable PostGIS instance");
     let source = format!("{}_lines", c.prefix);
     let target = format!("{}_multi", c.prefix);
     let definition = format!("SELECT id, ST_Multi(ST_Collect(g)) AS g FROM {source} GROUP BY id");

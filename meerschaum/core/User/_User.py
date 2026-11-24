@@ -84,7 +84,7 @@ class User:
         email: Optional[str] = None,
         attributes: Optional[Dict[str, Any]] = None,
         user_id: Union[int, str, uuid.UUID, None] = None,
-        instance: Optional[str] = None
+        instance: Union[str, mrsm.connectors.InstanceConnector, None] = None
     ):
         if password is None:
             password = ''
@@ -94,6 +94,8 @@ class User:
         self.type = type
         self._attributes = attributes
         self._user_id = user_id
+        if instance is not None and not isinstance(instance, str):
+            self._instance_connector = instance
         self._instance_keys = str(instance) if instance is not None else None
 
     def __repr__(self):

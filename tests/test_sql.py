@@ -268,3 +268,35 @@ def test_find_top_level_select_index_skips_comments_and_strings():
     assert find_top_level_select_index("WITH a AS (SELECT 1)") == -1
 
 
+
+
+@pytest.mark.parametrize('flavor', [f for f in get_flavors() if f in ('postgis', 'timescaledb_ha')])
+def test_postgis_existing_row_updates_z(flavor):
+    conn = conns[flavor]
+    suffix = uuid4().hex
+    source, target = f'lines_{suffix}', f'routes_{suffix}'
+    query = f'SELECT id, ST_Multi(ST_Collect(g)) AS g FROM {source} GROUP BY id'
+    pipe = mrsm.Pipe(
+        conn, target, instance=conn, target=target, columns={'id': 'id'},
+        dtypes={'g': 'geometry[MULTILINESTRINGZ, 4326]'},
+        parameters={'sql': query},
+    )
+    assert pipe.register()[0]
+    try:
+        for sql in (
+            f'CREATE TABLE {source} (id bigint, g geometry(LineStringZ,4326))',
+            f"INSERT INTO {source} VALUES (1, 'SRID=4326;LINESTRING Z(0 0 1,1 1 2)')",
+            f'CREATE TABLE {target} (id bigint PRIMARY KEY, g geometry(MultiLineStringZ,4326))',
+        ):
+            assert conn.exec(sql) is not None
+        assert pipe.sync()[0]
+        assert conn.value(f'SELECT ST_AsEWKT(g) FROM {target}') == 'SRID=4326;MULTILINESTRING((0 0 1,1 1 2))'
+        assert conn.exec(f'UPDATE {source} SET g = ST_Translate(g, 0, 0, 10)') is not None
+        for _ in range(2):
+            success, message = pipe.sync()
+            assert success, message
+            assert conn.value(f'SELECT COUNT(*) FROM {target}') == 1
+            assert conn.value(f'SELECT ST_AsEWKT(g) FROM {target}') == 'SRID=4326;MULTILINESTRING((0 0 11,1 1 12))'
+    finally:
+        pipe.delete()
+        conn.exec(f'DROP TABLE IF EXISTS {source}')
