@@ -878,10 +878,10 @@ print('JSON:' + json.dumps(out, default=str))
     # Admin: All teams -> sees everything and has switcher with all teams
     a_all = out['admin_all']
     assert a_all['is_admin'] is True and a_all['acting_team'] is None
-    assert '' == a_all['team_select_options'][0] and 'Everyone' == a_all['team_select_options'][-1]
+    assert a_all['team_select_options'][0] == 'All teams' and a_all['team_select_options'][-1] == 'Everyone'
     for name in ('sw-alpha', 'sw-beta', 'sw-open'):
         assert name in a_all['team_select_options']
-    assert a_all['team_select_value'] == '' and a_all['team_select_acting_class'] is False
+    assert a_all['team_select_value'] == 'All teams' and a_all['team_select_acting_class'] is False
     assert a_all['pipes'] == ['sw_alpha', 'sw_beta', 'sw_everyone', 'sw_open']
 
     # Admin acting as isolated team `sw-alpha`
@@ -896,7 +896,7 @@ print('JSON:' + json.dumps(out, default=str))
     assert a_w['plugins'] == [True, False]
     assert a_w['jobs'] == ['j_alpha']
     # Admin can still see all teams in the switcher to return to All teams
-    assert '' == a_w['team_select_options'][0] and 'sw-alpha' in a_w['team_select_options']
+    assert a_w['team_select_options'][0] == 'All teams' and 'sw-alpha' in a_w['team_select_options']
     assert a_w['team_select_value'] == 'sw-alpha' and a_w['team_select_acting_class'] is True
     assert a_w['instance_select_options'] == ['sql:swalpha']
 
@@ -910,7 +910,7 @@ print('JSON:' + json.dumps(out, default=str))
 
     # Multi-team isolated user (`sw-alpha` manager + `sw-beta` member)
     m_all = out['multi_all']
-    assert m_all['team_select_options'] == ['', 'sw-alpha', 'sw-beta']
+    assert m_all['team_select_options'] == ['All teams', 'sw-alpha', 'sw-beta']
     assert m_all['pipes'] == ['sw_alpha', 'sw_beta']
     assert m_all['jobs'] == ['j_alpha', 'j_beta']
 

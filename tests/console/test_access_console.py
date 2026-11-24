@@ -373,6 +373,26 @@ def test_pipes_table_team_column_and_owner_filter(access_server, browser):
         context.close()
 
 
+@pytest.mark.parametrize(('username', 'password', 'default_label'), [
+    (USERNAME, PASSWORD, 'All teams (Admin)'),
+    ('w8-manager', PASS, 'All teams'),
+])
+def test_team_switcher_shows_the_selected_view(access_server, browser, username, password, default_label):
+    context, tab = _signed_in(browser, access_server, username, password, path='/dash/pipes')
+    try:
+        select = tab.page.locator('#pages-team-select')
+        selected = select.locator('option:checked')
+        assert selected.text_content() == default_label
+        for label in ('w8data', 'Everyone', default_label):
+            with tab.page.expect_navigation():
+                select.select_option(label=label)
+            assert selected.text_content() == label
+            cookies = {cookie['name']: cookie['value'] for cookie in context.cookies()}
+            assert cookies.get('mrsm-team') == (None if label == default_label else label)
+    finally:
+        context.close()
+
+
 def test_users_and_teams_emails_and_members(access_server, browser):
     ### An administrator: every user with Type, Role and Email; teams with their menus.
     context, tab = _signed_in(browser, access_server, USERNAME, PASSWORD, path='/dash/users')
@@ -389,6 +409,8 @@ def test_users_and_teams_emails_and_members(access_server, browser):
         assert 'w8data' in page.inner_text('#teams-table') and 'Everyone' in page.inner_text('#teams-table')
         page.click('#teams-new-button')
         page.wait_for_selector('.modal.show #teams-new-name', timeout=15000)
+        page.locator('#teams-new-instance option:not([hidden])').first.wait_for(state='attached')
+        assert page.locator('#teams-new-instance option:checked').text_content() == 'None'
         page.fill('#teams-new-name', 'w8crew')
         page.click('#teams-new-submit')
         page.wait_for_selector('.modal.show', state='detached', timeout=15000)

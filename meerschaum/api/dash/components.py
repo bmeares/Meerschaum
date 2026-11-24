@@ -538,7 +538,7 @@ def build_pages_team_select(
                 id=select_id,
                 size='sm',
                 options=options,
-                value=acting,
+                value=acting or options[0]['value'],
                 class_name=(
                     'dbc_dark custom-select custom-select-sm team-select'
                     + (' team-select-acting' if acting else '')

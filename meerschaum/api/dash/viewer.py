@@ -39,6 +39,9 @@ from meerschaum.api.dash.session_store import (
 #: The built-in team every user belongs to (a pipe without a team is Everyone's).
 EVERYONE: str = 'Everyone'
 
+#: A display choice outside the team-name alphabet. An empty Select value shows its placeholder.
+ALL_TEAMS: str = 'All teams'
+
 #: How long (seconds) a viewer is reused.
 VIEWER_TTL_SECONDS: float = 5.0
 
@@ -419,7 +422,7 @@ def available_acting_teams(viewer: Optional[Viewer], conn: Any = None) -> List[D
         if not names:
             return []
         return (
-            [{'label': 'All teams (Admin)', 'value': ''}]
+            [{'label': 'All teams (Admin)', 'value': ALL_TEAMS}]
             + [{'label': name, 'value': name} for name in names]
             + [{'label': EVERYONE, 'value': EVERYONE}]
         )
@@ -428,7 +431,7 @@ def available_acting_teams(viewer: Optional[Viewer], conn: Any = None) -> List[D
     in_everyone = not viewer.real_is_isolated
     if not own or (len(own) == 1 and not in_everyone):
         return []
-    options = [{'label': 'All teams', 'value': ''}] + [{'label': name, 'value': name} for name in own]
+    options = [{'label': ALL_TEAMS, 'value': ALL_TEAMS}] + [{'label': name, 'value': name} for name in own]
     if in_everyone:
         options.append({'label': EVERYONE, 'value': EVERYONE})
     return options
