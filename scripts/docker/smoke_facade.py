@@ -84,7 +84,7 @@ def main() -> int:
         if result.returncode:
             raise RuntimeError(result.stderr or result.stdout)
         version = result.stdout.strip()
-        assert version == f'Meerschaum v{mrsm.__version__}', version
+        assert version == f'Meerschaum v{mrsm._core.__version__}', version
         return version
 
     def passwords():
