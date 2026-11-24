@@ -6,13 +6,34 @@
 
 ### 5.1.5
 
-- **Preserve PostGIS coordinates during updates.** SQL-to-SQL sync keeps Z, M and ZM when reflecting geometry and geography columns. An aggregate feeding an existing 3D target can update elevation with normal dtype enforcement.
-- **Show the active team on console login.** Administrators see **All teams (Admin)** immediately. Selecting **Everyone** previews that team's view. Empty instance selectors now explain which choices are available.
-- **Keep users on their explicit instance.** Refreshing a user or a token's owner reads the database supplied to the SDK, including when another database uses the same connector label.
-- **Run five-field cron schedules on the next matching date.** A quarterly job at 03:00 now fires in January when started in November after 03:00. Existing jobs may fire earlier than the previous preview. Check the next dates with `mrsm show schedule '0 3 1 1,4,7,10 *' 4`.
-- **Honor daylight saving transitions in Python schedules.** Local abbreviations such as `EST` and `EDT` follow the same rules as the job scheduler across skipped and repeated local times. Starting a wildcard-hour cron schedule during a repeated hour includes the remaining fires in both occurrences. [Schedules](https://meerschaum.io/reference/background-jobs/schedules/)
-- **Roll back failed SQL in native plugin actions.** The transaction example now checks statement results and propagates a write failure to the enclosing transaction. [Rust plugin guide](https://meerschaum.io/reference/plugins/rust-plugins/advanced/)
-- **Test release upgrades and credential workflows.** Release checks exercise existing PostGIS rows, scoped token registration with a live cache, persisted state across upgrades and clean package installs.
+#### Before upgrading
+
+- **Preview five-field cron schedules.**  
+  Use 5.1.5 to check upcoming runs before rolling it out. A job can now run on a date that earlier versions skipped. Both plain and zoned schedules are affected. A quarterly 03:00 UTC job started on November 24 after 03:00 now runs on January 1, then April 1. Earlier versions skipped January.
+
+  ```bash
+  mrsm show schedule '0 3 1 1,4,7,10 *' 4
+  ```
+
+#### Fixes
+
+- **Keep elevation on PostGIS updates.**  
+  PostGIS table inspection preserves Z, M, and ZM dimensions on `geometry` and `geography` columns. Ordinary SQL-to-SQL sync updates an existing aggregated 3D target when only elevation changes under normal dtype enforcement.
+
+- **Keep console team choices across reloads.**  
+  Administrators default to **All teams (Admin)** on initial login. Selecting **Everyone** previews that team's view, and an explicit choice persists after reload. An empty instance selector explains the available choices.
+
+- **Use the exact connector in SDK lookups.**  
+  The SDK refreshes a user and a token's owner from the exact connector instance supplied, even when another database shares the same connector label.
+
+- **Handle daylight saving time in cron schedules.**  
+  The Python scheduler honors recognized local abbreviations such as `EST` and `EDT` across daylight saving time on systems that support abbreviations. Starting a wildcard-hour cron during a repeated hour keeps the remaining runs in both occurrences of the hour. A specific time in a skipped hour runs right when the clock jumps past the gap. See [Schedules](https://meerschaum.io/reference/background-jobs/schedules/).
+
+- **Return errors in the Rust transaction example.**  
+  The native Rust plugin transaction example shows how to return an error on an unsuccessful statement so earlier writes roll back. See [Advanced Rust Plugins](https://meerschaum.io/reference/plugins/rust-plugins/advanced/).
+
+- **Expand release checks.**  
+  Release checks now cover an isolated team member registering, using, and revoking a scoped token with a live Valkey cache. They also verify existing 3D rows and persisted data across version upgrades.
 
 ### 5.1.4
 

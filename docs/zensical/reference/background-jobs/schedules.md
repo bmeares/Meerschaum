@@ -81,8 +81,7 @@ As in 4.x, a zone abbreviation after the starting time is accepted:
 
 Abbreviations are matched in capitals only (`edt` is an error), and never on Windows, where 4.x does not match them either.
 
-The bundled time zone tables have a finite range. For example, `America/New_York` has
-daylight saving transitions through 2099. Later dates use the last recorded offset.
+Bundled time zone data for `America/New_York` covers daylight saving time transitions through 2099. Later dates use the last recorded offset.
 
 ### Clock changes
 
