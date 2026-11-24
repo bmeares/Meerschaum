@@ -51,6 +51,14 @@ pub fn sql_item_name(
     ))
 }
 
+/// PostGIS catalog query for the plugin-visible SQLAlchemy and native connection helper.
+#[pyfunction]
+#[pyo3(signature = (table, schema=None))]
+pub fn postgis_geo_columns_types_query(table: &str, schema: Option<&str>) -> PyResult<String> {
+    meerschaum_connector_sql::queries::table::get_postgis_geo_columns_types_query(table, schema)
+        .map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
 /// `build_where(params, flavor=..., with_where=True)`. The façade resolves the connector's
 /// flavor, so the `connector` argument is not bound.
 #[pyfunction]

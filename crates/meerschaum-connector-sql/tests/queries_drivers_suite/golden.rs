@@ -1272,6 +1272,18 @@ fn golden_queries_match_python() {
                 "1 = 0"
             }));
         }
+        // v4 selects the bare geometry subtype, which loses Z and ZM. Preserve its schema
+        // and table lookup, and require the dimension-aware projection in that exact spot.
+        if func == "get_postgis_geo_columns_types_query"
+            && let Some(Value::List(queries)) = &mut expected
+            && let [Value::Str(sql)] = queries.as_mut_slice()
+        {
+            use meerschaum_connector_sql::queries::table::POSTGIS_GEOMETRY_SUBTYPE;
+            *sql = sql.replace(
+                "\"type\", geom.",
+                &format!("{POSTGIS_GEOMETRY_SUBTYPE} AS \"type\", geom."),
+            );
+        }
         let matched = match (&outcome, &expected, &case.error) {
             (Outcome::Value(got), Some(exp), None) => {
                 let exp = exp.json_dumps();

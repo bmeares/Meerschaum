@@ -7,6 +7,7 @@ Test SQL utility functions.
 """
 
 import datetime
+from uuid import uuid4
 import pytest
 import meerschaum as mrsm
 from tests.connectors import conns, get_flavors
@@ -51,6 +52,28 @@ def test_exists(flavor: str):
     conn.exec(f"DROP TABLE {tbl_name}", silent=True)
     assert table_exists(tbl, conn, debug=True) is False
  
+
+@pytest.mark.parametrize("flavor", [f for f in get_flavors() if f in ('postgis', 'timescaledb_ha')])
+def test_postgis_column_dimensions(flavor: str):
+    from meerschaum.utils.sql import get_postgis_geo_columns_types
+
+    conn = conns[flavor]
+    table = f"geometry_dims_{uuid4().hex}"
+    assert conn.exec(
+        f"CREATE TABLE {table} (g geometry, z geometry(LineStringZ,4326), "
+        "m geometry(PointM), zm geometry(PointZM), gg geography(PointZ,4326))"
+    ) is not None
+    try:
+        assert get_postgis_geo_columns_types(conn, table) == {
+            'g': 'GEOMETRY',
+            'z': 'GEOMETRY(LINESTRINGZ, 4326)',
+            'm': 'GEOMETRY(POINTM)',
+            'zm': 'GEOMETRY(POINTZM)',
+            'gg': 'GEOGRAPHY(POINTZ, 4326)',
+        }
+    finally:
+        conn.exec(f"DROP TABLE {table}")
+
 
 @pytest.mark.parametrize(
     "uri,expected_attributes", [

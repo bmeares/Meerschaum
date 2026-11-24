@@ -136,6 +136,10 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // D14 runway
     m.add_function(wrap_pyfunction!(d14_api::sql_item_name, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        d14_api::postgis_geo_columns_types_query,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(d14_api::build_where, m)?)?;
     m.add_function(wrap_pyfunction!(d14_api::d14_get_pipe_metadef, m)?)?;
     m.add_function(wrap_pyfunction!(d14_api::d14_sync_pipe_inplace, m)?)?;

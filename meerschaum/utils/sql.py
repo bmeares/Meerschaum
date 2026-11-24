@@ -1726,28 +1726,11 @@ def get_postgis_geo_columns_types(
     -------
     A dictionary mapping column names to geometry types.
     """
-    from meerschaum.utils.dtypes import get_geometry_type_srid
     from meerschaum.connectors.sql._native import sql_text
-    default_type, default_srid = get_geometry_type_srid()
-    default_type = default_type.upper()
 
     clean(table)
     clean(str(schema))
-    schema = schema or 'public'
-    truncated_schema_name = truncate_item_name(schema, flavor='postgis')
-    truncated_table_name = truncate_item_name(table, flavor='postgis')
-    query = sql_text(
-        connectable,
-        "SELECT \"f_geometry_column\" AS \"column\", 'GEOMETRY' AS \"func\", \"type\", geom.\"srid\"\n"
-        "FROM \"geometry_columns\" AS geom\n"
-        f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"
-        f"    AND \"f_table_name\" = '{truncated_table_name}'\n"
-        "UNION ALL\n"
-        "SELECT \"f_geography_column\" AS \"column\", 'GEOGRAPHY' AS \"func\", \"type\", geog.\"srid\"\n"
-        "FROM \"geography_columns\" AS geog\n"
-        f"WHERE \"f_table_schema\" = '{truncated_schema_name}'\n"
-        f"    AND \"f_table_name\" = '{truncated_table_name}'\n"
-    )
+    query = sql_text(connectable, _core.postgis_geo_columns_types_query(table, schema))
     debug_kwargs = {'debug': debug} if isinstance(connectable, mrsm.connectors.SQLConnector) else {}
     result_rows = [
         row
