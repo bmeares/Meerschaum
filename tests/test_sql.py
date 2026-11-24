@@ -296,11 +296,15 @@ def test_postgis_existing_row_updates_z(flavor, record_property):
         assert pipe.sync()[0]
         assert conn.value(f'SELECT ST_AsEWKT(g) FROM {target}') == 'SRID=4326;MULTILINESTRING((0 0 1,1 1 2))'
         assert conn.exec(f'UPDATE {source} SET g = ST_Translate(g, 0, 0, 10)') is not None
-        for _ in range(2):
-            success, message = pipe.sync()
-            assert success, message
+        for expected_updates in (1, 0):
+            result = pipe.sync()
+            assert result.success, result.message
+            assert result.updated == expected_updates
             assert conn.value(f'SELECT COUNT(*) FROM {target}') == 1
-            assert conn.value(f'SELECT ST_AsEWKT(g) FROM {target}') == 'SRID=4326;MULTILINESTRING((0 0 11,1 1 12))'
+            ewkt = conn.value(f'SELECT ST_AsEWKT(g) FROM {target}')
+            assert ewkt == 'SRID=4326;MULTILINESTRING((0 0 11,1 1 12))'
+        record_property('geometry_after_repeat', ewkt)
+        record_property('repeat_updates', result.updated)
     finally:
         pipe.delete()
         conn.exec(f'DROP TABLE IF EXISTS {source}')
