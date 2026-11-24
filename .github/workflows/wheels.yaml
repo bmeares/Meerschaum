@@ -128,6 +128,7 @@ jobs:
         export RUSTUP_TOOLCHAIN="$toolchain" MRSM_ROOT_DIR="$RUNNER_TEMP/source-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/source-plugins"
         mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
         source-venv/bin/pip install --no-cache-dir --no-deps "$archive"
+        export PATH="$RUNNER_TEMP/source-venv/bin:$PATH"
         source-venv/bin/python -I "$GITHUB_WORKSPACE/scripts/docker/smoke_facade.py"
     - name: Record exact-commit source provenance
       run: python scripts/ci/artifacts.py create --kind sdist --profile release --target source --artifact-dir dist --output dist/provenance.json

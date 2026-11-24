@@ -2,6 +2,8 @@
 # Usage (inside an `alpine` container, as the `smoke-musl` job of .github/workflows/wheels.yaml runs it):
 #
 #   docker run --rm -v "$PWD/dist:/dist:ro" \
+#     -v "$PWD/scripts/ci/upgrade_state.py:/upgrade_state.py:ro" \
+#     -v "$PWD/docs/zensical/changelog/v5.md:/changelog.md:ro" \
 #     -v "$PWD/scripts/docker/smoke_wheel_alpine.sh:/smoke.sh:ro" \
 #     -v "$PWD/scripts/docker/smoke_facade.py:/smoke_facade.py:ro" alpine:3.22 sh /smoke.sh
 #
@@ -43,4 +45,15 @@ export MRSM_SQL_SMOKE=sqlite:////tmp/api-smoke.db
 export MRSM_CONFIG='{"meerschaum": {"instance": "sql:smoke"}}'
 python3 -I /smoke_facade.py | tee /tmp/api-smoke.txt
 grep -q '"install_requests": \[\]' /tmp/api-smoke.txt
+version=$(python3 -I -c 'import meerschaum; print(meerschaum.__version__)')
+previous=$(python3 /upgrade_state.py previous --version "$version" --changelog /changelog.md)
+python3 -m venv /tmp/before
+/tmp/before/bin/pip install --only-binary=:all: "meerschaum==$previous"
+export MRSM_ROOT_DIR=/tmp/upgrade MRSM_PLUGINS_DIR=/tmp/upgrade/plugins
+export MRSM_SQL_UPGRADE=sqlite:////tmp/upgrade/state.db
+export MRSM_CONFIG='{"meerschaum":{"instance":"sql:upgrade","executor":"local"}}'
+mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
+/tmp/before/bin/python -I /upgrade_state.py seed
+python3 -I /upgrade_state.py verify
+python3 -I /upgrade_state.py reopen
 echo "musllinux smoke OK"

@@ -83,7 +83,9 @@ def main() -> int:
         result = subprocess.run(['mrsm', '--version'], capture_output=True, text=True, timeout=30)
         if result.returncode:
             raise RuntimeError(result.stderr or result.stdout)
-        return result.stdout.strip()
+        version = result.stdout.strip()
+        assert version == f'Meerschaum v{mrsm.__version__}', version
+        return version
 
     def passwords():
         from meerschaum.core.User import hash_password, verify_password

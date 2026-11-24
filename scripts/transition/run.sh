@@ -57,7 +57,7 @@ for f in ${flavors//,/ }; do
   "$PY" "$HERE/run_all.py" "run-$f" "$f" $extra || failed=1
 done
 if [ -n "$wheel" ]; then
-  report_names+=(run-wheel)
+  report_names+=(run-pip run-wheel)
   "$PY" "$HERE/run_pip.py" "$wheel" || failed=1
   MRSM_TRANSITION_V5_PY="$SCRATCH/venv-up/bin/python" MRSM_TRANSITION_V5_WHEEL=1 \
     "$PY" "$HERE/run_all.py" run-wheel sqlite --extras || failed=1

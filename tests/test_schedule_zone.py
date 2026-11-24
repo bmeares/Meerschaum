@@ -245,6 +245,8 @@ def test_python_local_abbreviation_honors_both_clock_changes(abbreviation, tmp_p
             cli = _show_schedules(schedule, 'America/New_York', tmp_path, count=len(expected))
             assert cli.returncode == 0, cli.stderr
             assert all(t.isoformat(sep=' ') in cli.stdout for t in instants)
+        named = parse_schedule(f'daily starting July 1, 2027 09:00 {abbreviation}')
+        assert named.next() == datetime(2027, 7, 1, 13, tzinfo=timezone.utc)
         between = datetime(2027, 11, 7, 6, tzinfo=timezone.utc)
         assert parse_schedule(schedule).next_after(between) == datetime(
             2027, 11, 7, 6, 30, tzinfo=timezone.utc,

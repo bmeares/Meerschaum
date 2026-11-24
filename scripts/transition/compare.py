@@ -1,6 +1,6 @@
 """Compare two snapshots (pickles from snapshot.py): `compare.py A.pkl B.pkl [--ignore-keys k,...]`.
 Run with the v5 interpreter (pandas comes from the shared mrsm venv)."""
-import pickle, sys, json
+import pickle, sys, json, re
 from meerschaum.utils.packages import attempt_import
 pd = attempt_import('pandas', lazy=False)
 
@@ -12,8 +12,19 @@ def _arrow_variant(a, b):
     """v4.1.4 returns NumPy-backed dtypes when polars is absent; v5 always returns the polars-path dtypes
     (Arrow-backed, nanosecond-capable): `float64` -> `double[pyarrow]`, `string` -> `large_string[pyarrow]`,
     `datetime64[us, UTC]` -> `timestamp[us, tz=UTC][pyarrow]` or `datetime64[ns, UTC]`. Decided for rc1."""
-    if b.endswith('[pyarrow]') and not a.endswith('[pyarrow]'):
-        return True
+    if match := re.fullmatch(r'datetime64\[(us|ns)(?:, (.+))?\]', a):
+        unit, zone = match.groups()
+        suffix = f', tz={zone}' if zone else ''
+        if b == f'timestamp[{unit}{suffix}][pyarrow]':
+            return True
+    aliases = {
+        'float64': 'double', 'Float64': 'double', 'float32': 'float', 'Float32': 'float',
+        'str': 'large_string', 'string': 'large_string', 'boolean': 'bool', 'bool': 'bool',
+    }
+    if re.fullmatch(r'[uU]?[iI]nt(?:8|16|32|64)', a):
+        return b == f'{a.lower()}[pyarrow]'
+    if a in aliases:
+        return b == f'{aliases[a]}[pyarrow]'
     return a.startswith('datetime64[us,') and b == a.replace('[us,', '[ns,')
 
 
@@ -35,8 +46,7 @@ def cmp_snaps(a, b, ignore=()):
         if pa is None or pb is None:
             diffs.append((key, 'missing', pa is None, pb is None)); continue
         if 'error' in pa or 'error' in pb:
-            if pa.get('error') != pb.get('error'):
-                diffs.append((key, 'error', (pa.get('error') or '')[-300:], (pb.get('error') or '')[-300:]))
+            diffs.append((key, 'error', (pa.get('error') or '')[-300:], (pb.get('error') or '')[-300:]))
             continue
         for f in ('rowcount', 'sync_time', 'columns', 'target', 'exists', 'columns_types', 'dtypes', 'parameters'):
             if f in ignore:

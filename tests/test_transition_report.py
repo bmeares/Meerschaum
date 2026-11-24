@@ -39,3 +39,18 @@ def test_strict_report_classifies_differences(tmp_path, status, strict_status):
             capture_output=True, text=True,
         )
         assert result.returncode == expected, result.stdout + result.stderr
+
+
+def test_snapshot_differences_preserve_logical_type_and_value(monkeypatch):
+    monkeypatch.syspath_prepend(str(TRANSITION))
+    from compare import cmp_snaps, split_dtype_diff
+    import pandas as pd
+    expected, changed = split_dtype_diff({'a': 'int64', 'b': 'string'},
+                                        {'a': 'string[pyarrow]', 'b': 'large_string[pyarrow]'})
+    assert set(changed) == {'a'} and set(expected) == {'b'}
+    def snapshot(value):
+        row = dict.fromkeys(('rowcount', 'sync_time', 'columns', 'target', 'exists',
+                             'columns_types', 'dtypes', 'parameters'))
+        row['df'] = pd.DataFrame([{'id': 1, 'value': value}])
+        return {'pipes': {'sample': row}}
+    assert [entry[1] for entry in cmp_snaps(snapshot(10), snapshot(11))] == ['values(as str)']

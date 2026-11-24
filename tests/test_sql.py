@@ -7,6 +7,7 @@ Test SQL utility functions.
 """
 
 import datetime
+import os
 from uuid import uuid4
 import pytest
 import meerschaum as mrsm
@@ -271,8 +272,11 @@ def test_find_top_level_select_index_skips_comments_and_strings():
 
 
 @pytest.mark.parametrize('flavor', [f for f in get_flavors() if f in ('postgis', 'timescaledb_ha')])
-def test_postgis_existing_row_updates_z(flavor):
+def test_postgis_existing_row_updates_z(flavor, record_property):
     conn = conns[flavor]
+    record_property('revision', os.environ.get('GITHUB_SHA', 'working-tree'))
+    record_property('backend', conn.value('SELECT version()'))
+    record_property('postgis', conn.value('SELECT postgis_full_version()'))
     suffix = uuid4().hex
     source, target = f'lines_{suffix}', f'routes_{suffix}'
     query = f'SELECT id, ST_Multi(ST_Collect(g)) AS g FROM {source} GROUP BY id'

@@ -391,12 +391,17 @@ def schedule_function(
 _V5_CLAUSE_PATTERN = re.compile(r'(?:^|\s)(?:tz|jitter)\s+\S', flags=re.IGNORECASE)
 
 
-def _uses_native_scheduler(schedule: str) -> bool:
+def _native_schedule(schedule: str, now: Optional[datetime]) -> Optional[str]:
     if _V5_CLAUSE_PATTERN.search(str(schedule)):
-        return True
-    start = _canonicalize_starting_keyword(schedule).partition(STARTING_KEYWORD)[2]
-    words = start.split()
-    return bool(words and words[-1].isupper() and words[-1] in time.tzname)
+        return schedule
+    frequency, _, start = _canonicalize_starting_keyword(schedule).partition(STARTING_KEYWORD)
+    zone = re.search(r'(?<![a-zA-Z])([A-Z]{1,5})$', start.strip())
+    if not zone or zone[1] not in time.tzname or zone[1] in ('UTC', 'GMT', 'Z'):
+        return None
+    ### The legacy SDK accepts dates like "July 1, 2027". Keep its date parser,
+    ### then let the job scheduler resolve the wall clock through gaps and folds.
+    wall_time = _legacy_start_time(schedule, now).replace(tzinfo=None)
+    return f'{frequency.strip()} starting {wall_time.isoformat(sep=" ")} tz local'
 
 
 def _from_iso(text: Optional[str]) -> Optional[datetime]:
@@ -452,11 +457,11 @@ def parse_schedule(schedule: str, now: Optional[datetime] = None):
     """
     from meerschaum.utils.misc import items_str, is_int
 
-    if _uses_native_scheduler(schedule):
-        return _parse_native(schedule, now)
+    if native_schedule := _native_schedule(schedule, now):
+        return _parse_native(native_schedule, now)
 
     schedule = _canonicalize_starting_keyword(schedule)
-    starting_ts = parse_start_time(schedule, now=now)
+    starting_ts = _legacy_start_time(schedule, now)
     schedule = schedule.split(STARTING_KEYWORD, maxsplit=1)[0].strip().lower()
     for alias_keyword, true_keyword in SCHEDULE_ALIASES.items():
         schedule = schedule.replace(alias_keyword, true_keyword)
@@ -526,13 +531,16 @@ def parse_start_time(schedule: str, now: Optional[datetime] = None) -> datetime:
     Return the explicit starting datetime in ``schedule``, or ``now``. Under a v5 `tz <zone>`
     clause, a time without a zone of its own is read on that zone's clock.
     """
-    if _uses_native_scheduler(schedule):
+    if native_schedule := _native_schedule(schedule, now):
         from meerschaum.jobs import _native
-        start, warnings = _native.core().jobs_parse_start_time(str(schedule), _aware_iso(now))
+        start, warnings = _native.core().jobs_parse_start_time(native_schedule, _aware_iso(now))
         for message in warnings:
             warn(message, stack=False)
         return datetime.fromisoformat(start)
+    return _legacy_start_time(schedule, now)
 
+
+def _legacy_start_time(schedule: str, now: Optional[datetime]) -> datetime:
     from meerschaum.utils.dtypes import round_time
     dateutil_parser = mrsm.attempt_import('dateutil.parser')
     schedule = _canonicalize_starting_keyword(schedule)

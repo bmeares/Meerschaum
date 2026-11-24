@@ -6,14 +6,15 @@ import os
 import pytest
 
 from tests._ports import service_port
-from tests.console.conftest import Server, Tab
-from tests.console.test_credential_interop import request
+from tests.console.conftest import PASSWORD, USERNAME, Server, Tab
+from tests.console.test_credential_interop import login, request
 
 pytestmark = pytest.mark.console
 
 
-def test_member_token_lifecycle(browser):
+def test_member_token_lifecycle(browser, record_property):
     from tests._binary import skip_or_fail
+    record_property('revision', os.environ.get('GITHUB_SHA', 'working-tree'))
     if 'valkey' not in json.loads(os.environ.get('MRSM_TEST_PORTS', '{}')):
         skip_or_fail('The member token lifecycle needs an owned Valkey test port.')
     instance = Server('member-token', config={
@@ -29,8 +30,31 @@ def test_member_token_lifecycle(browser):
                                      'teams': ['Readers']}),
         'MRSM_VALKEY_SESSION': f"valkey://127.0.0.1:{service_port('valkey')}/0",
     })
+    (instance.plugins / 'cache_probe.py').write_text("""
+from meerschaum.plugins import api_plugin
+
+@api_plugin
+def routes(app):
+    @app.get('/cache-probe')
+    def cache_probe():
+        from meerschaum.api import get_api_connector
+        cache = get_api_connector()._cache_connector
+        return str(cache) == 'valkey:session' and cache.test_connection()
+""")
     context = browser.new_context()
     try:
+        ### Create the untagged pipe before the instance is reserved for the team.
+        reserved = instance.env['MRSM_SQL_TEAM']
+        definition = json.loads(reserved)
+        del definition['teams']
+        instance.env['MRSM_SQL_TEAM'] = json.dumps(definition)
+        prior = instance.python("""
+import meerschaum as mrsm
+pipe = mrsm.Pipe('sql:team', 'legacy', instance='sql:team', columns={'id': 'id'})
+assert pipe.sync([{'id': 7}])[0]
+""")
+        assert prior.returncode == 0, prior.stderr[-2500:]
+        instance.env['MRSM_SQL_TEAM'] = reserved
         instance.start()
         seed = instance.python("""
 import meerschaum as mrsm
@@ -71,6 +95,9 @@ assert token.user.username == 'member' and token.scopes == ['pipes:read']
         assert check.returncode == 0, check.stderr[-2500:]
         path = '/pipes/sql:team/sample/None/docs?instance_keys=sql:team'
         assert request(instance, path, key) == (200, [{'id': 1, 'value': 42}])
+        assert request(instance, '/cache-probe', login(instance)) == (200, True)
+        assert request(instance, '/pipes/sql:team/legacy/None/docs?instance_keys=sql:team', key) == (200, [{'id': 7}])
+        page.click('#tokens-register-copy-button')
         page.click('#tokens-close-register-output-modal-button')
         row = page.locator('tr').filter(has_text='read-one')
         row.get_by_title('Manage token').click()
@@ -80,6 +107,18 @@ assert token.user.username == 'member' and token.scopes == ['pipes:read']
         page.reload()
         page.get_by_text('read-one', exact=True).first.wait_for()
         assert request(instance, path, key)[0] == 401
+        admin = browser.new_context()
+        try:
+            admin_tab = Tab(admin.new_page(), instance.base_url)
+            admin_tab.login(USERNAME, PASSWORD, path='/dash/pipes')
+            select = admin_tab.page.locator('#pages-team-select')
+            assert select.locator('option:checked').inner_text() == 'All teams (Admin)'
+            with admin_tab.page.expect_navigation():
+                select.select_option(label='Everyone')
+            admin_tab.page.reload()
+            assert select.locator('option:checked').inner_text() == 'Everyone'
+        finally:
+            admin.close()
     finally:
         context.close()
         instance.stop()

@@ -302,19 +302,20 @@ jobs:
         extra="$(grep -viE '^(pip|setuptools|wheel|meerschaum)$' "$RUNNER_TEMP/installed.txt" || true)"
         if [ -n "$extra" ]; then echo "unexpected dependencies: $extra" >&2; exit 1; fi
     - name: Upgrade the previous installed wheel on persisted state
-      if: inputs.target == 'x86_64-unknown-linux-gnu' && matrix.python == '3.11'
+      if: matrix.python == '3.11'
       run: |
         script="$GITHUB_WORKSPACE/smoke-src/scripts/ci/upgrade_state.py"
         current=$("$VENV_BIN/python" -I -c 'import importlib.metadata as md; print(md.version("meerschaum"))')
         previous=$(python "$script" previous --version "$current" --changelog smoke-src/docs/zensical/changelog/v5.md)
         cd "$RUNNER_TEMP"
         python -m venv before
-        before/bin/pip install --only-binary=:all: "meerschaum==$previous"
+        if [ -d before/Scripts ]; then oldbin=before/Scripts; else oldbin=before/bin; fi
+        "$oldbin/pip" install --only-binary=:all: "meerschaum==$previous"
         export MRSM_ROOT_DIR="$RUNNER_TEMP/upgrade-root" MRSM_PLUGINS_DIR="$RUNNER_TEMP/upgrade-plugins"
         export MRSM_SQL_UPGRADE="sqlite:///$MRSM_ROOT_DIR/state.db" MRSM_NO_AUTO_INSTALL=1
         export MRSM_CONFIG='{"meerschaum":{"instance":"sql:upgrade","executor":"local"}}'
         mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
-        before/bin/python -I "$script" seed
+        "$oldbin/python" -I "$script" seed
         "$VENV_BIN/python" -I "$script" verify
         "$VENV_BIN/python" -I "$script" reopen
     - name: Exercise the Windows loopback API host from the installed wheel
@@ -336,6 +337,7 @@ jobs:
         export MRSM_ROOT_DIR="$RUNNER_TEMP/root315" MRSM_PLUGINS_DIR="$RUNNER_TEMP/plugins315"
         mkdir -p "$MRSM_ROOT_DIR" "$MRSM_PLUGINS_DIR"
         cd "$RUNNER_TEMP"
+        export PATH="$RUNNER_TEMP/py315/bin:$PATH"
         py315/bin/python -I "$GITHUB_WORKSPACE/smoke-src/scripts/docker/smoke_facade.py"
   smoke-musl:
     name: smoke (musllinux ${{ inputs.wheel-arch }}, Alpine)
@@ -350,6 +352,8 @@ jobs:
         sparse-checkout: |-
           scripts/docker/smoke_facade.py
           scripts/docker/smoke_wheel_alpine.sh
+          scripts/ci/upgrade_state.py
+          docs/zensical/changelog/v5.md
           scripts/ci/artifacts.py
           scripts/check_packaging.py
           Cargo.toml
@@ -384,6 +388,8 @@ jobs:
         ls -l dist
         docker run --rm \
           -v "$PWD/dist:/dist:ro" \
+          -v "$PWD/smoke-src/scripts/ci/upgrade_state.py:/upgrade_state.py:ro" \
+          -v "$PWD/smoke-src/docs/zensical/changelog/v5.md:/changelog.md:ro" \
           -v "$PWD/smoke-src/scripts/docker/smoke_wheel_alpine.sh:/smoke.sh:ro" \
           -v "$PWD/smoke-src/scripts/docker/smoke_facade.py:/smoke_facade.py:ro" \
           alpine:3.22 sh /smoke.sh

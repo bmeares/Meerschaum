@@ -33,6 +33,9 @@ def main(wheel, F, name='venv-up'):
     if r.returncode:
         return None
     with zipfile.ZipFile(wheel) as z:
+        from email.parser import BytesParser
+        metadata = next(n for n in z.namelist() if n.endswith('.dist-info/METADATA'))
+        version = BytesParser().parsebytes(z.read(metadata))['Version']
         wheel_files = {n for n in z.namelist() if n.startswith('meerschaum/')}
         has_native = any('_native' in n for n in wheel_files)
         scripts = [n for n in z.namelist() if '.data/scripts' in n or 'entry_points' in n]
@@ -56,9 +59,9 @@ def main(wheel, F, name='venv-up'):
     pathlib.Path(env['MRSM_PLUGINS_DIR']).mkdir(parents=True, exist_ok=True)
     for exe in ('mrsm', 'meerschaum'):
         r = subprocess.run([str(venv / 'bin' / exe), '--version'], capture_output=True, text=True, env=env, cwd=str(SCRATCH / 'tmp'))
-        F.add('pip', f'console script `{exe} --version` runs v5', 'PASS' if '5.0' in (r.stdout + r.stderr) else 'FAIL', (r.stdout + r.stderr)[-200:])
-    r = subprocess.run([str(py), '-m', 'meerschaum', 'show', 'version'], capture_output=True, text=True, env=env, cwd=str(SCRATCH / 'tmp'))
-    F.add('pip', '`python -m meerschaum show version` runs v5', 'PASS' if '5.0' in (r.stdout + r.stderr) else 'FAIL', (r.stdout + r.stderr)[-200:])
+        F.add('pip', f'console script `{exe} --version` runs v5', 'PASS' if r.returncode == 0 and r.stdout.strip().removeprefix('Meerschaum v') == version else 'FAIL', (r.stdout + r.stderr)[-200:])
+    r = subprocess.run([str(py), '-m', 'meerschaum', 'show', 'version', '--nopretty'], capture_output=True, text=True, env=env, cwd=str(SCRATCH / 'tmp'))
+    F.add('pip', '`python -m meerschaum show version` runs v5', 'PASS' if r.returncode == 0 and r.stdout.strip().removeprefix('Meerschaum v') == version else 'FAIL', (r.stdout + r.stderr)[-200:])
     r = subprocess.run([str(py), '-c', 'import meerschaum.connectors.sql._instance'], capture_output=True, text=True, env=env, cwd=str(SCRATCH / 'tmp'))
     F.add('pip', 'importing a removed v4 module raises ModuleNotFoundError naming the replacement', 'PASS' if 'ModuleNotFoundError' in r.stderr and 'meerschaum' in r.stderr.split('ModuleNotFoundError')[-1] else 'FAIL', r.stderr[-400:])
     with zipfile.ZipFile(wheel) as z:

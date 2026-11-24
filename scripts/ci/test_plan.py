@@ -48,7 +48,8 @@ def plan(files: list[str], *, full: bool = False, requested: str = '') -> dict:
             selected.update(LANES)
         if enabled and not changes._is_ignored(normalized) and (
             any(word in normalized.lower() for word in ('token', 'team', 'cache', 'instance', 'credential'))
-            or normalized in ('meerschaum/api/__init__.py', 'meerschaum/api/dash/viewer.py',
+            or normalized in ('meerschaum/api/dash/components.py', 'meerschaum/api/dash/callbacks/users.py',
+                              'meerschaum/api/__init__.py', 'meerschaum/api/dash/viewer.py',
                               'meerschaum/api/dash/access.py', 'meerschaum/core/User/_User.py')
         ):
             selected.add('mssql-valkey')

@@ -19,7 +19,7 @@ for stage in seed verify reopen; do
         mkdir -p "$MRSM_ROOT_DIR/config"
         printf "%s\n" "upgrade_probe: MRSM{meerschaum:instance}" >> "$MRSM_ROOT_DIR/config/stack.yaml"
       fi
-      python /upgrade_state.py "$1"
+      python /upgrade_state.py "$1" --stack
       mrsm show jobs --nopretty | grep -F retained-command
       grep -Fq "MRSM{meerschaum:instance}" "$MRSM_ROOT_DIR/config/stack.yaml"
       touch "$MRSM_ROOT_DIR/executors/.upgrade-write" && rm "$MRSM_ROOT_DIR/executors/.upgrade-write"
