@@ -5,12 +5,13 @@
 use std::time::{Duration, Instant};
 
 use meerschaum_connector::retry::{
-    CollectEvents, RetryOptions, RetryOutcome, SleepWaiter, retry_connect,
+    CollectEvents, RetryEvents, RetryOptions, RetryOutcome, RetryWaiter, SleepWaiter, Wait,
+    retry_connect,
 };
 use meerschaum_connector_valkey::retry::ValkeyRetryProbe;
 use meerschaum_core::{Map, Value};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpSocket, TcpStream};
 
 const PASSWORD: &str = "retry-not-a-secret";
 
@@ -25,11 +26,11 @@ fn attributes(port: u16, extra: &[(&str, Value)]) -> Map {
     attributes
 }
 
-fn closed_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
-    port
+/// Reserve a port that refuses connections until the socket starts listening.
+fn bound_socket() -> TcpSocket {
+    let socket = TcpSocket::new_v4().unwrap();
+    socket.bind(([127, 0, 0, 1], 0).into()).unwrap();
+    socket
 }
 
 fn options(max_retries: u64) -> RetryOptions {
@@ -123,7 +124,8 @@ async fn a_reachable_server_connects_and_the_connection_is_kept() {
 
 #[tokio::test]
 async fn a_closed_port_fails_each_attempt_with_the_connectors_message() {
-    let port = closed_port();
+    let socket = bound_socket();
+    let port = socket.local_addr().unwrap().port();
     let mut probe = ValkeyRetryProbe::new("retry", attributes(port, &[]), None);
     let (outcome, lines, elapsed) = run(&mut probe, &options(2)).await;
     assert_eq!(outcome, RetryOutcome::Exhausted);
@@ -141,22 +143,35 @@ async fn a_closed_port_fails_each_attempt_with_the_connectors_message() {
     assert!(!lines.iter().any(|l| l.contains(PASSWORD)), "{lines:?}");
 }
 
+struct StartServerOnRetry(Option<TcpSocket>);
+
+impl RetryWaiter for StartServerOnRetry {
+    async fn wait(&mut self, _wait: Duration, _events: &mut dyn RetryEvents) -> Wait {
+        if let Some(socket) = self.0.take() {
+            tokio::spawn(start_server(socket.listen(1).unwrap()));
+        }
+        Wait::Elapsed
+    }
+}
+
 #[tokio::test]
 async fn a_server_that_starts_between_attempts_is_picked_up() {
-    let port = closed_port();
+    let socket = bound_socket();
+    let port = socket.local_addr().unwrap().port();
     let mut probe = ValkeyRetryProbe::new("retry", attributes(port, &[]), None);
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(400)).await;
-        let listener = TcpListener::bind(("127.0.0.1", port)).await.unwrap();
-        start_server(listener).await;
-    });
-    let mut opts = options(60);
-    opts.retry_wait = 0.1;
-    opts.wait_text = "0.1".into();
-    opts.warn = false;
-    let (outcome, _, elapsed) = run(&mut probe, &opts).await;
-    assert_eq!(outcome, RetryOutcome::Connected);
-    assert!(elapsed >= Duration::from_millis(300), "{elapsed:?}");
+    let opts = RetryOptions {
+        max_retries: 2,
+        ..RetryOptions::new("valkey:retry")
+    };
+    let mut events = CollectEvents::default();
+    let mut waiter = StartServerOnRetry(Some(socket));
+    let outcome = retry_connect(&mut probe, &opts, &mut events, &mut waiter).await;
+    assert_eq!(outcome, RetryOutcome::Connected, "{:?}", events.lines);
+    assert!(
+        events
+            .lines
+            .contains(&"info: Failed connection attempt (1 / 2)".to_string())
+    );
     assert!(probe.live().is_some());
 }
 
@@ -171,7 +186,9 @@ async fn an_existing_connection_is_used_without_connecting_again() {
     let live = first.live();
     // The address is dead now, but the probe holds a connection: it pings that one.
     server.abort();
-    let mut second = ValkeyRetryProbe::new("retry", attributes(closed_port(), &[]), live);
+    let socket = bound_socket();
+    let port = socket.local_addr().unwrap().port();
+    let mut second = ValkeyRetryProbe::new("retry", attributes(port, &[]), live);
     let (outcome, lines, _) = run(&mut second, &options(1)).await;
     assert_eq!(outcome, RetryOutcome::Connected, "{lines:?}");
 }
