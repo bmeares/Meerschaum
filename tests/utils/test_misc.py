@@ -201,3 +201,16 @@ def test_interval_str_needs_no_package(seconds, expected):
     from meerschaum.utils.misc import interval_str
     assert interval_str(timedelta(seconds=seconds)) == expected
     assert 'humanfriendly' not in sys.modules
+
+
+def test_make_symlink_recognizes_two_paths_to_the_same_plugin(tmp_path):
+    from meerschaum.utils.misc import make_symlink
+    source = tmp_path / 'source.py'
+    source.write_text('value = 1\n')
+    destination = tmp_path / 'plugin.py'
+    destination.hardlink_to(source)
+
+    success, message = make_symlink(source, destination)
+    assert success, message
+    assert destination.samefile(source)
+    assert source.read_text() == 'value = 1\n'

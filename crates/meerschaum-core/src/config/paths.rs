@@ -361,16 +361,23 @@ pub fn resolve_path(p: &Path) -> PathBuf {
     resolved
 }
 
-/// Parse a plugins-directories string (`MRSM_PLUGINS_DIR`): a JSON list or a `:`-separated list.
+/// Parse plugin directories from a JSON array or a platform path list.
 pub fn parse_plugins_dirs(value: &str) -> Result<Vec<PathBuf>, ConfigError> {
+    parse_plugins_dirs_for_platform(value, cfg!(windows))
+}
+
+fn parse_plugins_dirs_for_platform(
+    value: &str,
+    windows: bool,
+) -> Result<Vec<PathBuf>, ConfigError> {
     let paths: Vec<PathBuf> = if value.trim_start().starts_with('[') {
         match serde_json::from_str::<Vec<String>>(value) {
             Ok(items) => items.iter().map(|s| resolve_path(Path::new(s))).collect(),
             Err(_) => Vec::new(),
         }
     } else {
-        value
-            .split(':')
+        split_plugins_dir_list(value, windows)
+            .into_iter()
             .filter(|s| !s.is_empty())
             .map(|s| resolve_path(Path::new(s)))
             .collect()
@@ -382,6 +389,31 @@ pub fn parse_plugins_dirs(value: &str) -> Result<Vec<PathBuf>, ConfigError> {
         });
     }
     Ok(dedupe_plugins_dirs(paths))
+}
+
+fn split_plugins_dir_list(value: &str, windows: bool) -> Vec<&str> {
+    if !windows {
+        return value.split(':').collect();
+    }
+    static DRIVE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"^(?:[\\/]{2}[?.][\\/])?[A-Za-z]$").expect("valid drive prefix regex")
+    });
+    let mut paths = Vec::new();
+    let mut start = 0;
+    for (i, separator) in value.match_indices([':', ';']) {
+        let field = &value[start..i];
+        // A colon before a slash belongs to an absolute drive path, including \\?\C:\.
+        if separator == ":"
+            && matches!(value.as_bytes().get(i + 1), Some(b'/' | b'\\'))
+            && DRIVE.is_match(field)
+        {
+            continue;
+        }
+        paths.push(field);
+        start = i + 1;
+    }
+    paths.push(&value[start..]);
+    paths
 }
 
 /// Port of `_process_plugins_dir_paths`.
@@ -477,7 +509,7 @@ impl Paths {
             vec![launch.namespace.view.clone()]
         } else {
             match env("MRSM_PLUGINS_DIR") {
-                Some(v) => parse_plugins_dirs(&v)?,
+                Some(v) => parse_plugins_dirs_for_platform(&v, windows)?,
                 None => vec![root_dir.join("plugins")],
             }
         };

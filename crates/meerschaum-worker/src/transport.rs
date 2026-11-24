@@ -99,8 +99,6 @@ mod imp {
     }
 }
 
-// The Windows named-pipe transport compiles but is not exercised by CI yet (the Python side
-// opens the pipe as a file).
 #[cfg(windows)]
 mod imp {
     use super::*;

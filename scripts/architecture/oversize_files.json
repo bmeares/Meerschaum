@@ -29,7 +29,7 @@
  "meerschaum/utils/dataframe.py": 1560,
  "meerschaum/utils/dtypes/__init__.py": 1247,
  "meerschaum/utils/dtypes/sql.py": 1372,
- "meerschaum/utils/misc.py": 1881,
+ "meerschaum/utils/misc.py": 1877,
  "meerschaum/utils/packages/__init__.py": 2304,
  "meerschaum/utils/sql.py": 3136,
  "meerschaum/utils/venv/__init__.py": 1054,

@@ -208,8 +208,8 @@ def _connect(address: str):
         sock.set_inheritable(False)
         return sock.makefile('rwb', buffering=1024 * 1024)
     if address.startswith('\\\\.\\pipe\\'):
-        ### Windows named pipe: the host created it; open it like a file.
-        return open(address, 'r+b', buffering=0)
+        from meerschaum.worker._windows_pipe import connect_pipe
+        return connect_pipe(address)
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.connect(address)
     return sock.makefile('rwb', buffering=1024 * 1024)

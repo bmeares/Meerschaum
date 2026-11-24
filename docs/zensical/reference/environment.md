@@ -52,6 +52,13 @@ export MRSM_PLUGINS_DIR='./plugins:/another/plugins/path'
 export MRSM_PLUGINS_DIR='["./plugins", "/another/plugins/path"]'
 ```
 
+On Windows, separate multiple paths with semicolons to preserve drive letters.
+
+```powershell
+$env:MRSM_PLUGINS_DIR = "C:\meerschaum\plugins;D:\plugins"
+mrsm show plugins
+```
+
 ## `MRSM_VENVS_DIR`
 
 Place virtual environments outside `MRSM_ROOT_DIR`, e.g. to share packages across containers.

@@ -358,6 +358,63 @@ print(json.dumps(paths))
     assert out['root'] == str(tmp_path.resolve()), out
 
 
+def test_plugin_directory_lists_follow_platform_rules():
+    from meerschaum.config._paths import _split_plugins_dir_list
+
+    cases = REPO / 'crates/meerschaum-core/tests/integration/plugin_directory_lists.json'
+    for platform, value, expected in json.loads(cases.read_text(encoding='utf-8')):
+        assert _split_plugins_dir_list(value, platform == 'windows') == expected
+
+
+def test_plugin_directories_accept_native_and_colon_lists(tmp_path):
+    first, second = tmp_path / 'first', tmp_path / 'second'
+    first.mkdir()
+    second.mkdir()
+    code = """
+import json, os
+from meerschaum import _core
+from meerschaum.config import _paths
+initial = [str(path) for path in _paths.PLUGINS_DIR_PATHS]
+original = os.environ['MRSM_PLUGINS_DIR']
+_paths.set_plugins_dir_paths(original)
+print(json.dumps([initial, [str(p) for p in _paths.PLUGINS_DIR_PATHS],
+                  _core.live_config_paths()['plugins_dirs']]))
+"""
+    for paths, encoded in (
+        ([first], str(first)),
+        ([first, second], f'{first}:{second}'),
+        ([first, second], os.pathsep.join(map(str, (first, second)))),
+    ):
+        expected = [str(path.resolve()) for path in paths]
+        rc, out, err = run_python(code, tmp_path, env={'MRSM_PLUGINS_DIR': encoded})
+        assert rc == 0, err
+        assert out == [expected, expected, expected]
+
+
+def test_empty_plugin_directory_fields_and_lazy_import(tmp_path):
+    root = str(tmp_path.resolve())
+    first = tmp_path.resolve() / 'first'
+    first.mkdir()
+    code = """
+import json, os, sys
+from meerschaum.config import _paths
+initial = list(map(str, _paths.PLUGINS_DIR_PATHS))
+_paths.set_plugins_dir_paths(os.environ['MRSM_PLUGINS_DIR'])
+print(json.dumps([initial, list(map(str, _paths.PLUGINS_DIR_PATHS)),
+                  'meerschaum._core._native' in sys.modules]))
+"""
+    for encoded, initial in (
+        (f'{first}{os.pathsep}', [str(first)]),
+        (json.dumps([str(first), '']), [str(first), root]),
+    ):
+        rc, out, err = run_python(code, tmp_path, env={'MRSM_PLUGINS_DIR': encoded})
+        assert rc == 0, err
+        assert out == [initial, [str(first), root], False]
+    for invalid in (os.pathsep, '[]', '[broken'):
+        rc, _, _ = run_python(code, tmp_path, env={'MRSM_PLUGINS_DIR': invalid})
+        assert rc == 1
+
+
 def test_the_native_config_defaults_to_the_root_plugins_and_venvs(tmp_path):
     code = """
 import json

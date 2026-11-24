@@ -1551,22 +1551,18 @@ def make_symlink(src_path: 'pathlib.Path', dest_path: 'pathlib.Path') -> Success
     -------
     A SuccessTuple indicating success.
     """
-    if dest_path.exists() and dest_path.resolve() == src_path.resolve():
-        return True, "Symlink already exists."
+    try:
+        if dest_path.samefile(src_path):
+            return True, "Symlink already exists."
+    except OSError:
+        pass
     try:
         dest_path.symlink_to(src_path)
-        success = True
+        return True, "Success"
     except Exception as e:
-        success = False
-        msg = str(e)
-    if success:
-        return success, "Success"
-
-    ### Failed to create a symlink.
-    ### If we're not on Windows, return an error.
-    import platform
-    if platform.system() != 'Windows':
-        return success, msg
+        import platform
+        if platform.system() != 'Windows':
+            return False, str(e)
 
     try:
         import _winapi

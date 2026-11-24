@@ -12,6 +12,7 @@ from pathlib import Path
 import contextlib
 import os
 import platform
+import re
 import sys
 import json
 
@@ -64,19 +65,44 @@ if ENVIRONMENT_CONFIG_DIR in os.environ:
 else:
     _CONFIG_DIR_PATH = _ROOT_DIR_PATH / 'config'
 
+
+def _split_plugins_dir_list(value: str, windows: bool) -> list[str]:
+    """Keep drive letters intact while the config bootstrap runs before the extension loads."""
+    if not windows:
+        return value.split(':')
+    paths = []
+    start = 0
+    for match in re.finditer('[:;]', value):
+        i = match.start()
+        field = value[start:i]
+        if (
+            match[0] == ':'
+            and value[i + 1:i + 2] in ('/', '\\')
+            and re.fullmatch(r'(?:[\\/]{2}[?.][\\/])?[A-Za-z]', field)
+        ):
+            continue
+        paths.append(field)
+        start = i + 1
+    paths.append(value[start:])
+    return paths
+
+
+def _resolve_plugins_dir_list(value: str, *, skip_empty: bool) -> list[Path]:
+    """Resolve entries at the time of the call. Only the environment skips empty list fields."""
+    if value.lstrip().startswith('['):
+        entries = json.loads(value)
+    else:
+        entries = _split_plugins_dir_list(value, os.name == 'nt')
+        if skip_empty:
+            entries = filter(None, entries)
+    return [Path(entry).resolve() for entry in entries]
+
+
 ENVIRONMENT_PLUGINS_DIR = STATIC_CONFIG['environment']['plugins']
 if ENVIRONMENT_PLUGINS_DIR in os.environ:
     try:
-        PLUGINS_DIR_PATHS = (
-            [
-                Path(path).resolve()
-                for path in json.loads(os.environ[ENVIRONMENT_PLUGINS_DIR])
-            ] if os.environ[ENVIRONMENT_PLUGINS_DIR].lstrip().startswith('[')
-            else [
-                Path(path_str).resolve()
-                for path_str in os.environ[ENVIRONMENT_PLUGINS_DIR].split(':')
-                if path_str
-            ]
+        PLUGINS_DIR_PATHS = _resolve_plugins_dir_list(
+            os.environ[ENVIRONMENT_PLUGINS_DIR], skip_empty=True,
         )
     except Exception:
         PLUGINS_DIR_PATHS = []
@@ -249,11 +275,7 @@ def set_plugins_dir_paths(plugins_dir_paths: Union[List[Path], Path, str]):
     """Modify the value of `PLUGINS_DIR_PATHS`."""
     global PLUGINS_DIR_PATHS
     if isinstance(plugins_dir_paths, str):
-        if plugins_dir_paths.strip() and plugins_dir_paths.lstrip()[0] == '[':
-            plugins_dir_paths = json.loads(plugins_dir_paths)
-        else:
-            plugins_dir_paths = plugins_dir_paths.split(':')
-        plugins_dir_paths = [Path(_path).resolve() for _path in plugins_dir_paths]
+        plugins_dir_paths = _resolve_plugins_dir_list(plugins_dir_paths, skip_empty=False)
     if isinstance(plugins_dir_paths, Path):
         plugins_dir_paths = [plugins_dir_paths.resolve()]
 

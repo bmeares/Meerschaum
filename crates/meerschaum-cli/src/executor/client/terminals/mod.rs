@@ -51,10 +51,7 @@ impl Catalog {
         update: impl FnOnce(&mut Vec<Record>) -> Result<T, String>,
     ) -> Result<T, TerminalStorageError> {
         create_private_dir(&self.0).map_err(|_| "Could not prepare terminal identity storage.")?;
-        let lock = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(self.0.join("terminals.lock"))
+        let lock = meerschaum_core::file_lock::open(self.0.join("terminals.lock"))
             .map_err(|_| "Could not open terminal identity lock.")?;
         fs4::FileExt::try_lock(&lock).map_err(|error| match error {
             fs4::TryLockError::WouldBlock => TerminalStorageError::Busy,
@@ -918,7 +915,7 @@ mod tests {
         let directory = controller.terminals().0;
         let before = std::fs::read(directory.join("terminals.json")).unwrap();
         let lock = std::fs::OpenOptions::new()
-            .append(true)
+            .write(true)
             .open(directory.join("terminals.lock"))
             .unwrap();
         fs4::FileExt::lock(&lock).unwrap();

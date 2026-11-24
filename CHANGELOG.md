@@ -26,6 +26,9 @@
 - **Use the exact connector in SDK lookups.**  
   The SDK refreshes a user and a token's owner from the exact connector instance supplied, even when another database shares the same connector label.
 
+- **Fix Windows hangs and preserve drive letters in plugin paths.**  
+  Windows users can run `mrsm show actions` with Python plugins installed, access plugin routes and the Dash console after starting the API, and use drive-letter paths in [`MRSM_PLUGINS_DIR`](https://meerschaum.io/reference/environment/#mrsm_plugins_dir).
+
 - **Handle daylight saving time in cron schedules.**  
   The Python scheduler honors recognized local abbreviations such as `EST` and `EDT` across daylight saving time on systems that support abbreviations. Starting a wildcard-hour cron during a repeated hour keeps the remaining runs in both occurrences of the hour. A specific time in a skipped hour runs right when the clock jumps past the gap. See [Schedules](https://meerschaum.io/reference/background-jobs/schedules/).
 

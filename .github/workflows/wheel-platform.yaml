@@ -166,6 +166,8 @@ jobs:
         sparse-checkout: |-
           scripts/docker/smoke_facade.py
           scripts/ci/smoke_windows_host.py
+          tests/test_windows_worker_pipe.py
+          tests/api_host/test_windows_parent_pipe.py
           scripts/ci/upgrade_state.py
           docs/zensical/changelog/v5.md
           scripts/ci/artifacts.py
@@ -321,11 +323,17 @@ jobs:
         "$oldbin/python" -I "$script" seed
         "$VENV_BIN/python" -I "$script" verify
         "$VENV_BIN/python" -I "$script" reopen
+    - name: Exercise the Windows worker named pipe from the base wheel
+      if: runner.os == 'Windows'
+      run: |
+        cd "$RUNNER_TEMP"
+        "$VENV_BIN/python" -I "$GITHUB_WORKSPACE/smoke-src/tests/test_windows_worker_pipe.py"
     - name: Exercise the Windows loopback API host from the installed wheel
-      if: runner.os == 'Windows' && matrix.python == '3.14'
+      if: runner.os == 'Windows'
       run: |
         "$VENV_BIN/python" -m pip install "${CANDIDATE_WHEEL}[dash]"
         cd "$RUNNER_TEMP"
+        "$VENV_BIN/python" -I "$GITHUB_WORKSPACE/smoke-src/tests/api_host/test_windows_parent_pipe.py"
         "$VENV_BIN/python" -I "$GITHUB_WORKSPACE/smoke-src/scripts/ci/smoke_windows_host.py"
     - name: Install CPython 3.15 for the Linux ABI3 smoke
       if: inputs.target == 'x86_64-unknown-linux-gnu' && matrix.python == '3.14'
