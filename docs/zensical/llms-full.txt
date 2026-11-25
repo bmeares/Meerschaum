@@ -3365,6 +3365,7 @@ All keys live under `system.engine` (`mrsm edit config system`):
 | `events` | `all` | Persisted event detail: `all`, `nodes`, or `off` |
 | `state_flush_ms` | `500` | Batch flush interval in continuous mode |
 | `run_history_days` | `30` | Retention window for runs, nodes, and events |
+| `metrics_max_query_days` | `366` | Maximum span of one metrics query |
 | `metrics_retention_days` | `run_history_days` | Retention window for sync metrics. Set to `0` to disable expiry |
 | `debounce_seconds` | unset | Min delay between triggered runs of a stream child |
 | `default_duration_seconds` | `30` | Forecast duration without history |
@@ -7277,7 +7278,7 @@ print(summary['avg_duration_seconds'], 'seconds per sync')
 Leave out `pipeline` for every Pipe, or pass a `Pipe` as `pipe=`. Use UTC datetimes for `begin=` and `end=` to choose a window.
 
 ??? info "History, limits, and access"
-    - History follows `system.engine.run_history_days` (default **30 days**). Set `system.engine.metrics_retention_days` for a separate policy. Queries default to the last 24 hours and can span older retained data.
+    - History follows `system.engine.run_history_days` (default **30 days**). Set `system.engine.metrics_retention_days` for a separate policy. Queries default to the last 24 hours and can span older retained data. The independent scan limit is 366 days. Set `system.engine.metrics_max_query_days` to change it.
     - SQL totals and charts cover the chosen window. Recent history is separate: **1,000** records in the console, up to **5,000** in the SDK. Check `summary_complete` and `history_truncated` for coverage.
     - Backend or Pipeline run limits may produce sampled totals. The page labels these; filter by Pipe or choose a shorter window for more detail. Use `summary_only=True` for summary cards without history or run details.
     - Capture runs in the background and is best effort. Queue or database pressure can drop a measurement without failing the sync.
@@ -13868,10 +13869,10 @@ Source: https://meerschaum.io/changelog/v5/
 ## 5.1.6
 
 - **Reduce WAL from PostgreSQL syncs.**  
-  Frame updates and upserts of up to 1,024 rows use bound arrays. Larger patches use a transaction-local staging table that PostgreSQL removes after the merge. SQL-to-SQL syncs use unlogged staging on PostgreSQL, PostGIS, and TimescaleDB.
+  Frame updates and upserts of up to 1,024 rows use bound arrays. Larger patches use a transaction-local staging table that PostgreSQL removes after the merge. SQL-to-SQL merges use unlogged staging within their transaction on PostgreSQL, PostGIS, and TimescaleDB.
 
 - **Expire engine history once per SQL instance.**  
-  TimescaleDB drops whole chunks during automatic expiry and keeps the chunk containing the cutoff. Sync metrics inherit `system.engine.run_history_days`. Set `metrics_retention_days` under `system.engine` to keep a different window, or set it to `30` to retain the previous policy. See [Sync metrics](../reference/api-instance/sync-metrics.md).
+  TimescaleDB drops whole chunks during automatic expiry and keeps the chunk containing the cutoff. Sync metrics inherit `system.engine.run_history_days`. Set `metrics_retention_days` under `system.engine` to keep a different window, or set it to `30` before upgrading to retain the previous policy. Restoring expired history requires a backup. See [Sync metrics](../reference/api-instance/sync-metrics.md).
 
 - **Choose which loop laps to store.**  
   Set `system.engine.persist_skipped_laps: false` to omit successful all-skipped laps from run history. Live events and job heartbeats still report those laps.

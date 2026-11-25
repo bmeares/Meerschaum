@@ -520,3 +520,57 @@ async fn retention_keeps_the_boundary_chunk_and_other_jobs_skip_the_hour() {
     );
     cleanup(&conn).await;
 }
+
+#[tokio::test]
+async fn edited_user_compression_policy_and_chunk_width_reach_the_catalog() {
+    use crate::common::{doc, i};
+    let Some((conn, _)) = connectors().await else {
+        return;
+    };
+    let build = |days| {
+        let params = serde_json::json!({
+            "columns": {"datetime":"ts"}, "dtypes":{"ts":"int64","v":"int64"},
+            "target":"user_policy", "precision":"us", "upsert":true,
+            "verify":{"chunk_days":days}, "compress":{"after":format!("{days} days")}
+        });
+        Pipe::builder("test", "policy")
+            .instance("sql:metrics_partition")
+            .parameters(serde_json::from_value(params).unwrap())
+            .build()
+            .unwrap()
+    };
+    let schema = conn.schema().unwrap();
+    for days in [30, 7] {
+        let pipe = build(days);
+        let result = conn
+            .sync(
+                &pipe,
+                PipeInput::Docs(vec![doc(vec![("ts", i(WEEK_US)), ("v", i(days))])]),
+                &SyncOptions::default(),
+            )
+            .await;
+        assert!(
+            result.success && !result.message.contains("Could not apply"),
+            "{result}"
+        );
+        for (field, view) in [
+            ("integer_interval", "dimensions"),
+            ("(config->>'compress_after')::bigint", "jobs"),
+        ] {
+            let query = format!(
+                "SELECT {field} FROM timescaledb_information.{view} WHERE hypertable_schema='{schema}' AND hypertable_name='user_policy' {}",
+                if view == "jobs" {
+                    "AND proc_name='policy_compression'"
+                } else {
+                    ""
+                }
+            );
+            assert_eq!(
+                conn.value(&query).await.and_then(|v| v.as_i64()),
+                Some(days * 86_400_000_000),
+                "{query}"
+            );
+        }
+    }
+    cleanup(&conn).await;
+}

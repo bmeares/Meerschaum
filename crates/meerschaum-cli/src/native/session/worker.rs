@@ -483,6 +483,12 @@ impl Session {
                     "Warning: Native plugin '{name}' shadows Python entry-point plugin '{name}'. Shadowing is transitional and discouraged. Remove the Python plugin once the native port is complete."
                 ));
                 shadowed.push(name.clone());
+            } else if !natives.contains(name)
+                && let Some(reason) = natives.failure_for(name).or(state.native_error.as_deref())
+            {
+                report_plugin_selection(format!(
+                    "Error: Native plugin '{name}' failed to open: {reason}. Using the Python entry-point copy."
+                ));
             }
         }
         shadowed.sort();

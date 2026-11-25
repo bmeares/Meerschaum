@@ -350,6 +350,10 @@ impl SqlConnector {
         }
         let internal_schema = self.internal_schema().map(str::to_string);
         let isch = internal_schema.as_deref();
+        let mut stage_options = CreateTableOptions {
+            schema: internal_schema.clone(),
+            ..Default::default()
+        };
         let target = sp.target.clone();
         let transact_id = meerschaum_core::users::generate_password(
             self.settings.temporary_target.transaction_id_length,
@@ -489,11 +493,7 @@ impl SqlConnector {
                 &QueryOrDtypes::Query(metadef.clone()),
                 staged,
                 flavor,
-                &CreateTableOptions {
-                    schema: internal_schema.clone(),
-                    unlogged_staging: true,
-                    ..Default::default()
-                },
+                &stage_options,
             ) {
                 Ok(q) => q,
                 Err(e) => return SuccessTuple::fail(e.to_string()),
@@ -653,11 +653,7 @@ impl SqlConnector {
                 &QueryOrDtypes::Query(metadef.clone()),
                 staged,
                 flavor,
-                &CreateTableOptions {
-                    schema: internal_schema.clone(),
-                    unlogged_staging: true,
-                    ..Default::default()
-                },
+                &stage_options,
             ) {
                 Ok(q) => stage.extend(q),
                 Err(e) => return SuccessTuple::fail(e.to_string()),
@@ -818,11 +814,7 @@ impl SqlConnector {
                     &QueryOrDtypes::Query(metadef.clone()),
                     staged,
                     flavor,
-                    &CreateTableOptions {
-                        schema: internal_schema.clone(),
-                        unlogged_staging: true,
-                        ..Default::default()
-                    },
+                    &stage_options,
                 ) {
                     Ok(q) => stage.extend(q),
                     Err(e) => return SuccessTuple::fail(e.to_string()),
@@ -881,16 +873,14 @@ impl SqlConnector {
             Ok(t) => Some(t),
             Err(e) => return SuccessTuple::fail(e.to_string()),
         };
+        // This stage is consumed on the same transaction. First-sync stages that span commits stay durable.
+        stage_options.unlogged_staging = true;
         let ctas = |query: &str, table: &str| -> Result<String, String> {
             get_create_table_queries(
                 &QueryOrDtypes::Query(query.to_string()),
                 table,
                 flavor,
-                &CreateTableOptions {
-                    schema: internal_schema.clone(),
-                    unlogged_staging: true,
-                    ..Default::default()
-                },
+                &stage_options,
             )
             .map(|mut q| q.remove(0))
             .map_err(|e| e.to_string())

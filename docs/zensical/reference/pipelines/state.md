@@ -100,6 +100,7 @@ All keys live under `system.engine` (`mrsm edit config system`):
 | `events` | `all` | Persisted event detail: `all`, `nodes`, or `off` |
 | `state_flush_ms` | `500` | Batch flush interval in continuous mode |
 | `run_history_days` | `30` | Retention window for runs, nodes, and events |
+| `metrics_max_query_days` | `366` | Maximum span of one metrics query |
 | `metrics_retention_days` | `run_history_days` | Retention window for sync metrics. Set to `0` to disable expiry |
 | `debounce_seconds` | unset | Min delay between triggered runs of a stream child |
 | `default_duration_seconds` | `30` | Forecast duration without history |

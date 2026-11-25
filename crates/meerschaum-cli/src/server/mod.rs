@@ -288,7 +288,11 @@ fn start(args: &ArgsMap, rt: &mut Runtime<'_>, stdio: bool) -> ActionResult {
     let manifest = HostManifest::from_file(&manifest_path)
         .map_err(io_error)?
         .with_console(console_available);
-    let launcher = PythonHostLauncher::for_config(&config, python);
+    let mut launcher = PythonHostLauncher::for_config(&config, python);
+    launcher.env.push((
+        "MRSM_SHADOWED_PYTHON_PLUGINS".into(),
+        serde_json::to_string(&plugin_manifest.shadowed_plugins).expect("plugin names"),
+    ));
     let supervisor = HostSupervisor::new(
         &manifest,
         Arc::new(StderrHostLauncher(launcher, None)),

@@ -25,10 +25,13 @@ pub(super) fn query_bounds(
         .begin
         .or_else(|| end.checked_sub_signed(TimeDelta::days(1)))
         .ok_or_else(|| ConnectorError::Invalid("Metrics bounds are out of range.".into()))?;
-    if begin >= end
-        || (end - begin).num_microseconds().is_none()
-        || end > Utc::now() + TimeDelta::minutes(5)
-    {
+    let max_days = super::max_query_days();
+    if end.signed_duration_since(begin) > TimeDelta::days(max_days) {
+        return Err(ConnectorError::Invalid(format!(
+            "A metrics query may span up to {max_days} days."
+        )));
+    }
+    if begin >= end || end > Utc::now() + TimeDelta::minutes(5) {
         return Err(ConnectorError::Invalid(
             "Metrics need an ordered time window ending by the current time.".into(),
         ));

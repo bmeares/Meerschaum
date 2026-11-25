@@ -135,8 +135,8 @@ async fn wait_for_hooks(
     hooks: impl std::future::Future<Output = ()>,
 ) {
     if tokio::time::timeout(timeout, hooks).await.is_err() {
-        tracing::warn!(
-            "{phase}-sync hooks timed out after {timeout:?} for {pipe}. Continuing the sync."
+        eprintln!(
+            "Warning: {phase}-sync hooks timed out after {timeout:?} for {pipe}. Continuing the sync."
         );
     }
 }

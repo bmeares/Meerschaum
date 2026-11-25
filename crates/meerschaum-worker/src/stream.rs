@@ -155,7 +155,7 @@ impl PythonStream {
 }
 
 enum StreamWorker {
-    Dedicated(Worker),
+    Dedicated(Box<Worker>),
     Shared(Subscription),
 }
 
@@ -195,7 +195,7 @@ async fn supervise(
             } else {
                 let worker = pool.spawn_worker().await?;
                 worker.set_callback_handler(Some(pool.guard_handler(handler.clone())));
-                Ok(StreamWorker::Dedicated(worker))
+                Ok(StreamWorker::Dedicated(Box::new(worker)))
             }
         };
         let worker = tokio::select! {

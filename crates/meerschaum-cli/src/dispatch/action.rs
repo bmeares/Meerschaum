@@ -42,6 +42,31 @@ pub(super) fn repeat(
     {
         return failed;
     }
+    // Preserve programmatic overrides. Only dates originally parsed from this
+    // command should follow the clock on the next scheduled or looping lap.
+    let words: Vec<String> =
+        if (scheduled || looping) && ["begin", "end"].iter().any(|key| args.contains_key(*key)) {
+            args.get("sysargs")
+                .and_then(PyValue::as_list)
+                .into_iter()
+                .flatten()
+                .map(PyValue::py_str)
+                .collect()
+        } else {
+            Vec::new()
+        };
+    let original = (!words.is_empty())
+        .then(|| crate::parse::parse_arguments(&words, &rt.dates).ok())
+        .flatten();
+    let mut run_lap = |args: &ArgsMap, rt: &mut Runtime<'_>| {
+        let Some(original) = original.as_ref() else {
+            return once(args, rt);
+        };
+        match lap_bounds(args, original, &words, &crate::types::DateContext::system()) {
+            Ok(fresh) => once(&fresh, rt),
+            Err(message) => SuccessTuple::fail(message),
+        }
+    };
     if let Some(schedule) = args.get("schedule").filter(|v| v.is_truthy())
         && !skip_schedule
     {
@@ -52,7 +77,7 @@ pub(super) fn repeat(
             .map(PyValue::py_str)
             .and_then(|v| meerschaum_jobs::schedule::parse_jitter_seconds(&v));
         return crate::native::jobs::run_schedule_jittered(rt, &schedule, jitter, noun, |rt| {
-            once(args, rt)
+            run_lap(args, rt)
         });
     }
     if looping {
@@ -61,9 +86,30 @@ pub(super) fn repeat(
         // must not loop inside the first lap).
         let mut lap_args = args.clone();
         lap_args.insert("loop".into(), PyValue::Bool(false));
-        return native::jobs_laps::run_looping(rt, &lap_args, label, noun, once);
+        return native::jobs_laps::run_looping(rt, &lap_args, label, noun, run_lap);
     }
     once(args, rt)
+}
+
+fn lap_bounds(
+    args: &ArgsMap,
+    original: &ArgsMap,
+    words: &[String],
+    clock: &crate::types::DateContext,
+) -> Result<ArgsMap, String> {
+    let parsed = crate::parse::parse_arguments(words, clock).map_err(|e| e.message)?;
+    if let Some(PyValue::Exception(error)) = parsed.get(crate::spec::keys::FAILURE_KEY) {
+        return Err(error.message.clone());
+    }
+    let mut fresh = args.clone();
+    for key in ["begin", "end"] {
+        if original.get(key) == args.get(key)
+            && let Some(value) = parsed.get(key)
+        {
+            fresh.insert(key.into(), value.clone());
+        }
+    }
+    Ok(fresh)
 }
 
 /// `--min-seconds` / `--timeout-seconds` that no timer can hold: the failure to return before a
@@ -201,4 +247,32 @@ fn action_failure(
         msg.push_str(&format!(":\n\n{}", e.message));
     }
     SuccessTuple::fail(msg)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeated_retention_bounds_follow_the_lap_clock_and_preserve_overrides() {
+        let clock = |day| {
+            let date = chrono::NaiveDate::from_ymd_opt(2026, 10, day).unwrap();
+            crate::types::DateContext {
+                now_utc: date.and_hms_opt(12, 0, 0).unwrap(),
+                dateutil_default: date.and_hms_opt(0, 0, 0).unwrap(),
+                local_year: 2026,
+            }
+        };
+        let words = ["clear", "pipes", "--end", "16 days ago"].map(str::to_owned);
+        let original = crate::parse::parse_arguments(&words, &clock(24)).unwrap();
+        let later = lap_bounds(&original, &original, &words, &clock(25)).unwrap();
+        assert_ne!(later["end"], original["end"]);
+        assert_eq!(later["end"].py_str(), "2026-10-09 00:00:00+00:00");
+        let mut overridden = original.clone();
+        overridden.insert("end".into(), PyValue::Int(12));
+        assert_eq!(
+            lap_bounds(&overridden, &original, &words, &clock(25)).unwrap()["end"],
+            PyValue::Int(12)
+        );
+    }
 }

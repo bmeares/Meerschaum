@@ -9,8 +9,8 @@ import math
 from meerschaum.utils.typing import Any, Dict, List, Optional
 
 WINDOWS = (('1h', 'Last hour'), ('24h', 'Last 24 hours'), ('7d', 'Last 7 days'),
-           ('30d', 'Last 30 days'), ('all', 'All retained history'))
-WINDOW_HOURS = {'1h': 1, '24h': 24, '7d': 168, '30d': 720, 'all': 720}
+           ('30d', 'Last 30 days'), ('all', 'Maximum query window'))
+WINDOW_HOURS = {'1h': 1, '24h': 24, '7d': 168, '30d': 720, 'all': None}
 METRICS_LIMIT = 1000
 METRICS_BUCKETS = 48
 HISTORY_PAGE_SIZE = 10
@@ -72,9 +72,9 @@ def metrics(instance_keys: Optional[str], session: Any, window='24h', pipe=None,
         or (pipeline and names is not None and pipeline not in names)):
         raise PermissionError('This selection is not available to your account.')
     end = datetime.now(timezone.utc)
-    hours = WINDOW_HOURS[window]
+    hours = WINDOW_HOURS[window] or (24 * mrsm._core.metrics_max_query_days())
     result = mrsm.get_engine_metrics(
-        instance=instance, begin=(end - timedelta(hours=hours) if hours else None), end=end,
+        instance=instance, begin=end - timedelta(hours=hours), end=end,
         pipe_ref=pipe or None, pipeline=pipeline or None, limit=METRICS_LIMIT,
         buckets=METRICS_BUCKETS if with_options else 1,
         summary_only=not with_options,

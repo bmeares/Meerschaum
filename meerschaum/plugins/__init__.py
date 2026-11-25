@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import contextlib
 import pathlib
-import json
-import os
 import functools
 from collections import defaultdict
 
@@ -21,8 +19,7 @@ from meerschaum.utils.threading import RLock
 from meerschaum.core.Plugin import Plugin
 from meerschaum.plugins._page import figure, figure_json
 
-# The Rust host chooses the native implementation after it opens the plugin successfully.
-_shadowed_plugins = frozenset(json.loads(os.environ.get('MRSM_SHADOWED_PYTHON_PLUGINS', '[]')))
+from meerschaum.plugins._discovery import native_only, python_namespace_paths, shadowed_plugins
 
 _api_plugins: Dict[str, List[Callable[['fastapi.App'], Any]]] = {}
 _plugins_import_errors: Dict[str, Exception] = {}
@@ -963,7 +960,7 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
     import os
     import pathlib
     from collections import defaultdict
-    from meerschaum.utils.misc import flatten_list, make_symlink, is_symlink
+    from meerschaum.utils.misc import make_symlink, is_symlink
     import meerschaum.config.paths as paths
     from meerschaum.utils.locks import InterProcessLock
 
@@ -1021,24 +1018,7 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
             for item in os.listdir(paths.PLUGINS_INJECTED_RESOURCES_PATH)
             if is_symlink(_injected_symlink := (paths.PLUGINS_INJECTED_RESOURCES_PATH / item))
         }
-        plugins_to_be_symlinked = list(flatten_list(
-            [
-                [
-                    pathlib.Path(os.path.realpath(plugins_path / item))
-                    for item in os.listdir(plugins_path)
-                    if (
-                        not item.startswith('.')
-                    ) and (item not in ('__pycache__', '__init__.py'))
-                    and not item.endswith('.rs')
-                    and not (
-                        (plugins_path / item / 'plugin.toml').is_file()
-                        and not (plugins_path / item / '__init__.py').is_file()
-                    )
-                ]
-                for plugins_path in paths.PLUGINS_DIR_PATHS
-                if plugins_path.exists()
-            ]
-        ))
+        plugins_to_be_symlinked = python_namespace_paths(paths.PLUGINS_DIR_PATHS)
         plugins_to_be_symlinked.extend(packaged_plugin_paths)
 
         ### Check for duplicates.
@@ -1071,7 +1051,7 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                 ### links from the shared per-root `.internal/plugins`, so a
                 ### `plugin:<name>`-backed background job then fails to import its plugin.
                 try:
-                    if real_path.exists():
+                    if real_path.exists() and not native_only(real_path):
                         continue
                 except Exception:
                     pass
@@ -1161,12 +1141,7 @@ def import_plugins(
     prepended_sys_path = False
     with _locks['sys.path']:
 
-        ### Since plugins may depend on other plugins,
-        ### we need to activate the virtual environments for library plugins.
-        ### This logic exists in `Plugin.activate_venv()`,
-        ### but that code requires the plugin's module to already be imported.
-        ### It's not a guarantee of correct activation order,
-        ### e.g. if a library plugin pins a specific package and another 
+        # Library plugins may supply dependencies of the plugin being loaded.
         plugins_names = get_plugins_names()
         already_active_venvs = {
             plugin_name
@@ -1201,6 +1176,9 @@ def import_plugins(
         else:
             imported_plugins = []
             for plugin_name in flatten_list(plugins_to_import):
+                if plugin_name.split('.', 1)[0] in shadowed_plugins:
+                    imported_plugins.append(None)
+                    continue
                 plugin = Plugin(plugin_name)
                 try:
                     with Venv(plugin, init_if_not_exists=False), plugin_import_guard():
@@ -1284,6 +1262,8 @@ def from_plugin_import(plugin_import_name: str, *attrs: str) -> Any:
         plugin_import_name = plugin_import_name[len('plugins.'):]
     plugin_import_parts = plugin_import_name.split('.')
     plugin_root_name = plugin_import_parts[0]
+    if plugin_root_name in shadowed_plugins:
+        raise ImportError(f"Native plugin '{plugin_root_name}' owns this name.")
 
     plugins_package_name = _get_plugins_package_name()
     submodule_import_name = '.'.join([plugins_package_name] + plugin_import_parts)
@@ -1365,12 +1345,12 @@ def load_plugins(
     from meerschaum.utils.packages import get_modules_from_package
 
     with plugin_import_guard():
-        if _TEAM_SOURCE_NAMESPACE is not None or _shadowed_plugins:
+        if _TEAM_SOURCE_NAMESPACE is not None or shadowed_plugins:
             # Load each granted source with the same environment checks as a named import.
             plugins_modules = [
                 module for name in (get_plugins_names() if _TEAM_SOURCE_NAMESPACE is None
                                     else _TEAM_SOURCE_NAMESPACE['names'])
-                if name not in _shadowed_plugins and (module := import_plugins(name)) is not None
+                if name not in shadowed_plugins and (module := import_plugins(name)) is not None
             ]
         else:
             _plugins_names, plugins_modules = get_modules_from_package(
@@ -1635,7 +1615,7 @@ def get_plugins(*to_load, try_import: bool = True) -> Union[Tuple[Plugin], Plugi
             for name in os.listdir(paths.PLUGINS_RESOURCES_PATH)
             if name != '__init__.py'
         ]
-    _plugins = [Plugin(name) for name in names if name not in _shadowed_plugins]
+    _plugins = [Plugin(name) for name in names if name not in shadowed_plugins]
     plugins = tuple(plugin for plugin in _plugins if plugin.is_installed(try_import=try_import))
     if len(to_load) == 1:
         if len(plugins) == 0:

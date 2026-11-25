@@ -49,6 +49,12 @@ pub fn engine_metrics(
     serde_json::to_string(&result).map_err(|error| PyRuntimeError::new_err(error.to_string()))
 }
 
+/// Longest window selectable in the Performance console.
+#[pyfunction]
+pub fn metrics_max_query_days() -> i64 {
+    meerschaum_connector::sync_metrics::max_query_days()
+}
+
 /// Create the canonical empty metrics, runs and nodes tables and indexes.
 #[pyfunction]
 #[pyo3(signature = (request, pipe=None, context=None))]

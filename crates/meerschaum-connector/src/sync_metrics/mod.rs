@@ -40,6 +40,17 @@ pub fn retention_days() -> i64 {
         .unwrap_or(30)
         .clamp(0, 365_000)
 }
+/// Independent operational limit on one metrics scan. Earlier periods can be queried separately.
+pub fn max_query_days() -> i64 {
+    meerschaum_core::config::Config::current()
+        .ok()
+        .and_then(|config| config.get(&["system", "engine", "metrics_max_query_days"]))
+        .and_then(|v| v.as_i64())
+        .filter(|days| *days > 0)
+        .unwrap_or(366)
+        .min(365_000)
+}
+
 /// Maximum outcomes waiting in this process; overload drops telemetry, never the sync.
 pub const MAX_PENDING: usize = 4096;
 /// Largest database write batch.

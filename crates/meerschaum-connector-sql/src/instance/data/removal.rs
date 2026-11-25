@@ -146,7 +146,13 @@ impl SqlConnector {
         }
         let sql = self.get_clear_pipe_query(&sp, &state, query)?;
         if let Some(drop_sql) = self.get_drop_chunks_query(&sp, &state, query)?
-            && self.is_hypertable(&sp).await
+            && if retention {
+                let catalog = crate::queries::compress::get_is_hypertable_query(&self.ctx(), &sp)
+                    .ok_or_else(|| be("Missing TimescaleDB hypertable query."))?;
+                self.driver().value(&catalog).await?.is_some()
+            } else {
+                self.is_hypertable(&sp).await
+            }
         {
             let dropped = self.driver().exec(&drop_sql).await;
             if retention {

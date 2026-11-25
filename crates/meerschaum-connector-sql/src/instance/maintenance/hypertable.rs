@@ -39,7 +39,13 @@ impl SqlConnector {
         }
         let result = async {
             let sp = self.bind_pipe(pipe).await?;
-            self.reconcile_hypertable(&sp, compress).await
+            if !self.reconcile_hypertable(&sp, compress).await?
+                && sp.hypertable()
+                && sp.column("datetime").is_some()
+            {
+                return Err(be(format!("Table {} is not a hypertable", sp.target)));
+            }
+            Ok(())
         }
         .await;
         if let Err(error) = result {
@@ -55,7 +61,7 @@ impl SqlConnector {
         &self,
         sp: &SqlPipe,
         compress: bool,
-    ) -> ConnectorResult<()> {
+    ) -> ConnectorResult<bool> {
         let table = self.pipe_table_name(sp).replace('\'', "''");
         let schema = self
             .get_pipe_schema(sp)
@@ -70,7 +76,7 @@ impl SqlConnector {
             ))
             .await?;
         let Some(SqlValue::Bool(enabled)) = enabled else {
-            return Ok(());
+            return Ok(false);
         };
         if declared_width(sp.pipe())
             && let Some(axis) = sp.column("datetime")
@@ -91,7 +97,7 @@ impl SqlConnector {
             }
         }
         if !compress {
-            return Ok(());
+            return Ok(true);
         }
         let integer = dt_axis_is_integer(sp);
         if integer
@@ -129,7 +135,7 @@ impl SqlConnector {
                     .await?;
             }
         }
-        Ok(())
+        Ok(true)
     }
 
     // Timescale requires enabling the columnstore and installing its policy in separate

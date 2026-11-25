@@ -325,7 +325,11 @@ pub(super) fn run_pipeline(args: &ArgsMap, rt: &mut Runtime<'_>, depth: usize) -
         if let Some(heartbeat) = heartbeat.as_mut() {
             heartbeat.lap_started();
         }
-        let dates = rt.dates.clone();
+        let dates = if looping {
+            DateContext::system()
+        } else {
+            rt.dates.clone()
+        };
         result = match timeout {
             None => match run_chain(&sysargs, &dates, Some(&patch), |args| {
                 entry_with_args(args, rt, depth + 1)

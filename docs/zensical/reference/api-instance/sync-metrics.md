@@ -36,7 +36,7 @@ print(summary['avg_duration_seconds'], 'seconds per sync')
 Leave out `pipeline` for every Pipe, or pass a `Pipe` as `pipe=`. Use UTC datetimes for `begin=` and `end=` to choose a window.
 
 ??? info "History, limits, and access"
-    - History follows `system.engine.run_history_days` (default **30 days**). Set `system.engine.metrics_retention_days` for a separate policy. Queries default to the last 24 hours and can span older retained data.
+    - History follows `system.engine.run_history_days` (default **30 days**). Set `system.engine.metrics_retention_days` for a separate policy. Queries default to the last 24 hours and can span older retained data. The independent scan limit is 366 days. Set `system.engine.metrics_max_query_days` to change it.
     - SQL totals and charts cover the chosen window. Recent history is separate: **1,000** records in the console, up to **5,000** in the SDK. Check `summary_complete` and `history_truncated` for coverage.
     - Backend or Pipeline run limits may produce sampled totals. The page labels these; filter by Pipe or choose a shorter window for more detail. Use `summary_only=True` for summary cards without history or run details.
     - Capture runs in the background and is best effort. Queue or database pressure can drop a measurement without failing the sync.

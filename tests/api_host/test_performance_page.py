@@ -57,8 +57,9 @@ with patch.object(mrsm,'get_engine_metrics',native,create=True):
     refused(lambda: performance.metrics(str(c),{}))
     performance.metrics(str(c),admin)
     assert calls[-1]['visible_refs'] is None and calls[-1]['visible_pipelines'] is None
-    performance.metrics(str(c),admin,'all')
-    assert (calls[-1]['end'] - calls[-1]['begin']).total_seconds() == 30 * 86400
+    with patch.object(mrsm._core, 'metrics_max_query_days', return_value=90):
+        performance.metrics(str(c),admin,'all')
+    assert (calls[-1]['end'] - calls[-1]['begin']).total_seconds() == 90 * 86400
     performance.metrics(str(c),admin,with_options=False)
     assert calls[-1]['summary_only'] is True and calls[-1]['buckets'] == 1
     # Object visibility and permission changes take effect on the next refresh without a cache reset.

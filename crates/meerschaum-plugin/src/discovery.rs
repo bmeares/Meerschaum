@@ -218,7 +218,7 @@ fn read_candidate(
     if let Some(first) = seen.get(&desc.name) {
         return Err(Skip::invalid(format!(
             "duplicate native plugin '{}'; selected {}",
-            &desc.name,
+            desc.name,
             first.display()
         )));
     }

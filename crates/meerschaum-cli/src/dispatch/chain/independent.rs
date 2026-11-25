@@ -64,7 +64,7 @@ pub(super) fn run(
                 continue;
             }
             heartbeat.lap_started();
-            let dates = rt.dates.clone();
+            let dates = DateContext::system();
             last = run_chain(&step.words, &dates, Some(patch), |args| {
                 entry_with_args(args, rt, depth + 1)
             })

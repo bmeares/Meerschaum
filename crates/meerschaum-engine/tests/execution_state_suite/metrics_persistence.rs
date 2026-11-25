@@ -105,6 +105,79 @@ async fn ordinary_burst_syncs_and_failures_are_retained_without_status_debounce(
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn hook_writes_persist_status_without_recording_themselves() {
+    let env = env("hook_metrics").await;
+    let engine = env.engine();
+    for (name, hook) in [("source", false), ("telemetry", true)] {
+        let pipe = env.register(name, &json!({"columns":{"id":"id"}})).await;
+        let mut args = SyncArgs::default();
+        if hook {
+            args.extra.insert("_from_sync_hook".into(), true.into());
+        }
+        let input = PipeInput::Docs(vec![[("id".into(), KValue::Int(1))].into_iter().collect()]);
+        let result = engine.sync_pipe(&pipe, Some(input), &args).await;
+        assert!(result.success, "{}", result.message);
+        meerschaum_connector::sync_status::flush(Duration::from_secs(4)).await;
+        assert!(env.conn.get_sync_status(&pipe).await.unwrap().is_some());
+        let metrics = env
+            .conn
+            .get_engine_metrics(&MetricsQuery {
+                pipe_ref: Some(pipe.pipe_ref()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(metrics.summary.syncs, if hook { 0 } else { 1 });
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stalled_post_sync_hook_times_out_after_the_node_commits() {
+    use meerschaum_engine::{Engine, StaticRegistry, registry::SyncHooks};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct Stalled(AtomicBool);
+    #[meerschaum_connector::async_trait]
+    impl SyncHooks for Stalled {
+        async fn pre_sync(&self, _: &Pipe, _: &SyncArgs) {}
+        async fn post_sync(&self, _: &Pipe, _: &SyncArgs, _: &meerschaum_core::SyncResult) {
+            self.0.store(true, Ordering::SeqCst);
+            std::future::pending::<()>().await;
+        }
+    }
+    let env = env("hook_timeout").await;
+    let pipe = env
+        .register(
+            "source",
+            &json!({"fetch":{"definition":"SELECT 1 AS id"},"columns":{"id":"id"}}),
+        )
+        .await;
+    let hooks = Arc::new(Stalled(AtomicBool::new(false)));
+    let registry = StaticRegistry::new()
+        .with_instance(INSTANCE, env.conn.clone())
+        .with_source(INSTANCE, env.conn.clone())
+        .with_hooks(hooks.clone());
+    let mut config = env.config();
+    config.sync_hook_timeout = Duration::from_millis(20);
+    let engine = Engine::new(Arc::new(registry), config);
+    let run = engine.run(RunOptions {
+        selection: Some(Selection::refs([PipeRef::from_pipe(&pipe)])),
+        ..Default::default()
+    });
+    let result = tokio::time::timeout(Duration::from_secs(10), run)
+        .await
+        .expect("stalled hook held the sync");
+    assert!(result.success, "{}", result.message);
+    assert!(hooks.0.load(Ordering::SeqCst));
+    assert_eq!(
+        env.conn
+            .get_pipe_rowcount(&pipe, &DataQuery::default())
+            .await
+            .unwrap(),
+        Some(1)
+    );
+}
+
 #[tokio::test]
 async fn persisted_history_is_shared_with_a_new_connector_and_filtered_before_aggregation() {
     let env = env("metrics_shared").await;

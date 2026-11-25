@@ -100,7 +100,7 @@ async fn read(ctx: Ctx) -> ApiResult {
     };
     query
         .validate()
-        .map_err(|e| ApiError::new(400, &e.to_string()))?;
+        .map_err(|e| ApiError::new(400, e.to_string()))?;
     // This is a fresh registry read, rather than an access cache shared only by one worker.
     let registry = ctx.state.pipes(instance.as_deref(), true).await?;
     let index = access::index_from_dict(&conn.connector_keys(), &registry, conn.as_ref());

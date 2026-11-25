@@ -164,6 +164,46 @@ impl SystemdExecutor {
         }
     }
 
+    /// Drop disabled, inactive names from an earlier installation of this same job.
+    /// The user unit directory is shared by roots, so a filename alone proves no ownership.
+    fn remove_superseded_units(&self, name: &str, current: &str) -> std::io::Result<()> {
+        let entries = std::fs::read_dir(&self.ctx.paths.systemd_user_dir)?;
+        for entry in entries {
+            let entry = entry?;
+            let filename = entry.file_name();
+            let Some(unit) = filename.to_str() else {
+                continue;
+            };
+            if unit == current
+                || !unit.starts_with("mrsm-")
+                || !unit.ends_with(".service")
+                || !self.link_is_ours(name, unit)
+            {
+                continue;
+            }
+            if !matches!(
+                self.run_command_output(&["is-active", unit]).as_str(),
+                "inactive" | "failed" | "unknown"
+            ) || !matches!(
+                self.run_command_output(&["is-enabled", unit]).as_str(),
+                "disabled" | "linked" | "not-found"
+            ) {
+                continue;
+            }
+            let local = self.get_service_job_path(name).join(unit);
+            if entry.file_type()?.is_file()
+                && std::fs::read(entry.path())? != std::fs::read(&local)?
+            {
+                continue;
+            }
+            std::fs::remove_file(entry.path())?;
+            if local.is_file() {
+                std::fs::remove_file(local)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Whether the job `name` of this root has an installed unit: a unit file in its directory
     /// and the user unit linking to it.
     fn unit_is_installed(&self, name: &str) -> bool {
@@ -1051,6 +1091,11 @@ impl SystemdExecutor {
             return linked;
         }
 
+        if let Err(e) = self.remove_superseded_units(name, &service_name) {
+            return SuccessTuple::fail(format!(
+                "Could not remove superseded units for {name}: {e}"
+            ));
+        }
         let mut fails = 0;
         for command in [
             vec!["daemon-reload"],
@@ -1298,6 +1343,11 @@ impl JobExecutor for SystemdExecutor {
         let logs_path = self.get_service_logs_path(name);
         let mut file_paths = vec![self.get_socket_path(name), self.get_result_path(name)];
         file_paths.extend(owned_link);
+        if self.ctx.paths.systemd_user_dir.is_dir()
+            && let Err(e) = self.remove_superseded_units(name, &service)
+        {
+            return SuccessTuple::fail(e.to_string());
+        }
         let job_path = self.get_service_job_path(name);
         if job_path.exists()
             && let Err(e) = std::fs::remove_dir_all(&job_path)

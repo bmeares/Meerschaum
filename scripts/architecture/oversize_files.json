@@ -1,7 +1,7 @@
 {
  "_about": "Rust files over 1700 lines and Python files (meerschaum/, tests/) over 1000 lines. This list may only shrink: lower a number or drop an entry.",
  "crates/meerschaum-cli/src/action_docs.rs": 2068,
- "crates/meerschaum-connector-sql/src/instance/inplace/mod.rs": 2073,
+ "crates/meerschaum-connector-sql/src/instance/inplace/mod.rs": 2071,
  "crates/meerschaum-core/src/yaml/scanner.rs": 1743,
  "crates/meerschaum-plugin/src/single_file/runtime.rs": 2434,
  "meerschaum/_internal/docs/index.py": 1009,
@@ -25,7 +25,7 @@
  "meerschaum/core/Pipe/_sync.py": 1182,
  "meerschaum/core/Pipeline/__init__.py": 1654,
  "meerschaum/core/Plugin/_Plugin.py": 1147,
- "meerschaum/plugins/__init__.py": 1811,
+ "meerschaum/plugins/__init__.py": 1802,
  "meerschaum/utils/dataframe.py": 1560,
  "meerschaum/utils/dtypes/__init__.py": 1247,
  "meerschaum/utils/dtypes/sql.py": 1372,

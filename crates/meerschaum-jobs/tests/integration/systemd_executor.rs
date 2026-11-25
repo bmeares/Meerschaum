@@ -1278,3 +1278,28 @@ fn a_team_jobs_unit_holds_an_allowlisted_environment() {
         let _ = std::fs::remove_dir_all(tmp);
     }
 }
+
+#[test]
+fn deleting_a_scoped_job_reaps_its_disabled_predecessor_only() {
+    let r = Roots::new();
+    let ex = r.executor("project/root");
+    let name = "sample";
+    assert!(
+        ex.create_job(name, &["show".into(), "version".into()], None)
+            .success
+    );
+    let job_dir = ex.get_service_job_path(name);
+    let old = "mrsm-legacy.sample.service";
+    let stale = r.user_dir().join(old);
+    std::fs::write(job_dir.join(old), "previous unit").unwrap();
+    std::os::unix::fs::symlink(job_dir.join(old), &stale).unwrap();
+
+    let foreign = r.user_dir().join("mrsm-other.sample.service");
+    let other_file = r.root("other.service");
+    std::fs::write(&other_file, "another root").unwrap();
+    std::os::unix::fs::symlink(other_file, &foreign).unwrap();
+    let result = ex.delete_job(name);
+    assert!(result.success, "{result}");
+    assert!(stale.symlink_metadata().is_err());
+    assert!(foreign.exists());
+}

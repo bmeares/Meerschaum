@@ -193,7 +193,10 @@ impl SqlConnector {
         };
         if pipe.connector_keys() != "mrsm" {
             return match self.reconcile_hypertable(&sp, true).await {
-                Ok(()) => SuccessTuple::ok(format!("Checked the compression policy for {pipe}.")),
+                Ok(true) => SuccessTuple::ok(format!("Checked the compression policy for {pipe}.")),
+                Ok(false) => SuccessTuple::ok(format!(
+                    "{pipe} is not a hypertable; skipping compression policy."
+                )),
                 Err(error) => SuccessTuple::fail(format!(
                     "Failed to apply a compression policy to {pipe}: {error}"
                 )),
