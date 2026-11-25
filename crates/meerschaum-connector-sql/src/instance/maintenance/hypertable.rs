@@ -37,7 +37,8 @@ impl SqlConnector {
         if !compress && !declared_width(pipe) {
             return;
         }
-        let result = async {
+        // Keep the catalog work off the in-place sync future's stack.
+        let result = Box::pin(async {
             let sp = self.bind_pipe(pipe).await?;
             if !self.reconcile_hypertable(&sp, compress).await?
                 && sp.hypertable()
@@ -46,7 +47,7 @@ impl SqlConnector {
                 return Err(be(format!("Table {} is not a hypertable", sp.target)));
             }
             Ok(())
-        }
+        })
         .await;
         if let Err(error) = result {
             let warning = format!(

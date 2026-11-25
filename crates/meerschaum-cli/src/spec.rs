@@ -312,12 +312,6 @@ pub static ARGUMENTS: &[ArgSpec] = &[
         ),
         group: G::Actions,
     },
-    flag(
-        "independent_laps",
-        &["--independent-laps"],
-        "Give each step of a looping action chain its own interval and failure cooldown.",
-        G::Actions,
-    ),
     // ---------------------------------------------------------------- Jobs options
     flag(
         "daemon",
@@ -925,6 +919,12 @@ pub static ARGUMENTS: &[ArgSpec] = &[
         &["--plugin-manifest"],
         "Return bounded plugin metadata from this confined execution context (show plugins).",
         G::Plugins,
+    ),
+    flag(
+        "independent_laps",
+        &["--independent-laps"],
+        "Give each step of a looping action chain its own interval and failure cooldown.",
+        G::Actions,
     ),
 ];
 

@@ -256,6 +256,30 @@ impl Served {
         credential.token
     }
 
+    /// Model the supervisor renewing the launch lease and the client's credential together.
+    async fn with_live_command<F: Future>(
+        &self,
+        grant: &Grant,
+        file: &std::path::Path,
+        operation: F,
+    ) -> F::Output {
+        let renewal = async {
+            loop {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                callbacks::renew(&self.state, grant.id, grant.launch_id)
+                    .await
+                    .unwrap();
+                self.credential(grant, file).await;
+            }
+        };
+        tokio::select! {
+            result = tokio::time::timeout(Duration::from_secs(120), operation) => {
+                result.expect("supervised command must finish")
+            }
+            never = renewal => never,
+        }
+    }
+
     fn alias(&self, keys: &str, credential_file: &std::path::Path) -> APIConnector {
         APIConnector::from_execution_alias(&Alias {
             version: ALIAS_VERSION,
@@ -516,34 +540,20 @@ async fn actual_native_sync_consumes_large_pages_on_the_same_sqlite_db_and_refus
             ..Default::default()
         },
     );
-    // Keep the actual callback provider rotating throughout the native sync.
-    let state = server.state.clone();
-    let rotating_file = file.clone();
-    let rotating_grant = grant.clone();
-    let rotation = tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            let credential =
-                callbacks::credential(&state, rotating_grant.id, rotating_grant.launch_id)
-                    .await
-                    .unwrap();
-            write_private(&rotating_file, &serde_json::to_string(&credential).unwrap()).unwrap();
-        }
-    });
-    let result = tokio::time::timeout(
-        Duration::from_secs(120),
-        engine.sync_pipe(
-            &pipe,
-            None,
-            &meerschaum_engine::SyncArgs {
-                begin: meerschaum_engine::SyncBegin::Unbounded,
-                ..Default::default()
-            },
-        ),
-    )
-    .await;
-    rotation.abort();
-    let result = result.expect("large native sync must finish");
+    let result = server
+        .with_live_command(
+            &grant,
+            &file,
+            engine.sync_pipe(
+                &pipe,
+                None,
+                &meerschaum_engine::SyncArgs {
+                    begin: meerschaum_engine::SyncBegin::Unbounded,
+                    ..Default::default()
+                },
+            ),
+        )
+        .await;
     assert!(result.success, "{}", result.message);
     let count = server
         .main
@@ -712,7 +722,9 @@ async fn atomic_source_replacement_materializes_large_rows_and_replays_a_freshly
             serde_json::from_value::<source_replace::Response>(result).unwrap()
         }
     };
-    let prepared = send(request.clone(), token).await;
+    let prepared = server
+        .with_live_command(&grant, &file, send(request.clone(), token))
+        .await;
     let source_replace::Response::Prepared { id, summary } = prepared else {
         panic!("prepared replacement expected")
     };
@@ -729,9 +741,9 @@ async fn atomic_source_replacement_materializes_large_rows_and_replays_a_freshly
     request.phase = Phase::Commit;
     request.id = Some(id);
     token = server.credential(&grant, &file).await;
-    let committed = tokio::time::timeout(Duration::from_secs(120), send(request.clone(), token))
-        .await
-        .expect("atomic large commit must finish");
+    let committed = server
+        .with_live_command(&grant, &file, send(request.clone(), token))
+        .await;
     let source_replace::Response::Committed { result } = committed else {
         panic!("committed replacement expected")
     };
@@ -788,20 +800,21 @@ async fn atomic_source_replacement_materializes_large_rows_and_replays_a_freshly
             ..Default::default()
         },
     );
-    let result = tokio::time::timeout(
-        Duration::from_secs(120),
-        engine.sync_pipe(
-            &pipe,
-            None,
-            &meerschaum_engine::SyncArgs {
-                begin: meerschaum_engine::SyncBegin::Unbounded,
-                replace: true,
-                ..Default::default()
-            },
-        ),
-    )
-    .await
-    .expect("native atomic replacement must finish");
+    let result = server
+        .with_live_command(
+            &grant,
+            &file,
+            engine.sync_pipe(
+                &pipe,
+                None,
+                &meerschaum_engine::SyncArgs {
+                    begin: meerschaum_engine::SyncBegin::Unbounded,
+                    replace: true,
+                    ..Default::default()
+                },
+            ),
+        )
+        .await;
     assert!(result.success, "{}", result.message);
     assert_eq!(
         (result.deleted, result.inserted),

@@ -35,6 +35,7 @@
     "pre_sync_hooks": {"$ref": "#/$defs/names"},
     "post_sync_hooks": {"$ref": "#/$defs/names"},
     "load_errors": {"type": "object", "additionalProperties": {"type": "string"}},
+    "shadowed_plugins": {"$ref": "#/$defs/names", "description": "Python names replaced by native plugins in this session."},
     "entry_point_plugins": {
       "$ref": "#/$defs/names",
       "description": "Entry-point plugins (the `meerschaum.plugins` group) the interpreter had when the manifest was built; a different set makes the cache stale."
