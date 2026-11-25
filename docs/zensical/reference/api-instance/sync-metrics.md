@@ -2,6 +2,8 @@
 
 Find slow or failing syncs, and see how much data each Pipe or Pipeline changes.
 
+Writes made by sync hooks update the destination pipe’s latest status and skip the metrics queue. Each pre- and post-sync hook phase has a five-second deadline. Set `system.engine.sync_hook_timeout_seconds` to a positive duration in seconds to change it. A timeout logs a warning and the sync continues.
+
 ## In the console
 
 Open **Performance** in the navigation, or choose **View performance** on the Overview card. Pick a time window, then narrow it to a Pipe or Pipeline.
@@ -34,7 +36,7 @@ print(summary['avg_duration_seconds'], 'seconds per sync')
 Leave out `pipeline` for every Pipe, or pass a `Pipe` as `pipe=`. Use UTC datetimes for `begin=` and `end=` to choose a window.
 
 ??? info "History, limits, and access"
-    - History is retained for **30 days**. The default query covers the last 24 hours.
+    - History follows `system.engine.run_history_days` (default **30 days**). Set `system.engine.metrics_retention_days` for a separate policy. Queries default to the last 24 hours and can span older retained data. The independent scan limit is 366 days. Set `system.engine.metrics_max_query_days` to change it.
     - SQL totals and charts cover the chosen window. Recent history is separate: **1,000** records in the console, up to **5,000** in the SDK. Check `summary_complete` and `history_truncated` for coverage.
     - Backend or Pipeline run limits may produce sampled totals. The page labels these; filter by Pipe or choose a shorter window for more detail. Use `summary_only=True` for summary cards without history or run details.
     - Capture runs in the background and is best effort. Queue or database pressure can drop a measurement without failing the sync.
@@ -45,7 +47,7 @@ Leave out `pipeline` for every Pipe, or pass a `Pipe` as `pipe=`. Use UTC dateti
 ## In Grafana
 
 ??? info "Storage"
-    SQL instances keep measurements in the internal `mrsm_engine_metrics` table, with time, Pipe, run, and registration indexes. TimescaleDB uses 30-day chunks on a microsecond time axis. Upgrading an RC installation corrects undersized intervals for future chunks; retained history stays intact.
+    SQL instances keep measurements in the internal `mrsm_engine_metrics` table, with time, Pipe, run, and registration indexes. TimescaleDB uses seven-day chunks on a microsecond time axis. Automatic expiry drops whole chunks, so rows can survive up to one extra chunk interval. Upgrading an RC installation corrects undersized intervals for future chunks; retained history stays intact.
 
 The Stack's [**Syncs** dashboard](../stack/index.md#built-in-dashboards) shows the same affected-row, duration, and failure measurements, and its **Engine** dashboard shows engine runs, Pipe freshness and the dirty-range backlog.
 

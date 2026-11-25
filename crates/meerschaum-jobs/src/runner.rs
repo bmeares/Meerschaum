@@ -309,6 +309,17 @@ impl ProcessRunner for FakeSystemctl {
                 }
                 Ok(CommandOutput::ok(""))
             }
+            "is-enabled" => {
+                let enabled = rest
+                    .get(1)
+                    .and_then(|name| state.services.get(*name))
+                    .is_some_and(|service| service.enabled);
+                Ok(CommandOutput {
+                    code: Some(if enabled { 0 } else { 1 }),
+                    stdout: if enabled { "enabled\n" } else { "disabled\n" }.into(),
+                    stderr: String::new(),
+                })
+            }
             "is-active" => {
                 let name = rest.get(1).copied().unwrap_or("");
                 let scripted = state.is_active_scripts.get_mut(name).and_then(|queue| {

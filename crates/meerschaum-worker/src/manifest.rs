@@ -432,6 +432,9 @@ pub struct Manifest {
     /// plugin trees hold.
     #[serde(default)]
     pub entry_point_plugins: Vec<String>,
+    /// Native-owned names excluded when building this Python manifest.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shadowed_plugins: Vec<String>,
 }
 
 impl Manifest {
@@ -867,10 +870,17 @@ async fn build_manifest_with_options(
     quiet: bool,
 ) -> WorkerResult<Manifest> {
     let (combined, per_plugin) = fingerprint(plugins_dirs);
-    if per_plugin.is_empty() && entry_points.is_empty() {
+    let shadowed_plugins = pool.shadowed_plugins();
+    if per_plugin
+        .keys()
+        .chain(entry_points)
+        .all(|name| shadowed_plugins.contains(name))
+    {
         return Ok(Manifest {
             schema_version: MANIFEST_SCHEMA_VERSION,
             fingerprint: Some(combined),
+            entry_point_plugins: entry_points.to_vec(),
+            shadowed_plugins,
             ..Manifest::default()
         });
     }
@@ -905,6 +915,7 @@ async fn build_manifest_with_options(
         .map_err(|e| WorkerError::Protocol(format!("invalid manifest from the worker: {e}")))?;
     manifest.schema_version = MANIFEST_SCHEMA_VERSION;
     manifest.entry_point_plugins = entry_points.to_vec();
+    manifest.shadowed_plugins = shadowed_plugins;
     // Fingerprint after the import: a plugin that writes into its own tree while it is
     // imported must not make the fresh manifest stale (the check is idempotent).
     let sources = tracked_sources(plugins_dirs, &manifest.plugins);
@@ -956,7 +967,9 @@ pub async fn ensure_manifest_for_with_options(
     entry_points: &[String],
     quiet: bool,
 ) -> WorkerResult<(Manifest, ManifestSource)> {
-    if let Some(cached) = read_fresh_manifest_for(path, plugins_dirs, entry_points)? {
+    if let Some(cached) = read_fresh_manifest_for(path, plugins_dirs, entry_points)?
+        && cached.shadowed_plugins == pool.shadowed_plugins()
+    {
         return Ok((cached, ManifestSource::Cache));
     }
     let prior = read_cached_manifest_for(path, plugins_dirs).ok().flatten();

@@ -767,6 +767,7 @@ impl Engine {
         let critical_path = schedule(&the_plan, &durations).critical_path;
 
         let native_config = NativeConfig {
+            sync_hook_timeout: self.config.sync_hook_timeout,
             defaults: self.config.defaults.clone(),
             default_backtrack_minutes: self.config.default_backtrack_minutes,
             filter_params_index_limit: self.config.filter_params_index_limit,
@@ -785,6 +786,13 @@ impl Engine {
         }
         let executor = Arc::new(native);
 
+        // Delay history writes until the executor knows a lap did work. A provisional
+        // skip can become a sync after its parents finish.
+        let history_started = (self.config.persist_runs
+            && !self.config.persist_skipped_laps
+            && on_lap.is_some()
+            && self.plan_authority.is_none())
+        .then(|| Arc::new(std::sync::atomic::AtomicBool::new(false)));
         let persist = (self.config.persist_runs && self.config.events != EventGranularity::Off)
             .then(|| Arc::new(Mutex::new(Vec::new())));
         let sink = Arc::new(RunSink {
@@ -809,6 +817,7 @@ impl Engine {
         let flusher = persist.clone().map(|buf| {
             let state = self.state.clone();
             let stop = flusher_stop.clone();
+            let active = history_started.clone();
             let every = self.config.state_flush.max(Duration::from_millis(10));
             tokio::spawn(async move {
                 // A failed write (a SQLite instance busy with a node's long statement) keeps
@@ -819,6 +828,15 @@ impl Engine {
                 let mut lost = None;
                 loop {
                     let stopped = stop.sleep(every).await;
+                    if active
+                        .as_ref()
+                        .is_some_and(|flag| !flag.load(std::sync::atomic::Ordering::Acquire))
+                    {
+                        if stopped {
+                            return Ok(());
+                        }
+                        continue;
+                    }
                     let rows: Vec<EventRow> =
                         std::mem::take(&mut *buf.lock().unwrap_or_else(|e| e.into_inner()));
                     let mut pending = rows;
@@ -859,6 +877,7 @@ impl Engine {
         });
 
         let exec_opts = ExecutorOptions {
+            history_started: history_started.clone(),
             plan_authority: self.plan_authority.clone(),
             // A row-filtered Main window may observe only its accepted rows. A global
             // post-sync watermark is an optional progress measurement for this run.
@@ -921,6 +940,16 @@ impl Engine {
             };
             execute(ctx, the_plan.clone(), &exec_opts).await
         };
+        let persist_run = self.config.persist_runs
+            && (history_started.is_none()
+                || record.run.success != Some(true)
+                || record
+                    .nodes
+                    .iter()
+                    .any(|row| row.status != NodeStatus::Skipped));
+        if persist_run && let Some(active) = &history_started {
+            active.store(true, std::sync::atomic::Ordering::Release);
+        }
         flusher_stop.stop();
         if let Some(h) = flusher {
             let error = match h.await {
@@ -937,7 +966,7 @@ impl Engine {
                 warnings.push(warning);
             }
         }
-        if self.config.persist_runs {
+        if persist_run {
             record_finished_run(self.state.as_ref(), &mut record).await;
         }
         // The nodes' sync statuses (written in the background as each node ended).
@@ -1034,6 +1063,17 @@ impl Engine {
                 return;
             }
             *last = Some(Instant::now());
+        }
+        let Ok(conn) = self.registry.instance(&self.config.home_instance) else {
+            return;
+        };
+        match conn.claim_history_retention("runs").await {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(error) => {
+                tracing::debug!("Engine retention: {error}");
+                return;
+            }
         }
         let before = Utc::now() - chrono::TimeDelta::days(self.config.run_history_days);
         for e in self.state.prune_history(before).await {
@@ -1285,6 +1325,7 @@ impl Engine {
             expected: 0,
         };
         let native_config = NativeConfig {
+            sync_hook_timeout: self.config.sync_hook_timeout,
             defaults: self.config.defaults.clone(),
             default_backtrack_minutes: self.config.default_backtrack_minutes,
             filter_params_index_limit: self.config.filter_params_index_limit,

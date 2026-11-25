@@ -583,6 +583,7 @@ fn dtype_tables_case(func: &str, expected: &Value) -> Vec<String> {
 
 fn create_table_options(a: &Value) -> CreateTableOptions {
     CreateTableOptions {
+        unlogged_staging: false,
         schema: os(a, "schema"),
         primary_key: os(a, "primary_key"),
         primary_key_db_type: os(a, "primary_key_db_type"),

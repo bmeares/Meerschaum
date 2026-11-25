@@ -1363,3 +1363,40 @@ flavor_tests!(partitioned_upserts, |c: Ctx| async move {
 flavor_tests!(partitioned_upserts_by_default, |c: Ctx| async move {
     partitioned(c, false).await;
 });
+
+#[tokio::test]
+async fn postgres_patch_uses_arrays_and_one_transaction_local_large_stage() {
+    let Some(c) = ctx("postgresql", "patch_arrays").await else {
+        return;
+    };
+    let pipe = c.pipe(
+        "batch",
+        "patch",
+        None,
+        r#"{"columns":{"id":"id"},"upsert":true,"upsert_changed_only":true}"#,
+    );
+    let rows = |n: i64| {
+        (0..n)
+            .map(|id| doc(vec![("id", i(id)), ("v", i(id))]))
+            .collect()
+    };
+    ok(c.sync_with(&pipe, rows(1), no_diff()).await);
+    c.conn.enable_query_log();
+    let small = ok(c.sync_with(&pipe, rows(1024), no_diff()).await);
+    assert_eq!(small.message, "Upserted 1,023 rows.");
+    let log = c.conn.take_query_log();
+    assert!(
+        log.iter()
+            .any(|q| q.starts_with("WITH ") && q.contains("unnest(")),
+        "{log:?}"
+    );
+    assert!(!log.iter().any(|q| q.starts_with("CREATE TEMP TABLE")));
+    c.conn.enable_query_log();
+    let large = ok(c.sync_with(&pipe, rows(1025), no_diff()).await);
+    assert_eq!(large.message, upserted(1));
+    let log = c.conn.take_query_log();
+    assert!(
+        log.iter()
+            .any(|q| q.starts_with("CREATE TEMP TABLE") && q.ends_with("ON COMMIT DROP"))
+    );
+}

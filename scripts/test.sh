@@ -20,6 +20,11 @@ compose=(docker compose --file "$PARENT/tests/docker-compose.yaml")
 pytest_shard_args=()
 pytest_main_args=()
 pytest_users_args=()
+delete_test_api() {
+  if [ -d "$test_root/jobs/test_api" ] || [ -d "$test_root/systemd/services/test_api" ]; then
+    "$mrsm" delete jobs test_api -f -y
+  fi
+}
 if [ "$MRSM_TEST_ISOLATED" = '1' ]; then
   if [ -z "$MRSM_TEST_COMPOSE_PROJECT" ] || [ -z "$MRSM_TEST_SHARD" ] || [ -z "$MRSM_TEST_PORTS" ]; then
     echo 'test.sh: isolated runs require scripts/ci/services.py ownership and port settings.' >&2
@@ -32,7 +37,7 @@ if [ "$MRSM_TEST_ISOLATED" = '1' ]; then
   pytest_main_args=(--ignore=target/ --ignore=tests/test_users.py --mrsm-collection-report "$test_root/collection.json")
   pytest_users_args=(--mrsm-collection-report "$test_root/users-collection.json")
   cleanup_isolated() {
-    "$mrsm" delete jobs test_api -f -y >/dev/null 2>&1 || true
+    delete_test_api >/dev/null 2>&1 || true
     "$mrsm" stop daemon >/dev/null 2>&1 || true
   }
   trap cleanup_isolated EXIT
@@ -178,8 +183,7 @@ if [[ ",$MRSM_TEST_FLAVORS," == *,api,* ]]; then
   if [ "$MRSM_TEST_ISOLATED" != '1' ]; then
     "${compose[@]}" up -d postgresql || exit $?
   fi
-  $mrsm delete jobs test_api -y && \
-    $mrsm start connectors sql:test_postgresql; rc="$?"
+  delete_test_api && "$mrsm" start connectors sql:test_postgresql; rc="$?"
   [ "$rc" != '0' ] && exit "$rc"
   "$PYTHON_BIN" - <<'API_FIXTURE_SEED'
 from tests.connectors import conns
@@ -249,7 +253,7 @@ $PYTHON_BIN -m pytest \
 ### Cleanup
 if [ "$cleanup_on_exit" == "rm" ]; then
   "${compose[@]}" down -v
-  $mrsm delete job test_api -f -y
+  delete_test_api
 fi
 
 exit "$rc"

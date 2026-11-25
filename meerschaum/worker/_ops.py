@@ -229,6 +229,9 @@ def _patch_pipe_sync(conn: Connection, pipe) -> None:
     from meerschaum.core.Pipe._sync import InferFetch
 
     def sync(df=InferFetch, **kw):
+        from meerschaum.core.Pipe._sync import _in_sync_hook
+        if _in_sync_hook.get():
+            kw['_from_sync_hook'] = True
         return _sync_callback(conn, pipe, df, kw)
 
     pipe.sync = sync
@@ -352,6 +355,17 @@ def op_fetch(conn, call_id, args, frames) -> Result:
     return {'chunks': count, 'parallel': False, 'hook_results': None}, []
 
 
+class _StreamConnection:
+    """Keep background callbacks attached to the subscription that created the pipe or sink."""
+
+    def __init__(self, conn, subscription_id):
+        self.conn = conn
+        self.subscription_id = subscription_id
+
+    def callback(self, op, args, frames=()):
+        return self.conn.callback(op, args, frames, subscription_id=self.subscription_id)
+
+
 def op_sync(conn, call_id, args, frames) -> Result:
     """
     Call a plugin's (or custom connector's) `sync(pipe, **kw)`. Calls to `pipe.sync(df)` made by
@@ -367,6 +381,8 @@ def op_sync(conn, call_id, args, frames) -> Result:
     sync_function = getattr(connector, 'sync', None)
     if sync_function is None:
         raise NotImplementedError(f"No `sync()` function defined for connector '{connector}'")
+    if 'subscription_id' in args:
+        conn = _StreamConnection(conn, args['subscription_id'])
     pipe = _build_pipe(args.get('pipe'))
     _patch_pipe_sync(conn, pipe)
     kw = _kwargs(args)
@@ -400,6 +416,8 @@ def op_subscribe(conn, call_id, args, frames) -> Result:
     subscribe = getattr(connector, 'subscribe', None)
     if subscribe is None:
         raise NotImplementedError(f"No `subscribe()` function defined for connector '{connector}'")
+    if 'subscription_id' in args:
+        conn = _StreamConnection(conn, args['subscription_id'])
     pipe = _build_pipe(args.get('pipe'))
     _patch_pipe_sync(conn, pipe)
     kw = _kwargs(args)
@@ -600,12 +618,21 @@ def _run_hooks(conn, args, is_pre: bool) -> Result:
     return results, []
 
 
+def _in_hook_phase(conn, args, is_pre):
+    from meerschaum.core.Pipe._sync import _in_sync_hook
+    token = _in_sync_hook.set(True)
+    try:
+        return _run_hooks(conn, args, is_pre)
+    finally:
+        _in_sync_hook.reset(token)
+
+
 def op_pre_sync_hook(conn, call_id, args, frames) -> Result:
-    return _run_hooks(conn, args, True)
+    return _in_hook_phase(conn, args, True)
 
 
 def op_post_sync_hook(conn, call_id, args, frames) -> Result:
-    return _run_hooks(conn, args, False)
+    return _in_hook_phase(conn, args, False)
 
 
 def op_build_manifest(conn, call_id, args, frames) -> Result:

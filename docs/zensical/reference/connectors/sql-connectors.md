@@ -159,7 +159,9 @@ For PostgreSQL the highest partition is determined from the requested grid direc
 
 ### Changing the partition width
 
-`verify.chunk_minutes` is the **authoritative** partition width. It is read at sync time, so editing it does not retroactively reshape an existing table, and worse, a changed width laid over an existing grid (e.g. a 7-day grid over 30-day partitions) produces overlapping boundaries that PostgreSQL rejects outright. Treat the width as fixed for the life of a table.
+On TimescaleDB, syncing an edited pipe applies its declared width to future chunks. Sync also installs a declared columnstore policy or updates its compression age. An integer time axis accepts an integer `compress.after` in axis units or a duration such as `"7 days"` converted using the pipe's precision.
+
+On databases with native range partitions, `verify.chunk_minutes` is the **authoritative** partition width. It is read at sync time, so editing it does not retroactively reshape an existing table, and worse, a changed width laid over an existing grid (e.g. a 7-day grid over 30-day partitions) produces overlapping boundaries that PostgreSQL rejects outright. Treat the width as fixed for the life of a table.
 
 To actually change the width of an existing table, use the `partition pipes` action (or [`Pipe.repartition()`](https://docs.meerschaum.io/meerschaum.html#Pipe.repartition)), which updates `verify.chunk_minutes` and rebuilds the table at the new width:
 

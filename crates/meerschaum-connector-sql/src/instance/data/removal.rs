@@ -92,6 +92,15 @@ impl SqlConnector {
     /// `params`) without dropping the table. On an unbounded full clear, forgets Syncing Engine
     /// state on success.
     pub async fn clear_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
+        self.clear_pipe_with_retention(pipe, query, false).await
+    }
+
+    pub(in crate::instance) async fn clear_pipe_with_retention(
+        &self,
+        pipe: &Pipe,
+        query: &DataQuery,
+        retention: bool,
+    ) -> SuccessTuple {
         if let Err(e) = self.ensure_schema().await {
             return SuccessTuple::fail(e.to_string());
         }
@@ -105,7 +114,7 @@ impl SqlConnector {
             return refused;
         }
         let pipe = &self.prepare_pipe(pipe).await;
-        let res = match self.clear_pipe_inner(pipe, query).await {
+        let res = match self.clear_pipe_inner(pipe, query, retention).await {
             Ok(t) => t,
             Err(e) => SuccessTuple::fail(e.to_string()),
         };
@@ -126,6 +135,7 @@ impl SqlConnector {
         &self,
         pipe: &Pipe,
         query: &DataQuery,
+        retention: bool,
     ) -> ConnectorResult<SuccessTuple> {
         let sp = self.sql_pipe(pipe)?;
         let state = self.pipe_state(&sp).await;
@@ -136,10 +146,21 @@ impl SqlConnector {
         }
         let sql = self.get_clear_pipe_query(&sp, &state, query)?;
         if let Some(drop_sql) = self.get_drop_chunks_query(&sp, &state, query)?
-            && self.is_hypertable(&sp).await
-            && self.exec(&drop_sql).await.is_none()
+            && if retention {
+                let catalog = crate::queries::compress::get_is_hypertable_query(&self.ctx(), &sp)
+                    .ok_or_else(|| be("Missing TimescaleDB hypertable query."))?;
+                self.driver().value(&catalog).await?.is_some()
+            } else {
+                self.is_hypertable(&sp).await
+            }
         {
-            tracing::debug!("drop_chunks skipped for {pipe}; falling back to DELETE.");
+            let dropped = self.driver().exec(&drop_sql).await;
+            if retention {
+                return dropped.map(|_| SuccessTuple::success()).map_err(be);
+            }
+            if dropped.is_err() {
+                tracing::debug!("drop_chunks skipped for {pipe}; falling back to DELETE.");
+            }
         }
         Ok(if self.exec(&sql).await.is_some() {
             SuccessTuple::ok("Success")

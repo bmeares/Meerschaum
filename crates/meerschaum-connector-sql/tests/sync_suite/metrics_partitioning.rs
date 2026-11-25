@@ -467,3 +467,110 @@ async fn timescale_migrates_legacy_30_day_engine_hypertables_and_preserves_custo
     );
     cleanup(&fresh).await;
 }
+
+#[tokio::test]
+async fn retention_keeps_the_boundary_chunk_and_other_jobs_skip_the_hour() {
+    let Some((conn, other)) = connectors().await else {
+        return;
+    };
+    assert!(conn.claim_history_retention("metrics").await.unwrap());
+    assert!(!other.claim_history_retention("metrics").await.unwrap());
+    assert!(other.claim_history_retention("runs").await.unwrap());
+    let pipe = conn
+        .engine_state_pipe("sql:metrics_partition", "engine_metrics")
+        .unwrap();
+    assert!(conn.initialize_engine_metrics().await.is_ok());
+    let sp = conn.sql_pipe(&pipe).unwrap();
+    let table = conn.pipe_table_name(&sp);
+    // Integer chunk boundaries fall on multiples of the interval. Keep both rows of
+    // the second chunk, including the one just below the split.
+    for (i, ts) in [1_i64, WEEK_US + 1, WEEK_US + 3].into_iter().enumerate() {
+        conn.driver()
+            .exec(&format!(
+                "INSERT INTO {table} (ts_us, event_id) VALUES ({ts}, '{}')",
+                uuid::Uuid::from_u128(i as u128 + 1)
+            ))
+            .await
+            .unwrap();
+    }
+    let end = DateBound::Int(WEEK_US + 2);
+    let result = conn.expire_history(&pipe, end.clone()).await;
+    assert!(result.success, "{}", result.message);
+    assert_eq!(
+        conn.get_pipe_rowcount(&pipe, &DataQuery::default())
+            .await
+            .unwrap(),
+        Some(2)
+    );
+    let result = conn
+        .clear_pipe(
+            &pipe,
+            &DataQuery {
+                end: Some(end),
+                ..Default::default()
+            },
+        )
+        .await;
+    assert!(result.success, "{}", result.message);
+    assert_eq!(
+        conn.get_pipe_rowcount(&pipe, &DataQuery::default())
+            .await
+            .unwrap(),
+        Some(1)
+    );
+    cleanup(&conn).await;
+}
+
+#[tokio::test]
+async fn edited_user_compression_policy_and_chunk_width_reach_the_catalog() {
+    use crate::common::{doc, i};
+    let Some((conn, _)) = connectors().await else {
+        return;
+    };
+    let build = |days| {
+        let params = serde_json::json!({
+            "columns": {"datetime":"ts"}, "dtypes":{"ts":"int64","v":"int64"},
+            "target":"user_policy", "precision":"us", "upsert":true,
+            "verify":{"chunk_days":days}, "compress":{"after":format!("{days} days")}
+        });
+        Pipe::builder("test", "policy")
+            .instance("sql:metrics_partition")
+            .parameters(serde_json::from_value(params).unwrap())
+            .build()
+            .unwrap()
+    };
+    let schema = conn.schema().unwrap();
+    for days in [30, 7] {
+        let pipe = build(days);
+        let result = conn
+            .sync(
+                &pipe,
+                PipeInput::Docs(vec![doc(vec![("ts", i(WEEK_US)), ("v", i(days))])]),
+                &SyncOptions::default(),
+            )
+            .await;
+        assert!(
+            result.success && !result.message.contains("Could not apply"),
+            "{result}"
+        );
+        for (field, view) in [
+            ("integer_interval", "dimensions"),
+            ("(config->>'compress_after')::bigint", "jobs"),
+        ] {
+            let query = format!(
+                "SELECT {field} FROM timescaledb_information.{view} WHERE hypertable_schema='{schema}' AND hypertable_name='user_policy' {}",
+                if view == "jobs" {
+                    "AND proc_name='policy_compression'"
+                } else {
+                    ""
+                }
+            );
+            assert_eq!(
+                conn.value(&query).await.and_then(|v| v.as_i64()),
+                Some(days * 86_400_000_000),
+                "{query}"
+            );
+        }
+    }
+    cleanup(&conn).await;
+}

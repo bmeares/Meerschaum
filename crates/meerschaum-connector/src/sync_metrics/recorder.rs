@@ -12,7 +12,7 @@ use crate::InstanceConnector;
 use crate::sync_status::SyncOutcome;
 
 use super::{
-    BATCH_SIZE, MAX_PENDING, RETENTION_DAYS, SyncMetric, WRITE_TIMEOUT, observed_registration,
+    BATCH_SIZE, MAX_PENDING, SyncMetric, WRITE_TIMEOUT, observed_registration, retention_days,
 };
 
 /// The least time between two warnings about dropped metric writes (the ones in between are
@@ -122,9 +122,17 @@ fn changed() -> &'static tokio::sync::Notify {
     NOTIFY.get_or_init(tokio::sync::Notify::new)
 }
 
+tokio::task_local! { static HOOK_WRITE: (); }
+
+/// Update the latest status of a write made by a sync hook without enqueueing a metric.
+pub fn without_hook_metrics(f: impl FnOnce()) {
+    HOOK_WRITE.sync_scope((), f)
+}
+
 /// Queue metadata without blocking the original sync or retaining unbounded history in memory.
 pub fn record(conn: Arc<dyn InstanceConnector>, pipe: &Pipe, outcome: &SyncOutcome) {
-    if !crate::sync_status::is_recorded(pipe)
+    if HOOK_WRITE.try_with(|_| ()).is_ok()
+        || !crate::sync_status::is_recorded(pipe)
         || (if outcome.registration_captured {
             outcome.registration_id.is_none()
         } else {
@@ -275,11 +283,16 @@ pub async fn prune<C: InstanceConnector + ?Sized>(conn: &C) {
     if !due {
         return;
     }
+    let days = retention_days();
+    if days == 0 {
+        return;
+    }
     let _ = tokio::time::timeout(WRITE_TIMEOUT, async {
-        conn.expire_engine_metrics(
-            (Utc::now() - TimeDelta::days(RETENTION_DAYS)).timestamp_micros(),
-        )
-        .await
+        if !conn.claim_history_retention("metrics").await? {
+            return Ok(());
+        }
+        conn.expire_engine_metrics((Utc::now() - TimeDelta::days(days)).timestamp_micros())
+            .await
     })
     .await;
 }

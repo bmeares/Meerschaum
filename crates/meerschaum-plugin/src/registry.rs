@@ -18,6 +18,7 @@ use std::{
 /// The native plugins found in an ordered list of plugin directories.
 pub struct NativePlugins {
     candidates: Vec<Candidate>,
+    failures: HashMap<String, String>,
     manifest: Value,
     loaded: Mutex<HashMap<String, Arc<LoadedPlugin>>>,
 }
@@ -79,10 +80,30 @@ impl NativePlugins {
                 eprintln!("Warning: {}", item.message());
             }
         }
+        let failures_for = |skipped: &[discovery::Skipped]| {
+            skipped
+                .iter()
+                .filter_map(|s| {
+                    let path = &s.directory;
+                    let descriptor = std::fs::read_to_string(path.join("plugin.toml"))
+                        .ok()
+                        .and_then(|text| toml::from_str::<toml::Value>(&text).ok());
+                    let name = descriptor
+                        .as_ref()
+                        .and_then(|v| v.get("name"))
+                        .and_then(|v| v.as_str())
+                        .or_else(|| path.file_stem()?.to_str())?;
+                    Some((name.to_owned(), s.message()))
+                })
+                .collect()
+        };
         let known = discovery.skipped.len();
         let mut candidates = discovery.candidates.clone();
         if candidates.is_empty() {
-            return Ok(Self::empty());
+            return Ok(Self {
+                failures: failures_for(&discovery.skipped),
+                ..Self::empty()
+            });
         }
         // SAFETY: the configured plugin directories are trusted (see the module documentation).
         // Load-time failures were not visible to the scan; warn about those here.
@@ -94,10 +115,8 @@ impl NativePlugins {
             }
         }
         candidates.retain(|c| manifest["plugins"].get(&c.name).is_some());
-        if candidates.is_empty() {
-            return Ok(Self::empty());
-        }
         Ok(Self {
+            failures: failures_for(&load_skipped),
             candidates,
             manifest,
             loaded: Mutex::new(HashMap::new()),
@@ -108,9 +127,15 @@ impl NativePlugins {
     pub fn empty() -> Self {
         Self {
             candidates: Vec::new(),
+            failures: HashMap::new(),
             manifest: Value::Null,
             loaded: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Discovery or loading error for a native plugin that could not be selected.
+    pub fn failure_for(&self, name: &str) -> Option<&str> {
+        self.failures.get(name).map(String::as_str)
     }
 
     pub fn is_empty(&self) -> bool {

@@ -920,10 +920,17 @@ pub static ARGUMENTS: &[ArgSpec] = &[
         "Return bounded plugin metadata from this confined execution context (show plugins).",
         G::Plugins,
     ),
+    flag(
+        "independent_laps",
+        &["--independent-laps"],
+        "Give each step of a looping action chain its own interval and failure cooldown.",
+        G::Actions,
+    ),
 ];
 
 /// The arguments added since v4.1 (absent from the v4 parser fixture `tests/fixtures/parser.json`).
 pub const V5_ONLY_DESTS: &[&str] = &[
+    "independent_laps",
     "replace",
     "public",
     "allow_protected",

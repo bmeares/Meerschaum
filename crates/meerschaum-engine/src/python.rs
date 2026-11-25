@@ -27,6 +27,7 @@ pub type HookReporter = Arc<dyn Fn(SuccessTuple) + Send + Sync>;
 pub struct PythonRegistry {
     native: Arc<dyn ConnectorRegistry>,
     pool: WorkerPool,
+    stream_workers: meerschaum_worker::SharedStreamWorkers,
     manifest: Arc<Manifest>,
     config: EngineConfig,
     callbacks: Arc<NativeCallbacks>,
@@ -45,6 +46,7 @@ impl PythonRegistry {
     ) -> Arc<Self> {
         Arc::new_cyclic(|registry| Self {
             native,
+            stream_workers: meerschaum_worker::SharedStreamWorkers::new(pool.clone()),
             pool,
             manifest,
             config,
@@ -120,6 +122,7 @@ impl PythonRegistry {
 
     fn stream(&self, keys: &str) -> PythonSource {
         PythonSource {
+            stream_workers: self.stream_workers.clone(),
             pool: self.pool.clone(),
             keys: keys.into(),
             kwargs: self
@@ -198,8 +201,8 @@ impl ConnectorRegistry for PythonRegistry {
         if self.manifest.has_sync_hooks() {
             Some(Arc::new(PythonHooks {
                 pool: self.pool.clone(),
-                pre: !self.manifest.pre_sync_hooks.is_empty(),
-                post: !self.manifest.post_sync_hooks.is_empty(),
+                pre: self.manifest.pre_sync_hooks.clone(),
+                post: self.manifest.post_sync_hooks.clone(),
                 callbacks: self.callbacks(),
                 native: self.native.hooks(),
                 reporter: self
@@ -405,8 +408,8 @@ struct PythonHooks {
     pool: WorkerPool,
     /// Whether any plugin declares a `@pre_sync_hook` / `@post_sync_hook` (the manifest): a
     /// phase without one costs no worker round trip.
-    pre: bool,
-    post: bool,
+    pre: Vec<String>,
+    post: Vec<String>,
     callbacks: Arc<dyn CallbackHandler>,
     native: Option<Arc<dyn SyncHooks>>,
     reporter: Option<HookReporter>,
@@ -431,7 +434,10 @@ impl PythonHooks {
             pipe,
             phase,
             &context,
-            None,
+            Some(match phase {
+                HookPhase::Pre => &self.pre,
+                HookPhase::Post => &self.post,
+            }),
             Some(self.callbacks.clone()),
         )
         .await
@@ -456,7 +462,7 @@ impl SyncHooks for PythonHooks {
         if let Some(h) = &self.native {
             h.pre_sync(pipe, args).await;
         }
-        if self.pre {
+        if !self.pre.is_empty() {
             self.run(pipe, args, HookPhase::Pre, None).await;
         }
     }
@@ -464,7 +470,7 @@ impl SyncHooks for PythonHooks {
         if let Some(h) = &self.native {
             h.post_sync(pipe, args, result).await;
         }
-        if self.post {
+        if !self.post.is_empty() {
             self.run(pipe, args, HookPhase::Post, Some(result)).await;
         }
     }
@@ -472,6 +478,7 @@ impl SyncHooks for PythonHooks {
 
 type Pending = Arc<Mutex<HashMap<AckToken, oneshot::Sender<()>>>>;
 struct PythonSource {
+    stream_workers: meerschaum_worker::SharedStreamWorkers,
     pool: WorkerPool,
     keys: String,
     kwargs: Map,
@@ -559,6 +566,14 @@ impl PythonSource {
             mode,
             callbacks,
             StreamOptions {
+                shared: pipe
+                    .parameters()
+                    .get("stream")
+                    .and_then(Value::as_map)
+                    .and_then(|m| m.get("shared_worker"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                    .then(|| self.stream_workers.clone()),
                 restart: false,
                 ..Default::default()
             },

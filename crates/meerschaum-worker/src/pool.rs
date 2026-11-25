@@ -111,7 +111,7 @@ pub struct PoolConfig {
     pub backoff_max: Duration,
     /// Replace a worker after this many calls (`None`: never).
     pub max_calls: Option<u64>,
-    /// Replace a worker whose private resident memory (`RssAnon`) exceeds this many bytes after a
+    /// Replace a worker whose private memory (`RssAnon + VmSwap`) exceeds this many bytes after a
     /// call (`None`: never; Linux only).
     pub max_rss_bytes: Option<u64>,
     /// Stop a worker that has been idle this long (`None`: keep idle workers).
@@ -295,20 +295,33 @@ struct Checkout {
     permit: Option<OwnedSemaphorePermit>,
 }
 
-/// A worker's private resident memory in bytes (`RssAnon` of `/proc/<pid>/status`); `None` off
+/// A worker's private memory in bytes (`RssAnon + VmSwap` of `/proc/<pid>/status`); `None` off
 /// Linux or when it cannot be read.
-pub fn worker_rss_anon(pid: u32) -> Option<u64> {
+pub fn worker_private_bytes(pid: u32) -> Option<u64> {
     if !cfg!(target_os = "linux") {
         return None;
     }
     let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
-    let line = status.lines().find(|l| l.starts_with("RssAnon:"))?;
-    let kib: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    private_bytes_from_status(&status)
+}
+
+fn private_bytes_from_status(status: &str) -> Option<u64> {
+    let kib_for = |field: &str| -> Option<u64> {
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix(field))?
+            .split_whitespace()
+            .next()?
+            .parse()
+            .ok()
+    };
+    let kib = kib_for("RssAnon:")?.saturating_add(kib_for("VmSwap:").unwrap_or(0));
     Some(kib.saturating_mul(1024))
 }
 
 struct Inner {
     config: PoolConfig,
+    shadowed_plugins: Mutex<Vec<String>>,
     /// Attributes of connectors the host built itself (`mrsm.get_connector('sql', 'x',
     /// flavor='sqlite', ...)`: in no config file), by `type:label`. Sent with every call so the
     /// worker can build the same connectors.
@@ -351,6 +364,7 @@ impl WorkerPool {
         let size = config.size.max(1);
         WorkerPool {
             inner: Arc::new(Inner {
+                shadowed_plugins: Mutex::new(Vec::new()),
                 connector_attributes: Mutex::new(Vec::new()),
                 permits: Arc::new(Semaphore::new(size)),
                 callback_permits: Arc::new(Semaphore::new(size.saturating_mul(8))),
@@ -367,6 +381,31 @@ impl WorkerPool {
                 last_used: Mutex::new(Instant::now()),
             }),
         }
+    }
+
+    /// The Python plugins replaced by successfully loaded native plugins in this session.
+    pub fn shadowed_plugins(&self) -> Vec<String> {
+        self.inner
+            .shadowed_plugins
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Change the plugin selection and retire workers that imported the previous selection.
+    pub async fn set_shadowed_plugins(&self, names: Vec<String>) {
+        {
+            let mut previous = self
+                .inner
+                .shadowed_plugins
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if *previous == names {
+                return;
+            }
+            *previous = names;
+        }
+        self.recycle().await;
     }
 
     /// Whether `other` is this pool (a clone of it).
@@ -553,6 +592,10 @@ impl WorkerPool {
             tokio::time::sleep_until(t.into()).await;
         }
         let mut opts = self.inner.config.worker.clone();
+        opts.env.push((
+            "MRSM_SHADOWED_PYTHON_PLUGINS".into(),
+            serde_json::to_string(&self.shadowed_plugins()).expect("string array"),
+        ));
         if quiet {
             opts.quiet = true;
             opts.inherit_stdin = false;
@@ -664,7 +707,7 @@ impl WorkerPool {
         }
         config
             .max_rss_bytes
-            .is_some_and(|max| worker_rss_anon(worker.pid()).is_some_and(|rss| rss > max))
+            .is_some_and(|max| worker_private_bytes(worker.pid()).is_some_and(|rss| rss > max))
     }
 
     /// Stop a worker in the background, keeping its place under the live limit (`permit`) until
@@ -903,5 +946,20 @@ mod tests {
     fn default_size_is_bounded() {
         let n = default_python_workers();
         assert!((1..=4).contains(&n));
+    }
+}
+
+#[cfg(test)]
+mod private_memory_tests {
+    use super::private_bytes_from_status;
+
+    #[test]
+    fn counts_resident_and_swapped_private_pages() {
+        assert_eq!(
+            private_bytes_from_status("RssFile: 8192 kB\nRssAnon: 24 kB\nVmSwap: 80 kB"),
+            Some(104 * 1024)
+        );
+        assert_eq!(private_bytes_from_status("RssAnon: 8 kB"), Some(8192));
+        assert_eq!(private_bytes_from_status("VmRSS: 512 kB"), None);
     }
 }

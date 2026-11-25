@@ -468,7 +468,7 @@ pub fn get_update_queries(args: &UpdateQueriesArgs<'_>) -> Vec<String> {
     };
     let base_queries = update_queries(&flavor_key);
     let schema = args.schema;
-    let patch_schema = args.patch_schema.or(schema);
+    let patch_schema = args.patch_schema.or(schema).filter(|s| !s.is_empty());
     let target_table_columns = &args.target_cols_types;
     let patch_table_columns = &args.patch_cols_types;
 

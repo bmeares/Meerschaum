@@ -664,8 +664,57 @@ pub fn delete_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         Ok(jobs) => jobs,
         Err(failed) => return Ok(failed),
     };
+    let selected_executor = exec_keys
+        .clone()
+        .unwrap_or_else(|| meerschaum_jobs::job::get_executor_keys_from_context(&ctx));
+    let exclusions = !action.is_empty()
+        && action.iter().all(|n| n.starts_with('_'))
+        && !action.iter().any(|n| jobs.contains_key(n));
+    let mut missing = Vec::new();
+    if !exclusions {
+        for name in &action {
+            if jobs.contains_key(name) || missing.contains(name) {
+                continue;
+            }
+            // Retired local/systemd jobs may only have their properties and lap history.
+            // An explicit name can claim this metadata after its unit has gone.
+            if matches!(selected_executor.as_str(), "local" | "systemd")
+                && meerschaum_jobs::names::invalid_job_name_reason(name).is_none()
+                && meerschaum_jobs::names::is_direct_child(
+                    &ctx.paths.jobs_dir,
+                    &ctx.paths.jobs_dir.join(name),
+                    name,
+                )
+                && ctx
+                    .paths
+                    .jobs_dir
+                    .join(name)
+                    .join("properties.json")
+                    .is_file()
+                && !ctx.paths.systemd_jobs_dir.join(name).exists()
+                && let Ok(mut job) = Job::new(
+                    name,
+                    None,
+                    JobOptions {
+                        executor_keys: Some("local".into()),
+                        ..Default::default()
+                    },
+                    &ctx,
+                )
+                && job.status() == Status::Stopped
+            {
+                jobs.insert(name.clone(), job);
+                continue;
+            }
+            missing.push(name.clone());
+        }
+    }
     if jobs.is_empty() {
-        return Ok(SuccessTuple::ok("No jobs to delete; nothing to do."));
+        return Ok(if missing.is_empty() {
+            SuccessTuple::ok("No jobs to delete; nothing to do.")
+        } else {
+            SuccessTuple::fail(format!("Jobs not found: {}.", items_str(&missing)))
+        });
     }
     let mut delete_all = false;
     if action.is_empty() && !force {
@@ -736,12 +785,16 @@ pub fn delete_jobs(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         }
         deleted.push(n.clone());
     }
+    let mut message = format!(
+        "Deleted job{} {}.",
+        plural(deleted.len()),
+        items_str(&deleted)
+    );
+    if !missing.is_empty() {
+        message.push_str(&format!(" Jobs not found: {}.", items_str(&missing)));
+    }
     Ok(SuccessTuple {
-        success: !deleted.is_empty(),
-        message: format!(
-            "Deleted job{} {}.",
-            plural(deleted.len()),
-            items_str(&deleted)
-        ),
+        success: missing.is_empty() && deleted.len() == to_delete.len(),
+        message,
     })
 }

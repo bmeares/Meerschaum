@@ -160,11 +160,20 @@ fn precedence_invalid_names_and_failed_builds() {
     }
     std::fs::write(first.join("invalid name.rs"), "").unwrap();
     let builds = root.path().join("builds");
-    let found = discovery::discover_report_in(&[first.clone(), second], &builds);
+    let found = discovery::discover_report_in(&[first.clone(), second.clone()], &builds);
     assert_eq!(found.candidates.len(), 1);
     assert_eq!(found.candidates[0].directory, first.join("minimal.rs"));
-    assert_eq!(found.skipped.len(), 1);
-    assert!(found.skipped[0].reason.contains("filename"));
+    assert_eq!(found.skipped.len(), 2);
+    assert!(found.skipped.iter().any(|skip| {
+        skip.directory == first.join("invalid name.rs") && skip.reason.contains("filename")
+    }));
+    assert!(found.skipped.iter().any(|skip| {
+        skip.directory == second.join("minimal.rs")
+            && skip.reason.contains("duplicate native plugin 'minimal'")
+            && skip
+                .reason
+                .contains(&first.join("minimal.rs").display().to_string())
+    }));
     std::fs::write(
         builds.join("minimal/mrsm-build-failed"),
         &found.candidates[0].fingerprint,

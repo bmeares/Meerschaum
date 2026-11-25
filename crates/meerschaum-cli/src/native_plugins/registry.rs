@@ -157,6 +157,9 @@ impl NativeHooks {
         // inside a hook runs no hooks.
         let mut host_args = args.clone();
         host_args.extra.insert("skip_hooks".into(), true.into());
+        host_args
+            .extra
+            .insert("_from_sync_hook".into(), true.into());
         let host = Arc::new(PluginHost::engine(self.registry.clone(), host_args));
         let pipe = serde_json::to_value(pipe_json(pipe)).unwrap_or_default();
         let reporter = self
@@ -167,7 +170,12 @@ impl NativeHooks {
         for (name, hooks) in self.natives.hooks(post) {
             let natives = self.natives.clone();
             let (kwargs, pipe, host) = (kwargs.clone(), pipe.clone(), host.clone());
+            // A native call may finish after its caller's deadline. Keep its slot until it exits.
+            let Ok(slot) = self.registry.hook_slots.clone().acquire_owned().await else {
+                return;
+            };
             let outcomes = tokio::task::spawn_blocking(move || {
+                let _slot = slot;
                 run_plugin_hooks(&natives, &name, hooks, post, &kwargs, &pipe, &host)
             })
             .await
@@ -268,6 +276,7 @@ pub struct NativeRegistry {
     pub(super) connectors: Map,
     pub(super) inner: Arc<dyn ConnectorRegistry>,
     pub(super) hook_reporter: HookReporterSlot,
+    hook_slots: Arc<tokio::sync::Semaphore>,
     /// The sync's keyword arguments for streaming connectors' `subscribe` (`--listen`).
     pub(super) stream_kwargs: Arc<std::sync::RwLock<Map>>,
     /// The session whose connectors host calls use beyond the run's (`set_session`).
@@ -311,9 +320,11 @@ impl NativeRegistry {
         config: Arc<meerschaum_core::config::Config>,
         inner: Arc<dyn ConnectorRegistry>,
     ) -> Arc<Self> {
+        let engine_config = meerschaum_engine::EngineConfig::from_config(&config, None);
         Arc::new(Self {
+            hook_slots: Arc::new(tokio::sync::Semaphore::new(engine_config.workers.max(1))),
             natives,
-            engine_config: meerschaum_engine::EngineConfig::from_config(&config, None),
+            engine_config,
             connectors: config
                 .get(&["meerschaum", "connectors"])
                 .map(|v| v.to_map())

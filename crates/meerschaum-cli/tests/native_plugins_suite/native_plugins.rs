@@ -116,6 +116,29 @@ fn show_plugins_lists_native_plugins_with_a_marker() {
 }
 
 #[test]
+fn native_pair_warns_once_without_importing_its_python_hook() {
+    let home = Home::new();
+    let marker = home.root.path().join("python-imported");
+    std::fs::write(home.plugins.path().join("native_demo.py"),
+        format!("from pathlib import Path\nPath({:?}).touch()\nfrom meerschaum.plugins import post_sync_hook\n@post_sync_hook\ndef record(pipe, **kw): raise RuntimeError('shadowed hook ran')\n", marker.to_string_lossy())).unwrap();
+    let output = home.run(&["hello", "+", "hello"]);
+    let out = text(&output);
+    assert!(output.status.success(), "{out}");
+    assert_eq!(
+        out.matches("shadows Python plugin 'native_demo'").count(),
+        1,
+        "{out}"
+    );
+    assert!(!marker.exists());
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(home.root.path().join("cache/plugins_manifest.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(manifest["plugins"].get("native_demo").is_none());
+    assert!(manifest["post_sync_hooks"].as_array().unwrap().is_empty());
+}
+
+#[test]
 fn native_action_panic_is_contained() {
     let home = Home::new();
     let output = home.run(&["panic"]);

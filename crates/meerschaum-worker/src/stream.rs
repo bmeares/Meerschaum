@@ -20,7 +20,8 @@ use tokio::sync::{mpsc, watch};
 use crate::callback::CallbackHandler;
 use crate::pool::WorkerPool;
 use crate::protocol::{Msg, map_to_wire};
-use crate::worker::CallOptions;
+use crate::shared_stream::{SharedStreamWorkers, Subscription};
+use crate::worker::{CallOptions, Worker};
 
 /// Which entry point the stream runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,6 +35,8 @@ pub enum StreamMode {
 /// Supervision settings.
 #[derive(Debug, Clone)]
 pub struct StreamOptions {
+    /// Share a connector worker for subscriptions that return after registering callbacks.
+    pub shared: Option<SharedStreamWorkers>,
     /// Restart the worker when it exits.
     pub restart: bool,
     /// The first restart delay.
@@ -47,6 +50,7 @@ pub struct StreamOptions {
 impl Default for StreamOptions {
     fn default() -> Self {
         StreamOptions {
+            shared: None,
             restart: true,
             backoff_initial: Duration::from_millis(500),
             backoff_max: Duration::from_secs(60),
@@ -126,7 +130,14 @@ impl PythonStream {
             StreamMode::V4Sync => "sync",
             StreamMode::Subscribe => "subscribe",
         };
-        let task = tokio::spawn(supervise(pool, op, args, handler, opts, stop_rx, events_tx));
+        let task = tokio::spawn(supervise(
+            pool,
+            (op, args, pipe.pipe_ref()),
+            handler,
+            opts,
+            stop_rx,
+            events_tx,
+        ));
         (PythonStream { stop_tx, task }, events_rx)
     }
 
@@ -143,10 +154,23 @@ impl PythonStream {
     }
 }
 
+enum StreamWorker {
+    Dedicated(Box<Worker>),
+    Shared(Subscription),
+}
+
+impl StreamWorker {
+    fn worker(&self) -> &Worker {
+        match self {
+            Self::Dedicated(worker) => worker,
+            Self::Shared(subscription) => subscription.worker(),
+        }
+    }
+}
+
 async fn supervise(
     pool: WorkerPool,
-    op: &'static str,
-    args: Msg,
+    (op, args, pipe_ref): (&'static str, Msg, String),
     handler: Arc<dyn CallbackHandler>,
     opts: StreamOptions,
     mut stop_rx: watch::Receiver<bool>,
@@ -158,19 +182,38 @@ async fn supervise(
         if stopped(&stop_rx) {
             break;
         }
+        let acquire = async {
+            if let Some(groups) = &opts.shared {
+                groups
+                    .join(
+                        args.str("connector").expect("stream connector"),
+                        pipe_ref.clone(),
+                        handler.clone(),
+                    )
+                    .await
+                    .map(StreamWorker::Shared)
+            } else {
+                let worker = pool.spawn_worker().await?;
+                worker.set_callback_handler(Some(pool.guard_handler(handler.clone())));
+                Ok(StreamWorker::Dedicated(Box::new(worker)))
+            }
+        };
         let worker = tokio::select! {
-            w = pool.spawn_worker() => w,
+            w = acquire => w,
             _ = stop_rx.changed() => break,
         };
         let error = match worker {
             Err(e) => e.to_string(),
-            Ok(worker) => {
-                worker.set_callback_handler(Some(pool.guard_handler(Arc::clone(&handler))));
+            Ok(owner) => {
+                let worker = owner.worker();
                 let _ = events.send(StreamEvent::Started { pid: worker.pid() });
                 let mut stop_requested = false;
                 let mut error = String::new();
                 {
                     let mut call_args = args.clone();
+                    if let StreamWorker::Shared(subscription) = &owner {
+                        call_args.insert("subscription_id", subscription.id);
+                    }
                     if let Some(defined) = pool.connector_attributes_wire() {
                         call_args.insert("connector_attributes", defined);
                     }
@@ -208,7 +251,14 @@ async fn supervise(
                     }
                 }
                 if stop_requested || stopped(&stop_rx) {
-                    worker.shutdown(Duration::from_secs(5)).await;
+                    match owner {
+                        StreamWorker::Dedicated(worker) => {
+                            worker.shutdown(Duration::from_secs(5)).await
+                        }
+                        // Plugins have no unsubscribe contract. End this generation so callbacks
+                        // really stop; the engine resubscribes members that are still wanted.
+                        StreamWorker::Shared(subscription) => subscription.worker().kill().await,
+                    }
                     break;
                 }
                 worker.kill().await;

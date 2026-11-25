@@ -54,6 +54,18 @@ fn ctx(fixture: &Value) -> DateContext {
     }
 }
 
+// v5.1.6 deliberately fixes the v4 multi-day rounding grid for daily cutoffs.
+fn daily_cutoff(input: &str, ctx: &DateContext) -> Option<Value> {
+    static DAYS: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"(?i)([0-9]+)\s+days\s+ago$").unwrap());
+    let n = DAYS.captures(input)?.get(1)?.as_str().parse::<u64>().ok()?;
+    if n == 0 {
+        return None;
+    }
+    let day = ctx.now_utc.date().checked_sub_days(chrono::Days::new(n))?;
+    Some(PyValue::DateTime(day.and_hms_opt(0, 0, 0)?.and_utc()).to_fixture_json())
+}
+
 fn exc_json(e: &PyException) -> Value {
     PyValue::Exception(e.clone()).to_fixture_json()
 }
@@ -147,8 +159,17 @@ fn parse_arguments_matches_python() {
             }
             (None, Err(e)) => failures.push(format!("{sysargs:?}: rust raised {}", exc_json(&e))),
             (None, Ok(args)) => {
+                let mut expected_args = case["args"].clone();
+                for pair in sysargs.windows(2) {
+                    if let Some(bound @ ("begin" | "end")) = pair[0].strip_prefix("--")
+                        && expected_args[bound]["$type"] == "datetime"
+                        && let Some(value) = daily_cutoff(&pair[1], &ctx)
+                    {
+                        expected_args[bound] = value;
+                    }
+                }
                 let diffs = diff_maps(
-                    &case["args"],
+                    &expected_args,
                     &without_v5_options(args_to_fixture_json(&args)),
                 );
                 if !diffs.is_empty() {
@@ -404,6 +425,10 @@ fn type_functions_match_python() {
             let input = case["input"].as_str().unwrap();
             match (f(input), case.get("ok"), case.get("raises")) {
                 (Ok(v), Some(expected), _) => {
+                    let daily = (name == "parse_datetime")
+                        .then(|| daily_cutoff(input, &ctx))
+                        .flatten();
+                    let expected = daily.as_ref().unwrap_or(expected);
                     if v.to_fixture_json() != *expected {
                         failures.push(format!(
                             "{name}({input:?}): python={expected} rust={}",

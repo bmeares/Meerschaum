@@ -14,7 +14,7 @@ use super::registration::{RegistrationSnapshot, registration_snapshot};
 use super::{
     MAX_NODES, MAX_ROWS, MAX_RUNS, MAX_SUMMARY_GROUPS, METRIC, MetricAggregate, MetricBucket,
     MetricSummary, MetricsQuery, MetricsResponse, PipeMetricSummary, PipelineMetricSummary,
-    RETENTION_DAYS, SyncMetric, pipe_key, reference_keys, registration_matches, snapshot_registry,
+    SyncMetric, pipe_key, reference_keys, registration_matches, retention_days, snapshot_registry,
 };
 
 pub(super) fn query_bounds(
@@ -25,13 +25,16 @@ pub(super) fn query_bounds(
         .begin
         .or_else(|| end.checked_sub_signed(TimeDelta::days(1)))
         .ok_or_else(|| ConnectorError::Invalid("Metrics bounds are out of range.".into()))?;
-    if begin >= end
-        || end - begin > TimeDelta::days(RETENTION_DAYS)
-        || end > Utc::now() + TimeDelta::minutes(5)
-    {
+    let max_days = super::max_query_days();
+    if end.signed_duration_since(begin) > TimeDelta::days(max_days) {
         return Err(ConnectorError::Invalid(format!(
-            "Metrics need an ordered time window of at most {RETENTION_DAYS} days."
+            "A metrics query may span up to {max_days} days."
         )));
+    }
+    if begin >= end || end > Utc::now() + TimeDelta::minutes(5) {
+        return Err(ConnectorError::Invalid(
+            "Metrics need an ordered time window ending by the current time.".into(),
+        ));
     }
     Ok((begin, end, query.limit.unwrap_or(1000).clamp(1, MAX_ROWS)))
 }
@@ -219,7 +222,7 @@ pub async fn read<C: InstanceConnector + ?Sized>(
         history_truncated: false,
         pipelines_truncated: false,
         buckets: query.buckets.unwrap_or(48).clamp(1, 200),
-        retention_days: RETENTION_DAYS,
+        retention_days: retention_days(),
         summary: MetricSummary::default(),
         series: Vec::new(),
         pipes: Vec::new(),
@@ -288,7 +291,7 @@ pub async fn read<C: InstanceConnector + ?Sized>(
     let span = (micros_ceil(end) - begin.timestamp_micros()).max(1);
     let buckets = response.buckets.min(span as usize);
     response.buckets = buckets;
-    let width = (span + buckets as i64 - 1) / buckets as i64;
+    let width = (span - 1) / buckets as i64 + 1;
     let window_aggregates = if query.pipeline.is_none() {
         read_summary_groups(conn, &params, &allowed_registrations, begin, end, width).await?
     } else {
@@ -325,7 +328,8 @@ pub async fn read<C: InstanceConnector + ?Sized>(
                 "engine_runs",
                 &DataQuery {
                     begin: Some(DateBound::utc(
-                        end.checked_sub_signed(TimeDelta::days(RETENTION_DAYS))
+                        begin
+                            .checked_sub_signed(TimeDelta::days(super::MAX_DURATION_DAYS))
                             .unwrap_or(DateTime::<Utc>::MIN_UTC),
                     )),
                     end: None,

@@ -432,10 +432,10 @@ fn relative_ago(
     if !unit.ends_with('s') {
         unit.push('s');
     }
-    // PARITY: `lower.split('ago ')[-1]` is the whole string when it ends in "ago", so
-    // "10 days ago" rounds down to a multiple of 10 days (`_parser.py` `parse_datetime`).
+    // A daily cutoff advances every midnight. An explicit trailing grid still takes precedence.
     let round_part = match lower.rfind("ago ") {
         Some(ix) => &lower[ix + 4..],
+        None if unit == "days" && val > 0 => "1 day",
         None => lower,
     };
     let mut round_micros: Option<i128> = None;

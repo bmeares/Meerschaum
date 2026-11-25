@@ -9,6 +9,7 @@ Synchronize a pipe's data with its source via its connector.
 from __future__ import annotations
 
 import os
+from contextvars import ContextVar
 import time
 import threading
 import multiprocessing
@@ -30,6 +31,9 @@ from meerschaum.utils.warnings import warn
 
 if TYPE_CHECKING:
     pd = mrsm.attempt_import('pandas')
+
+_in_sync_hook = ContextVar('in_sync_hook', default=False)
+
 
 class InferFetch:
     MRSM_INFER_FETCH: bool = True
@@ -136,9 +140,7 @@ _NATIVE_SYNC_CACHE_KEYS = (
 
 
 def _plain_value(value: Any) -> bool:
-    """
-    Whether a connector attribute can cross to Rust and to a worker (data, not objects).
-    """
+    """Whether a connector attribute can cross the worker boundary."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return True
     if isinstance(value, (list, tuple)):
@@ -149,9 +151,7 @@ def _plain_value(value: Any) -> bool:
 
 
 def _connector_attributes(connector: Any) -> Dict[str, Any]:
-    """
-    The attributes that rebuild `connector` elsewhere (`get_connector(type, label, **attributes)`).
-    """
+    """The attributes used to rebuild the connector in another process."""
     meta = dict(getattr(connector, 'meta', None) or {})
     meta.pop('type', None)
     meta.pop('label', None)
@@ -796,9 +796,7 @@ def sync(
         Set this to `False` if the incoming rows are expected to be of the correct dtypes.
 
     blocking: bool, default True
-        If `True`, wait for sync to finish and return its result, otherwise
-        asyncronously sync (oxymoron?) and return success. Defaults to `True`.
-        Only intended for specific scenarios.
+        Wait for the sync result. Set to `False` to return immediately and sync asynchronously.
 
     workers: Optional[int], default None
         If provided and the instance connector is thread-safe
@@ -864,6 +862,8 @@ def sync(
     With `parents` or `children`, a `meerschaum.core.Pipeline.RunResult` (a `SuccessTuple`
     with the run's `run_id`, `plan`, `outcomes` and `events()`).
     """
+    if _in_sync_hook.get():
+        kw['_from_sync_hook'] = True
     if replace:
         kw['replace'] = True
     if parents or children:

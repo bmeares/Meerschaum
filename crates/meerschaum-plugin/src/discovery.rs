@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
 };
@@ -136,7 +136,7 @@ impl BuildRoot<'_> {
 
 fn read_candidate(
     directory: &Path,
-    seen: &HashSet<String>,
+    seen: &HashMap<String, PathBuf>,
     build_root: &BuildRoot<'_>,
 ) -> std::result::Result<Option<Candidate>, Skip> {
     if directory.is_file() && directory.extension().is_some_and(|ext| ext == "rs") {
@@ -148,8 +148,12 @@ fn read_candidate(
         {
             return Err(Skip::invalid("invalid Rust plugin filename"));
         }
-        if seen.contains(name) {
-            return Ok(None);
+        if let Some(first) = seen.get(name) {
+            return Err(Skip::invalid(format!(
+                "duplicate native plugin '{}'; selected {}",
+                name,
+                first.display()
+            )));
         }
         let compiler = build_root.policy.selected().map_err(Skip::source)?;
         let generated = build_root
@@ -211,8 +215,12 @@ fn read_candidate(
     {
         return Err(Skip::invalid("invalid native plugin descriptor"));
     }
-    if seen.contains(&desc.name) {
-        return Ok(None);
+    if let Some(first) = seen.get(&desc.name) {
+        return Err(Skip::invalid(format!(
+            "duplicate native plugin '{}'; selected {}",
+            desc.name,
+            first.display()
+        )));
     }
     let library = directory.join(library_name(&desc.name));
     let is_source = source::is_source_crate(directory);
@@ -365,7 +373,7 @@ pub fn discover_report_in_with_policy(
 }
 
 fn scan(directories: &[PathBuf], build_root: &BuildRoot<'_>) -> Discovery {
-    let mut seen = HashSet::new();
+    let mut seen = HashMap::new();
     let mut found = Discovery::default();
     for root in directories {
         if !root.exists() {
@@ -395,7 +403,7 @@ fn scan(directories: &[PathBuf], build_root: &BuildRoot<'_>) -> Discovery {
                         candidate.name,
                         directory.display()
                     );
-                    seen.insert(candidate.name.clone());
+                    seen.insert(candidate.name.clone(), directory.clone());
                     found.candidates.push(candidate);
                 }
                 Ok(None) => {}

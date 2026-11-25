@@ -17,6 +17,8 @@ full SDK (`greetings/Cargo.toml`, see the [advanced guide](rust-plugins/advanced
 Use `mrsm edit plugins greetings` to reopen it. Upload it to a repository with
 `mrsm register plugins greetings -r api:your-repo`, just as you would a Python plugin.
 
+During a port, a native plugin shadows a Python plugin with the same name. The host warns once and loads the native implementation, including its hooks. Shadowing is transitional and discouraged. Remove the Python copy after the port. If the native plugin fails to open, the host reports the error and uses the Python copy.
+
 ## Add a command
 
 Save this as `greetings.rs`:

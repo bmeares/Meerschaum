@@ -193,6 +193,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Per-pipe sync status: `pipe.get_sync_status()`, `mrsm.get_sync_statuses()`
     status_api::register(m)?;
     m.add_function(wrap_pyfunction!(metrics_api::engine_metrics, m)?)?;
+    m.add_function(wrap_pyfunction!(metrics_api::metrics_max_query_days, m)?)?;
     m.add_function(wrap_pyfunction!(metrics_api::initialize_engine_metrics, m)?)?;
 
     // The access model: permissions, roles, teams, pipe access and locks

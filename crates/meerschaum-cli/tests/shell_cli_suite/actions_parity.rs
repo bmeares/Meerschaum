@@ -215,6 +215,13 @@ fn actions_match_v4_transcripts() {
                             .to_string()
                     }
                     "show users -i sql:local --nopretty" => String::new(),
+                    "clear pipes -i sql:local --begin 2024-01-12 -y" => v4_stdout.replace(
+                        "Finished clearing 1 pipe",
+                        "Finished clearing 1 pipe (begin=2024-01-12 00:00:00+00:00)",
+                    ),
+                    "delete jobs emptyjob -f" | "delete jobs nosuchjob -y" => format!(
+                        "\n\x1b[1;31m 💢 Jobs not found: '{}'.\x1b[0m\n\n", args[2]
+                    ),
                     _ => v4_stdout,
                 };
                 if compare.iter().any(|c| c == "stdout") && stdout != expected_stdout {
@@ -232,7 +239,9 @@ fn actions_match_v4_transcripts() {
                 // result is a failure; v4 exited 0 whatever the command returned. The overlay
                 // names each affected step; nothing else may differ.
                 let expected_rc = match args.join(" ").as_str() {
-                    "show tags -i sql:local --nopretty" => Some(1),
+                    "show tags -i sql:local --nopretty"
+                    | "delete jobs emptyjob -f"
+                    | "delete jobs nosuchjob -y" => Some(1),
                     _ => step["rc"].as_i64(),
                 };
                 if compare.iter().any(|c| c == "rc") && Some(rc) != expected_rc {

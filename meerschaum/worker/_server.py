@@ -102,6 +102,7 @@ class Connection:
         op: str,
         args: Dict[str, Any],
         frames: List[bytes] = (),
+        *, subscription_id: Optional[int] = None,
     ) -> Tuple[Any, List[bytes]]:
         """Ask the host to run `op` (e.g. `sync`) and wait for its answer."""
         if self.closed.is_set():
@@ -111,7 +112,7 @@ class Connection:
         with self.pending_lock:
             self.pending[cb_id] = slot
         self.send(
-            {'t': 'callback', 'id': self.current_call_id, 'cb': cb_id, 'op': op, 'args': args},
+            {'t': 'callback', 'id': subscription_id or self.current_call_id, 'cb': cb_id, 'op': op, 'args': args},
             frames,
         )
         slot.event.wait()
@@ -246,7 +247,7 @@ def serve(address: str) -> int:
         'python': platform.python_version(),
         'meerschaum': mrsm.__version__,
         'msgpack': ('stdlib' if USING_FALLBACK else 'msgpack'),
-        'capabilities': [team_scope.CAPABILITY],
+        'capabilities': [team_scope.CAPABILITY, 'stream_callbacks'],
     }
     ### 5.1: a worker started for an isolated team proves it loaded the team's configuration.
     report = team_scope.hello_report()

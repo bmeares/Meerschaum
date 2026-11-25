@@ -3,6 +3,7 @@
 //! `to_sql` and `psql_insert_copy`), plus the essentials of `Pipe.sync()` (dtype enforcement,
 //! autotime, capturing new special columns) for callers that hold raw rows.
 
+mod postgres_patch;
 mod schema;
 pub mod snapshot;
 mod to_sql;
@@ -389,12 +390,15 @@ impl SqlConnector {
             ..Default::default()
         };
         let result = self.sync_pipe_impl(pipe, df, &opts, internal).await;
-        if result.success && pipe.param("compress").is_some_and(|v| v.truthy()) {
-            let res = self.apply_compression_policy(pipe).await;
-            if !res.success {
-                tracing::debug!(
-                    "Could not apply compression policy to {pipe}:\n{}",
-                    res.message
+        if result.success
+            && pipe.connector_keys() == "mrsm"
+            && pipe.param("compress").is_some_and(|v| v.truthy())
+        {
+            let policy = self.apply_compression_policy(pipe).await;
+            if !policy.success {
+                tracing::warn!(
+                    "Could not install the internal compression policy: {}",
+                    policy.message
                 );
             }
         }
@@ -460,6 +464,10 @@ impl SqlConnector {
                 // The table may have changed elsewhere: forget all cached catalog & readiness
                 // metadata so the next sync asks the database again.
                 self.forget_catalog_table(&sp.target);
+            }
+            if result.success {
+                self.check_declared_hypertable(pipe, &mut result.message)
+                    .await;
             }
             result.duration = Some(start.elapsed());
             result

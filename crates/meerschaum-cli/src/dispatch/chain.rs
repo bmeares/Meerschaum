@@ -1,6 +1,8 @@
 //! Action chains: splitting `+` and `:` command lines into steps, running them in order and
 //! summarizing them, and the serialized `chain` action that repeats a chain (`xN`, `--loop`).
 
+mod independent;
+
 use std::time::Instant;
 
 use super::child::timed_pipeline_step;
@@ -289,6 +291,14 @@ pub(super) fn run_pipeline(args: &ArgsMap, rt: &mut Runtime<'_>, depth: usize) -
         .and_then(|s| s.trim_start_matches('x').parse::<i64>().ok())
         .unwrap_or(if looping { -1 } else { 1 });
     let delay = native::float(args, "min_seconds").unwrap_or(1.0);
+    if native::flag(args, "independent_laps") {
+        if !looping || timeout.is_some() {
+            return Ok(SuccessTuple::fail(
+                "Use --independent-laps with : --loop and without a per-process timeout.",
+            ));
+        }
+        return independent::run(&sysargs, &patch, delay, rt, depth);
+    }
     let stop = native::jobs::stop_requested_flag();
     native::jobs::install_stop_handler(&native::session(rt));
     // Job health: each run of a repeated chain is a lap (a single run leaves the record to the
@@ -315,7 +325,11 @@ pub(super) fn run_pipeline(args: &ArgsMap, rt: &mut Runtime<'_>, depth: usize) -
         if let Some(heartbeat) = heartbeat.as_mut() {
             heartbeat.lap_started();
         }
-        let dates = rt.dates.clone();
+        let dates = if looping {
+            DateContext::system()
+        } else {
+            rt.dates.clone()
+        };
         result = match timeout {
             None => match run_chain(&sysargs, &dates, Some(&patch), |args| {
                 entry_with_args(args, rt, depth + 1)

@@ -7,6 +7,8 @@ hide:
 
 Meerschaum plugins let you ingest any data source into [pipes](/reference/pipes) as well as defining custom actions, connectors, API endpoints, dash apps, and more.
 
+Give each plugin a unique name. During a port, a native implementation takes precedence over a Python plugin with the same name, including its sync hooks. This transitional setup is discouraged. Remove the Python copy once the port is complete.
+
 ### Quickstart
 
 Run `bootstrap plugin` to get started:

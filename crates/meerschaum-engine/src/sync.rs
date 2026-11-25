@@ -640,13 +640,20 @@ pub async fn sync_pipe(
     // The sync's frames are gone: return their pages (see `crate::memory`).
     crate::memory::release_free_memory_throttled(TRIM_INTERVAL);
     if records {
-        crate::status::record_result_with_registration(
-            env.registry,
-            pipe,
-            &result,
-            false,
-            registration,
-        );
+        let record = || {
+            crate::status::record_result_with_registration(
+                env.registry,
+                pipe,
+                &result,
+                false,
+                registration,
+            )
+        };
+        if args.extra.get("_from_sync_hook").is_some_and(Value::truthy) {
+            meerschaum_connector::sync_metrics::without_hook_metrics(record);
+        } else {
+            record();
+        }
     }
     result
 }
