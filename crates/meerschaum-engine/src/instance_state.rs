@@ -1208,13 +1208,24 @@ impl InstanceState {
     /// ([`StateWriter::prune_ledger`]), and an unconsumed entry must survive until its children
     /// read it.
     pub async fn prune_history(&self, before: DateTime<Utc>) -> Vec<StateError> {
+        let conn = match self.conn(&self.home) {
+            Ok(conn) => conn,
+            Err(error) => return vec![error],
+        };
         let mut errors = Vec::new();
         for kind in [EnginePipe::Runs, EnginePipe::Nodes, EnginePipe::Events] {
-            if let Err(e) = self
-                .clear_rows(&self.home, kind, Map::new(), Some(before))
-                .await
-            {
-                errors.push(e);
+            let pipe = match engine_pipe_on(conn.as_ref(), &self.home, kind).await {
+                Ok(pipe) => pipe,
+                Err(e) => {
+                    errors.push(unreachable(&self.home, e));
+                    continue;
+                }
+            };
+            if conn.pipe_exists(&pipe).await.unwrap_or(false) {
+                let result = conn.expire_history(&pipe, DateBound::utc(before)).await;
+                if !result.success {
+                    errors.push(StateError::Other(result.message));
+                }
             }
         }
         errors

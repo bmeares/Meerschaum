@@ -322,7 +322,7 @@ async fn bounds_limits_and_retention_are_enforced_by_the_persisted_store() {
                 ..Default::default()
             })
             .await
-            .is_err()
+            .is_ok()
     );
 }
 

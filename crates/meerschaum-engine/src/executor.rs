@@ -304,6 +304,8 @@ impl RetryPolicy {
 /// Executor options.
 #[derive(Debug, Clone)]
 pub struct ExecutorOptions {
+    /// Delay loop history until the first node starts work or finishes with a non-skip status.
+    pub history_started: Option<Arc<std::sync::atomic::AtomicBool>>,
     /// Optional trusted Main plan source; absent on ordinary runs.
     pub plan_authority: Option<Arc<dyn crate::PlanAuthority>>,
     /// Whether the operation can observe a whole-pipe watermark for progress events.
@@ -345,6 +347,7 @@ pub enum Priority {
 impl Default for ExecutorOptions {
     fn default() -> Self {
         ExecutorOptions {
+            history_started: None,
             plan_authority: None,
             report_global_watermarks: true,
             workers: 4,
@@ -433,6 +436,16 @@ where
     L: LeaseSource,
 {
     async fn persist_progress(&mut self, run: &RunRow) {
+        if let Some(active) = &self.options.history_started
+            && !active.load(std::sync::atomic::Ordering::Acquire)
+        {
+            if self.rows.values().all(|row| {
+                row.attempts == 0 && matches!(row.status, NodeStatus::Pending | NodeStatus::Skipped)
+            }) {
+                return;
+            }
+            active.store(true, std::sync::atomic::Ordering::Release);
+        }
         let record = RunRecord {
             run: run.clone(),
             nodes: self

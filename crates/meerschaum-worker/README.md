@@ -50,7 +50,7 @@ engine, jobs, server and CLI depend on this crate, never the reverse).
 - **Lifetime limits.** Jobs loop for months, and a long-lived interpreter keeps the high-water
   mark of its largest call (and whatever plugin code accumulates). A worker is replaced after
   `system.engine.python_worker_max_calls` calls (default 10,000) or when its private resident
-  memory (`RssAnon`, Linux) exceeds `python_worker_max_memory_mb` (default 1,024) after a call;
+  memory (`RssAnon + VmSwap`, Linux) exceeds `python_worker_max_memory_mb` (default 1,024) after a call;
   an idle worker stops after `python_worker_idle_seconds` (default 600). `0` turns a limit off.
   Replacement never fails a call: the worker is shut down in the background and the next call
   starts a fresh one (`PoolStats::retired`). Plugin module state therefore lasts at most one
@@ -175,7 +175,7 @@ wrapping its native sync (autotime, ledger, observers).
 
 ## Streams (§5.6)
 
-`PythonStream::start` runs a connector in a **dedicated** worker (outside the pool's permits):
+`PythonStream::start` runs a connector by default in a **dedicated** worker (outside the pool's permits):
 
 - `StreamMode::V4Sync`: the connector's `sync()` (e.g. an MQTT plugin that subscribes and
   returns); the worker stays alive and its callback `pipe.sync()` calls reach the handler.

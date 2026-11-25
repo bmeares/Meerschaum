@@ -2,6 +2,8 @@
 //! `compress_pipe`, `decompress_pipe`, `apply_compression_policy`, `set_integer_now_func`,
 //! `vacuum_pipe` and `analyze_pipe`.
 
+mod hypertable;
+
 use indexmap::IndexMap;
 use meerschaum_connector::{ConnectorResult, DataQuery};
 use meerschaum_core::{Pipe, SuccessTuple};
@@ -189,6 +191,14 @@ impl SqlConnector {
         let Ok(sp) = self.sql_pipe(pipe) else {
             return SuccessTuple::fail(format!("Failed to apply a compression policy to {pipe}."));
         };
+        if pipe.connector_keys() != "mrsm" {
+            return match self.reconcile_hypertable(&sp, true).await {
+                Ok(()) => SuccessTuple::ok(format!("Checked the compression policy for {pipe}.")),
+                Err(error) => SuccessTuple::fail(format!(
+                    "Failed to apply a compression policy to {pipe}: {error}"
+                )),
+            };
+        }
         let exists = self
             .table_exists(&sp.target, self.get_pipe_schema(&sp).as_deref())
             .await;

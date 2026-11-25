@@ -2,9 +2,8 @@
 //! manifest, and the native plugins it opens.
 
 use meerschaum_worker::manifest::{
-    Manifest, ManifestSource, ensure_manifest_for, ensure_manifest_for_with_options, manifest_path,
-    probe_entry_points, read_cached_manifest_for, read_fresh_manifest_for, rebuild_manifest_for,
-    stale_plugins_for,
+    Manifest, ManifestSource, ensure_manifest_for_with_options, manifest_path, probe_entry_points,
+    read_cached_manifest_for, read_fresh_manifest_for, rebuild_manifest_for, stale_plugins_for,
 };
 use meerschaum_worker::{PoolConfig, WorkerPool};
 use std::io::IsTerminal;
@@ -235,28 +234,8 @@ impl Session {
             &native_cache,
             &compiler,
         );
-        if let Some(python) = fresh_python
-            && fresh_native
-        {
-            let python = Arc::new(python);
-            let signature = native_signature(&plugins_dirs, &native_cache, &compiler);
-            let (natives, error) =
-                match NativePlugins::open_with_policy(&plugins_dirs, &native_cache, &compiler) {
-                    Ok(natives) => (Arc::new(natives), None),
-                    Err(error) => (Arc::new(NativePlugins::empty()), Some(error.to_string())),
-                };
-            let mut merged = crate::native_plugins::merge(&python, &natives);
-            if let Some(error) = &error {
-                merged
-                    .load_errors
-                    .insert("native plugins".into(), error.clone());
-            }
-            state.python = Some(python);
-            state.natives = Some(natives);
-            state.native_signature = Some(signature);
-            state.native_error = error;
-            state.merged = Some(Arc::new(merged));
-            state.validated = true;
+        if fresh_python.is_some() && fresh_native {
+            let _ = self.validate_manifests(&mut state, config, false);
             return;
         }
         // Slow path: serve cached metadata immediately and rebuild quietly in the background.
@@ -269,42 +248,20 @@ impl Session {
 
         let session = self.clone();
         let bg_refresh = refresh.clone();
+        let config = crate::native_plugins::host_config(config);
         let spawned = std::thread::Builder::new()
             .name("mrsm-manifest".into())
             .spawn(move || {
                 let outcome = (|| -> Result<(), ActionError> {
-                    let (manifest, _source) = session
-                        .block_on(ensure_manifest_for_with_options(
-                            &pool,
-                            &manifest_file,
-                            &plugins_dirs,
-                            &entry_points,
-                            true,
-                        ))
-                        .map_err(|e| ActionError::new("WorkerError", e.to_string()))?;
-                    let python = Arc::new(manifest);
-                    let signature = native_signature(&plugins_dirs, &native_cache, &compiler);
-                    let (natives, error) = match NativePlugins::open_with_policy_quiet(
-                        &plugins_dirs,
-                        &native_cache,
-                        &compiler,
-                    ) {
-                        Ok(natives) => (Arc::new(natives), None),
-                        Err(error) => (Arc::new(NativePlugins::empty()), Some(error.to_string())),
-                    };
-                    let mut merged = crate::native_plugins::merge(&python, &natives);
-                    if let Some(error) = &error {
-                        merged
-                            .load_errors
-                            .insert("native plugins".into(), error.clone());
-                    }
+                    let mut fresh = ManifestState::default();
+                    session.validate_manifest_selection(&mut fresh, &config, false, true)?;
                     let mut state = session.manifests.lock().unwrap_or_else(|e| e.into_inner());
                     if !state.cached_only && state.generation == expected_gen {
-                        state.python = Some(python);
-                        state.natives = Some(natives);
-                        state.native_signature = Some(signature);
-                        state.native_error = error;
-                        state.merged = Some(Arc::new(merged));
+                        state.python = fresh.python;
+                        state.natives = fresh.natives;
+                        state.native_signature = fresh.native_signature;
+                        state.native_error = fresh.native_error;
+                        state.merged = fresh.merged;
                         state.validated = true;
                     }
                     if state
@@ -431,6 +388,16 @@ impl Session {
         config: &Config,
         force: bool,
     ) -> Result<(), ActionError> {
+        self.validate_manifest_selection(state, config, force, false)
+    }
+
+    fn validate_manifest_selection(
+        &self,
+        state: &mut ManifestState,
+        config: &Config,
+        force: bool,
+        quiet: bool,
+    ) -> Result<(), ActionError> {
         // The manifests lock serializes the trusted setter against the first discovery.
         // Keep this frozen even when cached-only mode later drops ManifestState.
         let compiler = self
@@ -470,9 +437,61 @@ impl Session {
         let mut python_changed = state.merged.is_none();
         let entry_points =
             Self::resolve_entry_points(&pool, &manifest_file, &paths.root_dir, force)?;
+        let native_cache = crate::native_plugins::cache_path(&paths.root_dir);
+        let signature = native_signature(&paths.plugins_dirs, &native_cache, compiler);
+        if force || state.natives.is_none() || state.native_signature.as_ref() != Some(&signature) {
+            let (natives, error) = match (if quiet {
+                NativePlugins::open_with_policy_quiet
+            } else {
+                NativePlugins::open_with_policy
+            })(&paths.plugins_dirs, &native_cache, compiler)
+            {
+                Ok(natives) => (Arc::new(natives), None),
+                // A broken native plugin must not disable the Python plugins.
+                Err(error) => (Arc::new(NativePlugins::empty()), Some(error.to_string())),
+            };
+            state.natives = Some(natives);
+            state.native_signature = Some(signature);
+            state.merged = None;
+            state.native_error = error;
+        }
+        let natives = state.natives.as_ref().expect("validated native plugins");
+        let mut shadowed = Vec::new();
+        let sources = meerschaum_worker::manifest::discover_plugins(&paths.plugins_dirs);
+        for source in &sources {
+            if natives.contains(&source.name) {
+                let name = &source.name;
+                report_plugin_selection(format!(
+                    "Warning: Native plugin '{name}' shadows Python plugin '{name}' ({}). Shadowing is transitional and discouraged. Remove the Python plugin once the native port is complete.",
+                    source.path.display()
+                ));
+                shadowed.push(name.clone());
+            } else if let Some(reason) = natives
+                .failure_for(&source.name)
+                .or(state.native_error.as_deref())
+            {
+                report_plugin_selection(format!(
+                    "Error: Native plugin '{}' failed to open: {reason}. Using its Python copy at {}.",
+                    source.name,
+                    source.path.display()
+                ));
+            }
+        }
+        for name in &entry_points {
+            if natives.contains(name) && !shadowed.contains(name) {
+                report_plugin_selection(format!(
+                    "Warning: Native plugin '{name}' shadows Python entry-point plugin '{name}'. Shadowing is transitional and discouraged. Remove the Python plugin once the native port is complete."
+                ));
+                shadowed.push(name.clone());
+            }
+        }
+        shadowed.sort();
+        self.block_on(pool.set_shadowed_plugins(shadowed.clone()));
         let python = match previous.clone() {
             Some(cached)
-                if !force && !stale_plugins_for(&cached, &paths.plugins_dirs, &entry_points).0 =>
+                if !force
+                    && cached.shadowed_plugins == shadowed
+                    && !stale_plugins_for(&cached, &paths.plugins_dirs, &entry_points).0 =>
             {
                 cached
             }
@@ -486,11 +505,12 @@ impl Session {
                     ))
                     .map(|manifest| (manifest, ManifestSource::Built))
                 } else {
-                    self.block_on(ensure_manifest_for(
+                    self.block_on(ensure_manifest_for_with_options(
                         &pool,
                         &manifest_file,
                         &paths.plugins_dirs,
                         &entry_points,
+                        quiet,
                     ))
                 }
                 .map_err(|e| ActionError::new("WorkerError", e.to_string()))?;
@@ -511,23 +531,7 @@ impl Session {
                 Arc::new(manifest)
             }
         };
-        python_changed |= force;
-        let native_cache = crate::native_plugins::cache_path(&paths.root_dir);
-        let signature = native_signature(&paths.plugins_dirs, &native_cache, compiler);
-        if force || state.natives.is_none() || state.native_signature.as_ref() != Some(&signature) {
-            let (natives, error) =
-                match NativePlugins::open_with_policy(&paths.plugins_dirs, &native_cache, compiler)
-                {
-                    Ok(natives) => (Arc::new(natives), None),
-                    // A broken native plugin must not disable the Python plugins.
-                    Err(error) => (Arc::new(NativePlugins::empty()), Some(error.to_string())),
-                };
-            state.natives = Some(natives);
-            state.native_signature = Some(signature);
-            state.merged = None;
-            state.native_error = error;
-        }
-        if python_changed || state.merged.is_none() {
+        if force || python_changed || state.merged.is_none() {
             let natives = state.natives.clone().expect("natives");
             let mut merged = crate::native_plugins::merge(&python, &natives);
             if let Some(error) = &state.native_error {
@@ -586,5 +590,17 @@ fn stdin_is_a_jobs_input() -> bool {
     #[cfg(not(unix))]
     {
         false
+    }
+}
+
+fn report_plugin_selection(message: String) {
+    static REPORTED: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::LazyLock::new(Default::default);
+    if REPORTED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(message.clone())
+    {
+        eprintln!("{message}");
     }
 }

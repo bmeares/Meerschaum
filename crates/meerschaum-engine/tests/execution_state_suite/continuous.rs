@@ -329,3 +329,68 @@ async fn listen_runs_supervised_stream_sources() {
         .unwrap();
     assert!(seq.is_some_and(|s| s >= 2), "{seq:?}");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn resumed_skipped_lap_reaches_subscribers_without_persisting_history() {
+    let env = env("skipped_lap").await;
+    env.exec("CREATE TABLE src (ts TEXT, id INTEGER, v REAL)")
+        .await;
+    env.exec("INSERT INTO src VALUES ('2026-01-01 00:00:00', 1, 1.0)")
+        .await;
+    env.register("m", &source_params()).await;
+    let engine = env.engine_with(|c| c.persist_skipped_laps = false);
+    let first = engine.run(RunOptions::default()).await;
+    assert!(first.success, "{}", first.message);
+    let run_id = first.record.unwrap().run.run_id;
+    let options = RunOptions {
+        resume: Some(run_id),
+        ..Default::default()
+    };
+    let mut events = engine.subscribe();
+    let (_, on_lap) = recorder();
+    let result = engine
+        .run_loop(
+            options.clone(),
+            LoopOptions {
+                run_loop: true,
+                max_laps: Some(1),
+                ..Default::default()
+            },
+            on_lap,
+        )
+        .await;
+    let last = result.last.unwrap();
+    assert!(last.success, "{}", last.message);
+    let record = last.record.unwrap();
+    assert_eq!(record.nodes.len(), 1);
+    assert_eq!(
+        record.nodes[0].status,
+        meerschaum_engine::NodeStatus::Skipped
+    );
+    assert!(events.try_recv().is_ok());
+    assert!(
+        engine
+            .state()
+            .load_run(&record.run.run_id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        engine
+            .state()
+            .load_events(&record.run.run_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let single = engine.run(options).await.record.unwrap();
+    assert!(
+        engine
+            .state()
+            .load_run(&single.run.run_id)
+            .await
+            .unwrap()
+            .is_some()
+    );
+}

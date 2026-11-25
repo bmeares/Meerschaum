@@ -1292,6 +1292,12 @@ impl JobExecutor for SystemdExecutor {
             let _ = self.run_command(&["disable", &service]);
         }
 
+        // Resolve the unit and its artifacts while the per-job definition still exists.
+        let user_link = self.ctx.paths.systemd_user_dir.join(&service);
+        let owned_link = self.link_is_ours(name, &service).then_some(user_link);
+        let logs_path = self.get_service_logs_path(name);
+        let mut file_paths = vec![self.get_socket_path(name), self.get_result_path(name)];
+        file_paths.extend(owned_link);
         let job_path = self.get_service_job_path(name);
         if job_path.exists()
             && let Err(e) = std::fs::remove_dir_all(&job_path)
@@ -1299,7 +1305,6 @@ impl JobExecutor for SystemdExecutor {
             return SuccessTuple::fail(e.to_string());
         }
 
-        let logs_path = self.get_service_logs_path(name);
         let logs_prefix = format!(
             "{}.",
             logs_path
@@ -1307,12 +1312,6 @@ impl JobExecutor for SystemdExecutor {
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default()
         );
-        let mut file_paths = vec![
-            self.get_service_file_path(name),
-            self.get_service_symlink_file_path(name),
-            self.get_socket_path(name),
-            self.get_result_path(name),
-        ];
         if let Ok(entries) = std::fs::read_dir(&self.ctx.paths.systemd_logs_dir) {
             for entry in entries.flatten() {
                 if entry

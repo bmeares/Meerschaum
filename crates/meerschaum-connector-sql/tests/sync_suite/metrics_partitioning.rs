@@ -467,3 +467,56 @@ async fn timescale_migrates_legacy_30_day_engine_hypertables_and_preserves_custo
     );
     cleanup(&fresh).await;
 }
+
+#[tokio::test]
+async fn retention_keeps_the_boundary_chunk_and_other_jobs_skip_the_hour() {
+    let Some((conn, other)) = connectors().await else {
+        return;
+    };
+    assert!(conn.claim_history_retention("metrics").await.unwrap());
+    assert!(!other.claim_history_retention("metrics").await.unwrap());
+    assert!(other.claim_history_retention("runs").await.unwrap());
+    let pipe = conn
+        .engine_state_pipe("sql:metrics_partition", "engine_metrics")
+        .unwrap();
+    assert!(conn.initialize_engine_metrics().await.is_ok());
+    let sp = conn.sql_pipe(&pipe).unwrap();
+    let table = conn.pipe_table_name(&sp);
+    // Integer chunk boundaries fall on multiples of the interval. Keep both rows of
+    // the second chunk, including the one just below the split.
+    for (i, ts) in [1_i64, WEEK_US + 1, WEEK_US + 3].into_iter().enumerate() {
+        conn.driver()
+            .exec(&format!(
+                "INSERT INTO {table} (ts_us, event_id) VALUES ({ts}, '{}')",
+                uuid::Uuid::from_u128(i as u128 + 1)
+            ))
+            .await
+            .unwrap();
+    }
+    let end = DateBound::Int(WEEK_US + 2);
+    let result = conn.expire_history(&pipe, end.clone()).await;
+    assert!(result.success, "{}", result.message);
+    assert_eq!(
+        conn.get_pipe_rowcount(&pipe, &DataQuery::default())
+            .await
+            .unwrap(),
+        Some(2)
+    );
+    let result = conn
+        .clear_pipe(
+            &pipe,
+            &DataQuery {
+                end: Some(end),
+                ..Default::default()
+            },
+        )
+        .await;
+    assert!(result.success, "{}", result.message);
+    assert_eq!(
+        conn.get_pipe_rowcount(&pipe, &DataQuery::default())
+            .await
+            .unwrap(),
+        Some(1)
+    );
+    cleanup(&conn).await;
+}

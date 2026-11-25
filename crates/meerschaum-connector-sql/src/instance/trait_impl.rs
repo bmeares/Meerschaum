@@ -364,6 +364,32 @@ impl InstanceConnector for SqlConnector {
         SqlConnector::sync_pipe(self, pipe, df, opts).await
     }
 
+    async fn claim_history_retention(&self, kind: &str) -> ConnectorResult<bool> {
+        let pipe = Pipe::builder("mrsm", "history_retention")
+            .location(Some(kind))
+            .instance(&self.keys())
+            .build()
+            .map_err(super::be)?;
+        self.acquire_pipe_lease(
+            &pipe,
+            &uuid::Uuid::new_v4().to_string(),
+            std::time::Duration::from_secs(3600),
+        )
+        .await
+    }
+
+    async fn expire_history(&self, pipe: &Pipe, end: DateBound) -> SuccessTuple {
+        self.clear_pipe_with_retention(
+            pipe,
+            &DataQuery {
+                end: Some(end),
+                ..Default::default()
+            },
+            true,
+        )
+        .await
+    }
+
     async fn clear_pipe(&self, pipe: &Pipe, query: &DataQuery) -> SuccessTuple {
         SqlConnector::clear_pipe(self, pipe, query).await
     }

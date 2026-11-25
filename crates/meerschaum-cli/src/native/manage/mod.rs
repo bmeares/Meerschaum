@@ -653,10 +653,19 @@ pub fn clear_pipes(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             fails += 1;
         }
     }
+    let bounds = ["begin", "end"]
+        .into_iter()
+        .filter_map(|key| bound_str(args, key).map(|value| format!("{key}={value}")))
+        .collect::<Vec<_>>();
+    let window = if bounds.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", bounds.join(", "))
+    };
     Ok(SuccessTuple {
         success: successes > 0,
         message: format!(
-            "Finished clearing {} pipe{}\n    ({successes} succeeded, {fails} failed).",
+            "Finished clearing {} pipe{}{window}\n    ({successes} succeeded, {fails} failed).",
             pipes.len(),
             plural(pipes.len())
         ),

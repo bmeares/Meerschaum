@@ -26,6 +26,16 @@ Jobs keep running after your terminal closes. Their [executor](executors.md) det
 
 The console's [Jobs page](../api-instance/web-console.md#jobs) offers the same controls. It also shows when the job last ran and its [health](health.md).
 
+## Run several actions in one job
+
+Use `+` between actions and `: --loop --independent-laps` after the last one. Each step has its own interval and failure cooldown. Due steps run one at a time in the job's host process and can reuse its Python worker.
+
+```bash
+mrsm sync pipes -t readings --min-seconds 30 + sync pipes -t summary --min-seconds 300 : --loop --independent-laps -d --name readings-and-summary
+```
+
+Use actions that finish one lap. A long-running step delays the next due step. The group has one owner, environment, log, and stop control.
+
 ## Answer a job's prompts
 
 A job that asks a question waits until someone answers. `mrsm show jobs` says **waiting for input**, and `mrsm attach job <name>` shows the question and sends the line you type; a remote client gets the same through the job log websocket. Nobody needs to be attached when the job asks: it waits.

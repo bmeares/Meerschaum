@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import contextlib
 import pathlib
+import json
+import os
 import functools
 from collections import defaultdict
 
@@ -18,6 +20,9 @@ from meerschaum.utils.typing import Callable, Any, Union, Optional, Dict, List, 
 from meerschaum.utils.threading import RLock
 from meerschaum.core.Plugin import Plugin
 from meerschaum.plugins._page import figure, figure_json
+
+# The Rust host chooses the native implementation after it opens the plugin successfully.
+_shadowed_plugins = frozenset(json.loads(os.environ.get('MRSM_SHADOWED_PYTHON_PLUGINS', '[]')))
 
 _api_plugins: Dict[str, List[Callable[['fastapi.App'], Any]]] = {}
 _plugins_import_errors: Dict[str, Exception] = {}
@@ -1024,6 +1029,11 @@ def sync_plugins_symlinks(debug: bool = False, warn: bool = True) -> None:
                     if (
                         not item.startswith('.')
                     ) and (item not in ('__pycache__', '__init__.py'))
+                    and not item.endswith('.rs')
+                    and not (
+                        (plugins_path / item / 'plugin.toml').is_file()
+                        and not (plugins_path / item / '__init__.py').is_file()
+                    )
                 ]
                 for plugins_path in paths.PLUGINS_DIR_PATHS
                 if plugins_path.exists()
@@ -1355,11 +1365,12 @@ def load_plugins(
     from meerschaum.utils.packages import get_modules_from_package
 
     with plugin_import_guard():
-        if _TEAM_SOURCE_NAMESPACE is not None:
+        if _TEAM_SOURCE_NAMESPACE is not None or _shadowed_plugins:
             # Load each granted source with the same environment checks as a named import.
             plugins_modules = [
-                module for name in _TEAM_SOURCE_NAMESPACE['names']
-                if (module := import_plugins(name)) is not None
+                module for name in (get_plugins_names() if _TEAM_SOURCE_NAMESPACE is None
+                                    else _TEAM_SOURCE_NAMESPACE['names'])
+                if name not in _shadowed_plugins and (module := import_plugins(name)) is not None
             ]
         else:
             _plugins_names, plugins_modules = get_modules_from_package(
@@ -1624,7 +1635,7 @@ def get_plugins(*to_load, try_import: bool = True) -> Union[Tuple[Plugin], Plugi
             for name in os.listdir(paths.PLUGINS_RESOURCES_PATH)
             if name != '__init__.py'
         ]
-    _plugins = [Plugin(name) for name in names]
+    _plugins = [Plugin(name) for name in names if name not in _shadowed_plugins]
     plugins = tuple(plugin for plugin in _plugins if plugin.is_installed(try_import=try_import))
     if len(to_load) == 1:
         if len(plugins) == 0:

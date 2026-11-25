@@ -20,7 +20,7 @@ mod registration;
 
 use query::query_bounds;
 pub use query::read;
-pub use recorder::{flush, has_unwritten, prune, record};
+pub use recorder::{flush, has_unwritten, prune, record, without_hook_metrics};
 pub use registration::{
     observed_registration, pipe_key, reference_keys, registration_matches, registration_stamp,
     registrations, snapshot_registry, strip_snapshot_proofs,
@@ -28,8 +28,18 @@ pub use registration::{
 
 /// The internal history pipe, placed by the instance beside its other engine state.
 pub const METRIC: &str = "engine_metrics";
-/// Persisted history expires after this many days.
-pub const RETENTION_DAYS: i64 = 30;
+/// Maximum duration of a single observed sync, independent of history retention.
+pub const MAX_DURATION_DAYS: i64 = 30;
+
+/// Days of sync history to keep, inheriting the run-history policy. Zero disables expiry.
+pub fn retention_days() -> i64 {
+    let config = meerschaum_core::config::Config::current().ok();
+    let days = |key| config.as_ref()?.get(&["system", "engine", key])?.as_i64();
+    days("metrics_retention_days")
+        .or_else(|| days("run_history_days"))
+        .unwrap_or(30)
+        .clamp(0, 365_000)
+}
 /// Maximum outcomes waiting in this process; overload drops telemetry, never the sync.
 pub const MAX_PENDING: usize = 4096;
 /// Largest database write batch.
@@ -99,7 +109,7 @@ impl SyncMetric {
             .duration_seconds
             .filter(|value| value.is_finite() && *value >= 0.0)
             .unwrap_or(0.0)
-            .min(RETENTION_DAYS as f64 * 86400.0);
+            .min(MAX_DURATION_DAYS as f64 * 86400.0);
         Self {
             event_id: uuid::Uuid::new_v4().to_string(),
             ts: outcome.finished,
@@ -143,12 +153,16 @@ impl SyncMetric {
 
     /// Canonicalize untrusted transport metadata on the server's selected instance.
     pub fn canonicalize(&mut self, pipe: &Pipe) -> ConnectorResult<()> {
+        let now = Utc::now();
         if uuid::Uuid::parse_str(&self.event_id).is_err()
             || !self.duration_seconds.is_finite()
             || self.duration_seconds < 0.0
-            || self.duration_seconds > RETENTION_DAYS as f64 * 86400.0
-            || self.ts > Utc::now() + TimeDelta::minutes(5)
-            || self.ts < Utc::now() - TimeDelta::days(RETENTION_DAYS)
+            || self.duration_seconds > MAX_DURATION_DAYS as f64 * 86400.0
+            || self.ts > now + TimeDelta::minutes(5)
+            || (self.ts < now - TimeDelta::days(1) && {
+                let days = retention_days();
+                days > 0 && self.ts < now - TimeDelta::days(days)
+            })
         {
             return Err(ConnectorError::Invalid(
                 "Invalid sync metric bounds or identity.".into(),
@@ -215,7 +229,7 @@ impl SyncMetric {
             .or_else(|| doc_dt(doc, "ts"))?;
         let duration_seconds = doc_f64(doc, "duration_seconds")
             .filter(|value| {
-                value.is_finite() && *value >= 0.0 && *value <= RETENTION_DAYS as f64 * 86400.0
+                value.is_finite() && *value >= 0.0 && *value <= MAX_DURATION_DAYS as f64 * 86400.0
             })
             .unwrap_or(0.0);
         let started = ts.checked_sub_signed(TimeDelta::microseconds(

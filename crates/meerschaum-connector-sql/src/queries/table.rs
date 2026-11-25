@@ -27,6 +27,8 @@ pub enum QueryOrDtypes {
 pub struct CreateTableOptions {
     /// `schema`.
     pub schema: Option<String>,
+    /// The relation holds disposable intermediate rows.
+    pub unlogged_staging: bool,
     /// `primary_key`.
     pub primary_key: Option<String>,
     /// `primary_key_db_type`.
@@ -55,6 +57,7 @@ impl Default for CreateTableOptions {
     fn default() -> Self {
         CreateTableOptions {
             schema: None,
+            unlogged_staging: false,
             primary_key: None,
             primary_key_db_type: None,
             autoincrement: false,
@@ -389,11 +392,16 @@ pub fn get_create_table_query_from_cte(
             (vec![create], Vec::new())
         }
         _ => {
+            let create_table = if opts.unlogged_staging && flavor.supports_unlogged_staging() {
+                "CREATE UNLOGGED TABLE"
+            } else {
+                "CREATE TABLE"
+            };
             let create = if is_with_query {
-                format!("CREATE TABLE {new_table_name} AS\n{query}")
+                format!("{create_table} {new_table_name} AS\n{query}")
             } else {
                 format!(
-                    "CREATE TABLE {new_table_name} AS\nSELECT *\nFROM (\n{}\n){}",
+                    "{create_table} {new_table_name} AS\nSELECT *\nFROM (\n{}\n){}",
                     indent(query, "    "),
                     if flavor != Flavor::Oracle {
                         format!(" AS {create_cte_name}")

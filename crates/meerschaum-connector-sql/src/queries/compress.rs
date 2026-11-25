@@ -336,8 +336,16 @@ pub fn get_columnstore_settings_query(ctx: &ConnectorCtx, pipe: &SqlPipe) -> Str
 
 /// `_get_columnstore_policy_query(pipe)`.
 pub fn get_columnstore_policy_query(ctx: &ConnectorCtx, pipe: &SqlPipe) -> String {
+    let after_clause = columnstore_after_clause(ctx, pipe);
+    format!(
+        "CALL add_columnstore_policy('{}', after => {after_clause}, if_not_exists => true)",
+        pipe_name(ctx, pipe).replace('\'', "''")
+    )
+}
+
+pub(crate) fn columnstore_after_clause(ctx: &ConnectorCtx, pipe: &SqlPipe) -> String {
     let settings = get_compress_settings(ctx.flavor, pipe);
-    let after_clause = if dt_axis_is_integer(pipe) {
+    if dt_axis_is_integer(pipe) {
         match &settings.after {
             Some(Value::Int(i)) => i.to_string(),
             other => get_integer_after(pipe, other.as_ref()).to_string(),
@@ -348,11 +356,7 @@ pub fn get_columnstore_policy_query(ctx: &ConnectorCtx, pipe: &SqlPipe) -> Strin
             _ => DEFAULT_COMPRESS_AFTER.to_string(),
         };
         format!("INTERVAL '{}'", after.replace('\'', "''"))
-    };
-    format!(
-        "CALL add_columnstore_policy('{}', after => {after_clause}, if_not_exists => true)",
-        pipe_name(ctx, pipe)
-    )
+    }
 }
 
 /// `_get_columnstore_remove_policy_query(pipe)`.

@@ -153,6 +153,7 @@ impl SqlConnector {
 
         let build = |chunk: Option<String>| -> crate::Result<Vec<String>> {
             let opts = CreateTableOptions {
+                unlogged_staging: false,
                 schema: schema.clone(),
                 primary_key: primary_key.clone(),
                 primary_key_db_type: primary_key_db_type.clone(),

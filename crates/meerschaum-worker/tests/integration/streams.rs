@@ -207,3 +207,58 @@ async fn subscribe_sink_pushes_batches() {
     let seen = handler.seen.lock().unwrap().clone();
     assert_eq!(seen, vec![("push".to_string(), 1); 3]);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn shared_subscriptions_route_late_callbacks_and_stop_together() {
+    require_python!();
+    let env = TestEnv::new();
+    let pool = env.pool(1);
+    let shared = meerschaum_worker::SharedStreamWorkers::new(pool.clone());
+    let (_dir, instance) = sqlite().await;
+    let mut streams = Vec::new();
+    let mut workers = Vec::new();
+    let mut subscriptions = Vec::new();
+    for count in [3, 5] {
+        let p = pipe("plugin:wk_streamer", "events", Some(&count.to_string()));
+        let handler = Arc::new(Recorder {
+            inner: InstanceSyncHandler::single(instance.clone()),
+            seen: Mutex::new(Vec::new()),
+        });
+        let (stream, mut events) = PythonStream::start(
+            pool.clone(),
+            p.connector_keys(),
+            &p,
+            &Map::new(),
+            StreamMode::V4Sync,
+            handler.clone(),
+            StreamOptions {
+                shared: Some(shared.clone()),
+                restart: false,
+                ..Default::default()
+            },
+        );
+        let StreamEvent::Started { pid } = next_event(&mut events).await else {
+            panic!("stream did not start")
+        };
+        workers.push(pid);
+        assert_eq!(
+            next_event(&mut events).await,
+            StreamEvent::Returned(SuccessTuple::ok("subscribed"))
+        );
+        streams.push((stream, events));
+        subscriptions.push((p, handler, count));
+    }
+    assert_eq!(workers[0], workers[1]);
+    for (pipe, handler, count) in subscriptions {
+        wait_for_rows(&instance, &pipe, count).await;
+        assert_eq!(handler.seen.lock().unwrap().len(), count as usize);
+    }
+    let (first, _) = streams.pop().unwrap();
+    first.stop().await;
+    let (last, mut events) = streams.pop().unwrap();
+    assert!(matches!(
+        next_event(&mut events).await,
+        StreamEvent::Exited { .. }
+    ));
+    last.stop().await;
+}

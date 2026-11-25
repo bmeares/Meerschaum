@@ -18,7 +18,7 @@ mrsm sync pipes -t nightly -l _staging -s 'daily starting 02:00' -d
  ✅ Finished syncing Pipe('sql:src', 'raw', instance='sql:local'):
 ```
 
-- **Graph-aware laps:** Add `--parents` or `--children` (or run a saved Pipeline with `mrsm sync pipelines daily --loop` / `mrsm start pipeline daily`) so unchanged children are skipped automatically and every lap is recorded in [run history](/reference/pipelines/state/#run-history).
+- **Graph-aware laps:** Add `--parents` or `--children` (or run a saved Pipeline with `mrsm sync pipelines daily --loop` / `mrsm start pipeline daily`) so unchanged children are skipped automatically and by default every lap is recorded in [run history](/reference/pipelines/state/#run-history).
 - **Error cooldown:** After a failed lap, the loop backs off by `2 × (N + 1)` seconds before retrying.
 - **Stopping:** Stop background loops with `mrsm stop jobs <name>` or press Ctrl-C in the foreground.
 
@@ -48,6 +48,17 @@ There are two ways to build a streaming plugin:
 
 1. **`IS_STREAMING = True` + `subscribe(pipe, sink)` (recommended):** The engine manages micro-batching, commit-then-ack, and restarts. Rust plugins use the same contract over Arrow streams.
 2. **Legacy `sync()` callbacks (v4 compatible):** Keep existing plugins that subscribe inside `sync()` and call `pipe.sync()` from callbacks. Under `--listen`, the engine keeps the worker alive, tracks each callback sync as a flush, and triggers downstream children automatically.
+
+### Share a Python stream worker
+
+Set this on each pipe whose connector registers callbacks and returns promptly:
+
+```yaml
+stream:
+  shared_worker: true
+```
+
+One listener then starts one Python process per connector label for those pipes. Each pipe keeps its own sink and acknowledgments. A worker exit or a subscription stopping restarts the remaining subscriptions together. Leave blocking subscriptions on their default dedicated workers.
 
 ### Micro-batching
 

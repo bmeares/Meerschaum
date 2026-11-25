@@ -70,12 +70,16 @@ pub struct EngineConfig {
     pub flat_ledger: bool,
     /// Persist runs, nodes and events (`false`: memory only).
     pub persist_runs: bool,
+    /// Store history for loop laps whose entire plan is skipped.
+    pub persist_skipped_laps: bool,
     /// `system.engine.events`: persisted event granularity.
     pub events: EventGranularity,
     /// `system.engine.state_flush_ms`.
     pub state_flush: Duration,
     /// `system.engine.run_history_days`.
     pub run_history_days: i64,
+    /// Maximum wait for a phase of sync hooks.
+    pub sync_hook_timeout: Duration,
     /// Lease TTL (renewed every third).
     pub lease_ttl: Duration,
     /// How long to wait for a lease held elsewhere.
@@ -114,9 +118,11 @@ impl Default for EngineConfig {
             inclusive_cap: true,
             flat_ledger: true,
             persist_runs: true,
+            persist_skipped_laps: true,
             events: EventGranularity::All,
             state_flush: Duration::from_millis(500),
             run_history_days: 30,
+            sync_hook_timeout: Duration::from_secs(5),
             lease_ttl: Duration::from_secs(60),
             lease_wait: Duration::from_secs(30),
             lease_poll: Duration::from_millis(500),
@@ -175,6 +181,10 @@ impl EngineConfig {
             inclusive_cap: flag(&["system", "engine", "inclusive_cap"], d.inclusive_cap),
             flat_ledger: flag(&["system", "engine", "flat_ledger"], d.flat_ledger),
             persist_runs: flag(&["system", "engine", "persist_runs"], d.persist_runs),
+            persist_skipped_laps: flag(
+                &["system", "engine", "persist_skipped_laps"],
+                d.persist_skipped_laps,
+            ),
             events: match get(&["system", "engine", "events"])
                 .map(|v| meerschaum_core::pyfmt::py_str(&v))
             {
@@ -185,6 +195,11 @@ impl EngineConfig {
             },
             state_flush: int(&["system", "engine", "state_flush_ms"])
                 .map_or(d.state_flush, |ms| Duration::from_millis(ms.max(0) as u64)),
+            sync_hook_timeout: get(&["system", "engine", "sync_hook_timeout_seconds"])
+                .and_then(|v| v.as_f64())
+                .and_then(|v| Duration::try_from_secs_f64(v).ok())
+                .filter(|d| !d.is_zero())
+                .unwrap_or(d.sync_hook_timeout),
             run_history_days: int(&["system", "engine", "run_history_days"])
                 .unwrap_or(d.run_history_days),
             lease_dir: root_dir

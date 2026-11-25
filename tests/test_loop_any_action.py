@@ -17,7 +17,7 @@ import sys
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
 PLUGIN = (
-    "import time\n"
+    "import os, time\n"
     "from meerschaum.plugins import make_action\n"
     "__version__ = '0.0.1'\n"
     "@make_action\n"
@@ -36,8 +36,12 @@ PLUGIN = (
     "    return True, f'Ran {count} times.'\n"
     "@make_action\n"
     "def e2tick(**kw):\n"
-    "    print('E2TICK run', flush=True)\n"
+    "    print(f'E2TICK run {os.getpid()}', flush=True)\n"
     "    return True, 'ticked'\n"
+    "@make_action\n"
+    "def e2fail(**kw):\n"
+    "    print(f'E2FAIL run {os.getpid()}', flush=True)\n"
+    "    return False, 'retry this step'\n"
 )
 
 
@@ -45,7 +49,7 @@ def run_job(tmp_path, sysargs, until, name='e2-job'):
     """Start a job running `sysargs`, wait for `until` (Python source over `logs` and `health`),
     then print its logs' markers and health."""
     code = (
-        "import time\n"
+        "import os, time\n"
         "import meerschaum as mrsm\n"
         f"job = mrsm.Job({name!r}, {sysargs!r}, executor_keys='local')\n"
         "assert job.start()[0]\n"
@@ -125,3 +129,16 @@ def test_a_scheduled_plugin_action_records_each_run(tmp_path):
     # The host runs the schedule and records each run (the worker no longer schedules again
     # inside the first run).
     assert 'HEALTH healthy | last good run' in stdout, context
+
+
+def test_independent_steps_share_the_worker_and_keep_their_own_cooldowns(tmp_path):
+    stdout, context = run_job(
+        tmp_path,
+        ['e2fail', '--min-seconds', '30', '+', 'e2tick', '--min-seconds', '0.1',
+         ':', '--loop', '--independent-laps'],
+        "logs.count('E2TICK run') >= 3",
+    )
+    failed = [line.split()[-1] for line in stdout.splitlines() if 'E2FAIL run' in line]
+    ticks = [line.split()[-1] for line in stdout.splitlines() if 'E2TICK run' in line]
+    assert len(failed) == 1 and len(ticks) >= 3, context
+    assert set(failed + ticks) == {failed[0]}, context

@@ -3350,7 +3350,7 @@ All keys live under `system.engine` (`mrsm edit config system`):
 | `limits.connectors` / `limits.instances` | none | Per-connector / per-instance concurrency caps |
 | `python_workers` | pool size | Max concurrent Python plugin workers |
 | `python_worker_max_calls` | `10000` | Recycle Python worker after N calls (`0`: never) |
-| `python_worker_max_memory_mb` | `1024` | Recycle Python worker above N MB RSS (`0`: never; Linux) |
+| `python_worker_max_memory_mb` | `1024` | Recycle Python worker above N MB of resident plus swapped private memory (`0`: never; Linux) |
 | `python_worker_idle_seconds` | `600` | Stop idle Python workers after N seconds (`0`: never) |
 | `python_team_workers` | pool size | Cap across [isolated teams' worker pools](/reference/api-instance/teams/#team-scoped-workers) |
 | `python_worker_team_idle_seconds` | `60` | Idle timeout for team workers (`0`: never) |
@@ -3361,9 +3361,11 @@ All keys live under `system.engine` (`mrsm edit config system`):
 | `inclusive_cap` | `true` | Cap children at parent watermark + 1 unit (`false`: half-open) |
 | `flat_ledger` | `true` | Write ledger entries for flat syncs |
 | `persist_runs` | `true` | Persist runs, nodes, and events (`false`: memory only) |
+| `persist_skipped_laps` | `true` | Set to `false` to omit loop laps in which every node was skipped from stored history |
 | `events` | `all` | Persisted event detail: `all`, `nodes`, or `off` |
 | `state_flush_ms` | `500` | Batch flush interval in continuous mode |
 | `run_history_days` | `30` | Retention window for runs, nodes, and events |
+| `metrics_retention_days` | `run_history_days` | Retention window for sync metrics. Set to `0` to disable expiry |
 | `debounce_seconds` | unset | Min delay between triggered runs of a stream child |
 | `default_duration_seconds` | `30` | Forecast duration without history |
 | `chunk_pipelining` | `false` | Enable [chunk pipelining](/reference/pipelines/#chunk-pipelining) |
@@ -3407,7 +3409,7 @@ mrsm sync pipes -t nightly -l _staging -s 'daily starting 02:00' -d
  ✅ Finished syncing Pipe('sql:src', 'raw', instance='sql:local'):
 ```
 
-- **Graph-aware laps:** Add `--parents` or `--children` (or run a saved Pipeline with `mrsm sync pipelines daily --loop` / `mrsm start pipeline daily`) so unchanged children are skipped automatically and every lap is recorded in [run history](/reference/pipelines/state/#run-history).
+- **Graph-aware laps:** Add `--parents` or `--children` (or run a saved Pipeline with `mrsm sync pipelines daily --loop` / `mrsm start pipeline daily`) so unchanged children are skipped automatically and by default every lap is recorded in [run history](/reference/pipelines/state/#run-history).
 - **Error cooldown:** After a failed lap, the loop backs off by `2 × (N + 1)` seconds before retrying.
 - **Stopping:** Stop background loops with `mrsm stop jobs <name>` or press Ctrl-C in the foreground.
 
@@ -3437,6 +3439,17 @@ There are two ways to build a streaming plugin:
 
 1. **`IS_STREAMING = True` + `subscribe(pipe, sink)` (recommended):** The engine manages micro-batching, commit-then-ack, and restarts. Rust plugins use the same contract over Arrow streams.
 2. **Legacy `sync()` callbacks (v4 compatible):** Keep existing plugins that subscribe inside `sync()` and call `pipe.sync()` from callbacks. Under `--listen`, the engine keeps the worker alive, tracks each callback sync as a flush, and triggers downstream children automatically.
+
+### Share a Python stream worker
+
+Set this on each pipe whose connector registers callbacks and returns promptly:
+
+```yaml
+stream:
+  shared_worker: true
+```
+
+One listener then starts one Python process per connector label for those pipes. Each pipe keeps its own sink and acknowledgments. A worker exit or a subscription stopping restarts the remaining subscriptions together. Leave blocking subscriptions on their default dedicated workers.
 
 ### Micro-batching
 
@@ -3924,7 +3937,9 @@ For PostgreSQL the highest partition is determined from the requested grid direc
 
 ### Changing the partition width
 
-`verify.chunk_minutes` is the **authoritative** partition width. It is read at sync time, so editing it does not retroactively reshape an existing table, and worse, a changed width laid over an existing grid (e.g. a 7-day grid over 30-day partitions) produces overlapping boundaries that PostgreSQL rejects outright. Treat the width as fixed for the life of a table.
+On TimescaleDB, syncing an edited pipe applies its declared width to future chunks. Sync also installs a declared columnstore policy or updates its compression age. An integer time axis accepts an integer `compress.after` in axis units or a duration such as `"7 days"` converted using the pipe's precision.
+
+On databases with native range partitions, `verify.chunk_minutes` is the **authoritative** partition width. It is read at sync time, so editing it does not retroactively reshape an existing table, and worse, a changed width laid over an existing grid (e.g. a 7-day grid over 30-day partitions) produces overlapping boundaries that PostgreSQL rejects outright. Treat the width as fixed for the life of a table.
 
 To actually change the width of an existing table, use the `partition pipes` action (or [`Pipe.repartition()`](https://docs.meerschaum.io/meerschaum.html#Pipe.repartition)), which updates `verify.chunk_minutes` and rebuilds the table at the new width:
 
@@ -6643,12 +6658,12 @@ mrsm stack up -d
 Meerschaum spins up a dedicated container, isolated bridge network, and private volumes (`/meerschaum` and `/var/lib/meerschaum/factory`). Grant changes apply live; image, limit, or network changes need `mrsm stack up -d`.
 
 !!! tip "Override the executor image"
-    Stack team executors default to `bmeares/meerschaum:5.1.5-full`, matching the main API release. To pin a custom image, set `executor.image` in `stack.yaml`.
+    Stack team executors default to `bmeares/meerschaum:5.1.6-full`, matching the main API release. To pin a custom image, set `executor.image` in `stack.yaml`.
 
     ```yaml
     # mrsm edit config stack
     executor:
-      image: registry.example/meerschaum-executor:5.1.5
+      image: registry.example/meerschaum-executor:5.1.6
     ```
 
 ## Choose a deployment
@@ -7228,6 +7243,8 @@ Source: https://meerschaum.io/reference/api-instance/sync-metrics/
 
 Find slow or failing syncs, and see how much data each Pipe or Pipeline changes.
 
+Writes made by sync hooks update the destination pipe’s latest status and skip the metrics queue. Each pre- and post-sync hook phase has a five-second deadline. Set `system.engine.sync_hook_timeout_seconds` to a positive duration in seconds to change it. A timeout logs a warning and the sync continues.
+
 ## In the console
 
 Open **Performance** in the navigation, or choose **View performance** on the Overview card. Pick a time window, then narrow it to a Pipe or Pipeline.
@@ -7260,7 +7277,7 @@ print(summary['avg_duration_seconds'], 'seconds per sync')
 Leave out `pipeline` for every Pipe, or pass a `Pipe` as `pipe=`. Use UTC datetimes for `begin=` and `end=` to choose a window.
 
 ??? info "History, limits, and access"
-    - History is retained for **30 days**. The default query covers the last 24 hours.
+    - History follows `system.engine.run_history_days` (default **30 days**). Set `system.engine.metrics_retention_days` for a separate policy. Queries default to the last 24 hours and can span older retained data.
     - SQL totals and charts cover the chosen window. Recent history is separate: **1,000** records in the console, up to **5,000** in the SDK. Check `summary_complete` and `history_truncated` for coverage.
     - Backend or Pipeline run limits may produce sampled totals. The page labels these; filter by Pipe or choose a shorter window for more detail. Use `summary_only=True` for summary cards without history or run details.
     - Capture runs in the background and is best effort. Queue or database pressure can drop a measurement without failing the sync.
@@ -7271,7 +7288,7 @@ Leave out `pipeline` for every Pipe, or pass a `Pipe` as `pipe=`. Use UTC dateti
 ## In Grafana
 
 ??? info "Storage"
-    SQL instances keep measurements in the internal `mrsm_engine_metrics` table, with time, Pipe, run, and registration indexes. TimescaleDB uses 30-day chunks on a microsecond time axis. Upgrading an RC installation corrects undersized intervals for future chunks; retained history stays intact.
+    SQL instances keep measurements in the internal `mrsm_engine_metrics` table, with time, Pipe, run, and registration indexes. TimescaleDB uses seven-day chunks on a microsecond time axis. Automatic expiry drops whole chunks, so rows can survive up to one extra chunk interval. Upgrading an RC installation corrects undersized intervals for future chunks; retained history stays intact.
 
 The Stack's [**Syncs** dashboard](../stack/index.md#built-in-dashboards) shows the same affected-row, duration, and failure measurements, and its **Engine** dashboard shows engine runs, Pipe freshness and the dirty-range backlog.
 
@@ -9028,6 +9045,16 @@ Jobs keep running after your terminal closes. Their [executor](executors.md) det
 
 The console's [Jobs page](../api-instance/web-console.md#jobs) offers the same controls. It also shows when the job last ran and its [health](health.md).
 
+## Run several actions in one job
+
+Use `+` between actions and `: --loop --independent-laps` after the last one. Each step has its own interval and failure cooldown. Due steps run one at a time in the job's host process and can reuse its Python worker.
+
+```bash
+mrsm sync pipes -t readings --min-seconds 30 + sync pipes -t summary --min-seconds 300 : --loop --independent-laps -d --name readings-and-summary
+```
+
+Use actions that finish one lap. A long-running step delays the next due step. The group has one owner, environment, log, and stop control.
+
 ## Answer a job's prompts
 
 A job that asks a question waits until someone answers. `mrsm show jobs` says **waiting for input**, and `mrsm attach job <name>` shows the question and sends the line you type; a remote client gets the same through the job log websocket. Nobody needs to be attached when the job asks: it waits.
@@ -9601,6 +9628,8 @@ hide:
 # ➕ Plugins
 
 Meerschaum plugins let you ingest any data source into [pipes](/reference/pipes) as well as defining custom actions, connectors, API endpoints, dash apps, and more.
+
+Give each plugin a unique name. During a port, a native implementation takes precedence over a Python plugin with the same name, including its sync hooks. This transitional setup is discouraged. Remove the Python copy once the port is complete.
 
 ### Quickstart
 
@@ -11222,6 +11251,8 @@ for a `greetings.rs` like the ones below, or choose **Package** for a Cargo crat
 full SDK (`greetings/Cargo.toml`, see the [advanced guide](rust-plugins/advanced.md)).
 Use `mrsm edit plugins greetings` to reopen it. Upload it to a repository with
 `mrsm register plugins greetings -r api:your-repo`, just as you would a Python plugin.
+
+During a port, a native plugin shadows a Python plugin with the same name. The host warns once and loads the native implementation, including its hooks. Shadowing is transitional and discouraged. Remove the Python copy after the port. If the native plugin fails to open, the host reports the error and uses the Python copy.
 
 ## Add a command
 
@@ -13833,6 +13864,32 @@ Read the [migration guide](../reference/migrating-to-v5.md) before upgrading an 
 Source: https://meerschaum.io/changelog/v5/
 
 # Meerschaum 5
+
+## 5.1.6
+
+- **Reduce WAL from PostgreSQL syncs.**  
+  Frame updates and upserts of up to 1,024 rows use bound arrays. Larger patches use a transaction-local staging table that PostgreSQL removes after the merge. SQL-to-SQL syncs use unlogged staging on PostgreSQL, PostGIS, and TimescaleDB.
+
+- **Expire engine history once per SQL instance.**  
+  TimescaleDB drops whole chunks during automatic expiry and keeps the chunk containing the cutoff. Sync metrics inherit `system.engine.run_history_days`. Set `metrics_retention_days` under `system.engine` to keep a different window, or set it to `30` to retain the previous policy. See [Sync metrics](../reference/api-instance/sync-metrics.md).
+
+- **Choose which loop laps to store.**  
+  Set `system.engine.persist_skipped_laps: false` to omit successful all-skipped laps from run history. Live events and job heartbeats still report those laps.
+
+- **Share Python workers and job hosts.**  
+  Callback-based stream pipes on one connector can opt into `stream.shared_worker`. Use `: --loop --independent-laps` to run several actions in one job with separate intervals and retries. Linux worker recycling now includes swapped private pages in its memory limit. See [Continuous mode](../reference/pipelines/continuous.md) and [Background jobs](../reference/background-jobs/index.md).
+
+- **Finish native plugin migrations cleanly.**  
+  A native plugin owns its name, including sync hooks. Meerschaum warns once when it shadows a Python plugin and reports a fallback if the native plugin fails to load. See [Rust plugins](/reference/plugins/rust-plugins/).
+
+- **Bound sync hooks and their telemetry.**  
+  Hook writes keep their latest sync status and skip the metrics queue. Set `system.engine.sync_hook_timeout_seconds` to adjust the five-second limit for each hook phase.
+
+- **Apply retention and compression edits.**  
+  A bare `--end '16 days ago'` now advances every midnight. `clear pipes` prints the resolved bounds. TimescaleDB syncs apply declared chunk widths to future chunks and reconcile the columnstore policy with `compress.after`.
+
+- **Report incomplete job deletions.**  
+  `delete jobs` removes named, retired job directories, reports missing names, and cleans up the installed link for a scoped systemd unit.
 
 ## 5.1.5
 

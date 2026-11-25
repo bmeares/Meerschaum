@@ -109,6 +109,8 @@ pub struct NativeConfig {
     pub filter_params_index_limit: usize,
     /// Write ledger entries for nodes with children.
     pub write_ledger: bool,
+    /// Maximum wall time for each sync hook phase.
+    pub sync_hook_timeout: std::time::Duration,
     /// Per-node sync options.
     pub sync: NodeSyncOptions,
 }
@@ -119,9 +121,23 @@ impl Default for NativeConfig {
             defaults: PipeDefaults::default(),
             default_backtrack_minutes: 1440,
             filter_params_index_limit: 250,
+            sync_hook_timeout: crate::EngineConfig::default().sync_hook_timeout,
             write_ledger: true,
             sync: NodeSyncOptions::default(),
         }
+    }
+}
+
+async fn wait_for_hooks(
+    timeout: std::time::Duration,
+    pipe: &Pipe,
+    phase: &str,
+    hooks: impl std::future::Future<Output = ()>,
+) {
+    if tokio::time::timeout(timeout, hooks).await.is_err() {
+        tracing::warn!(
+            "{phase}-sync hooks timed out after {timeout:?} for {pipe}. Continuing the sync."
+        );
     }
 }
 
@@ -657,11 +673,23 @@ impl<S: StateWriter + 'static> NativeExecutor<S> {
             self.registry.hooks()
         };
         if let Some(h) = &hooks {
-            h.pre_sync(pipe, args).await;
+            wait_for_hooks(
+                self.config.sync_hook_timeout,
+                pipe,
+                "pre",
+                h.pre_sync(pipe, args),
+            )
+            .await;
         }
         let result = sync_pipe(&env, pipe, input, args, observer).await;
         if let Some(h) = &hooks {
-            h.post_sync(pipe, args, &result).await;
+            wait_for_hooks(
+                self.config.sync_hook_timeout,
+                pipe,
+                "post",
+                h.post_sync(pipe, args, &result),
+            )
+            .await;
         }
         result
     }
@@ -1080,7 +1108,13 @@ impl<S: StateWriter + 'static> LegacySink for NativeLegacySink<S> {
             ..self.executor.base_args()
         };
         if let Some(h) = self.hooks(&args) {
-            h.pre_sync(pipe, &args).await;
+            wait_for_hooks(
+                self.executor.config.sync_hook_timeout,
+                pipe,
+                "pre",
+                h.pre_sync(pipe, &args),
+            )
+            .await;
         }
         self.calls
             .lock()
@@ -1099,7 +1133,13 @@ impl<S: StateWriter + 'static> LegacySink for NativeLegacySink<S> {
             call.unwrap_or_else(|| (self.executor.base_args(), std::time::Instant::now()));
         result.duration.get_or_insert(started.elapsed());
         if let Some(h) = self.hooks(&args) {
-            h.post_sync(pipe, &args, &result).await;
+            wait_for_hooks(
+                self.executor.config.sync_hook_timeout,
+                pipe,
+                "post",
+                h.post_sync(pipe, &args, &result),
+            )
+            .await;
         }
         if let Some(tx) = &self.outcomes {
             let label = self

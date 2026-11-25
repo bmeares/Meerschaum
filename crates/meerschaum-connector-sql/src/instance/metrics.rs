@@ -94,7 +94,7 @@ impl SqlConnector {
         };
         let condition = format!("{} = {success}", q("success"));
         let duration = q("duration_seconds");
-        let max_duration = meerschaum_connector::sync_metrics::RETENTION_DAYS * 86400;
+        let max_duration = meerschaum_connector::sync_metrics::MAX_DURATION_DAYS * 86400;
         let mut fields = vec![
             format!("{} AS {}", key("pipe_key"), q("pipe_key")),
             format!("{} AS {}", key("registration_id"), q("registration_id")),

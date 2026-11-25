@@ -85,7 +85,7 @@ All keys live under `system.engine` (`mrsm edit config system`):
 | `limits.connectors` / `limits.instances` | none | Per-connector / per-instance concurrency caps |
 | `python_workers` | pool size | Max concurrent Python plugin workers |
 | `python_worker_max_calls` | `10000` | Recycle Python worker after N calls (`0`: never) |
-| `python_worker_max_memory_mb` | `1024` | Recycle Python worker above N MB RSS (`0`: never; Linux) |
+| `python_worker_max_memory_mb` | `1024` | Recycle Python worker above N MB of resident plus swapped private memory (`0`: never; Linux) |
 | `python_worker_idle_seconds` | `600` | Stop idle Python workers after N seconds (`0`: never) |
 | `python_team_workers` | pool size | Cap across [isolated teams' worker pools](/reference/api-instance/teams/#team-scoped-workers) |
 | `python_worker_team_idle_seconds` | `60` | Idle timeout for team workers (`0`: never) |
@@ -96,9 +96,11 @@ All keys live under `system.engine` (`mrsm edit config system`):
 | `inclusive_cap` | `true` | Cap children at parent watermark + 1 unit (`false`: half-open) |
 | `flat_ledger` | `true` | Write ledger entries for flat syncs |
 | `persist_runs` | `true` | Persist runs, nodes, and events (`false`: memory only) |
+| `persist_skipped_laps` | `true` | Set to `false` to omit loop laps in which every node was skipped from stored history |
 | `events` | `all` | Persisted event detail: `all`, `nodes`, or `off` |
 | `state_flush_ms` | `500` | Batch flush interval in continuous mode |
 | `run_history_days` | `30` | Retention window for runs, nodes, and events |
+| `metrics_retention_days` | `run_history_days` | Retention window for sync metrics. Set to `0` to disable expiry |
 | `debounce_seconds` | unset | Min delay between triggered runs of a stream child |
 | `default_duration_seconds` | `30` | Forecast duration without history |
 | `chunk_pipelining` | `false` | Enable [chunk pipelining](/reference/pipelines/#chunk-pipelining) |

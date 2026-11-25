@@ -671,13 +671,6 @@ impl SqlConnector {
             None,
             Some(if upsert { "upsert" } else { "update" }),
         );
-        let _ = self
-            .log_temporary_tables_creation(
-                std::slice::from_ref(&temp_target),
-                false,
-                !pipe.temporary,
-            )
-            .await;
         let pipe_dtypes = &state.dtypes;
         let mut update_dtypes: IndexMap<String, String> = update_df.dtypes();
         for (c, t) in get_special_cols(update_df) {
@@ -694,6 +687,65 @@ impl SqlConnector {
                 }
             }
         }
+        let temp_columns_types: IndexMap<String, String> = update_dtypes
+            .iter()
+            .map(|(c, t)| {
+                // The broad pandas object/bytes equality used by the legacy mapping
+                // otherwise resolves an exact Arrow binary column to SQLite TEXT.
+                let dtype = if flavor == Flavor::Sqlite && native_binary_dtype(t) {
+                    "bytes"
+                } else {
+                    t
+                };
+                (c.clone(), history_db_type(sp, flavor, dtype))
+            })
+            .collect();
+        let schema = self.get_pipe_schema(sp);
+        let internal_schema = self.internal_schema().map(str::to_string);
+        let db_version = if matches!(flavor, Flavor::Sqlite | Flavor::Geopackage) {
+            self.db_version().await
+        } else {
+            None
+        };
+        let datetime_col = dt_col.as_deref().filter(|c| update_df.contains(c));
+        let mut args = UpdateQueriesArgs::new(&sp.target, &temp_target, join_cols, flavor);
+        args.upsert = upsert;
+        args.schema = schema.as_deref();
+        args.patch_schema = internal_schema.as_deref();
+        args.target_cols_types = existing_cols;
+        args.patch_cols_types = temp_columns_types;
+        args.datetime_col = datetime_col;
+        args.identity_insert = autoincrement
+            && primary_key
+                .as_ref()
+                .is_some_and(|pk| update_df.contains(pk));
+        args.null_indices = sp.null_indices();
+        args.cast_columns = sp.enforce();
+        args.db_version = db_version.as_deref();
+        if upsert {
+            // Name the unique key's own columns / expressions; compare NULL keys in the
+            // statements where that key does not.
+            args.conflict_target = conflict_target;
+            args.null_safe_upsert = null_safe_upsert;
+            args.changed_only = sp.upsert_changed_only();
+        }
+        let count_all = upsert && sp.upsert_changed_only() && flavor.supports_upsert_changed_only();
+        if flavor.supports_unlogged_staging() {
+            let written =
+                Box::pin(self.apply_postgres_patch(sp, state, update_df, &mut args)).await?;
+            return Ok((
+                true,
+                String::new(),
+                if count_all { written } else { input_count },
+            ));
+        }
+        let _ = self
+            .log_temporary_tables_creation(
+                std::slice::from_ref(&temp_target),
+                false,
+                !pipe.temporary,
+            )
+            .await;
         let temp_columns: Map = columns_map(sp)
             .into_iter()
             .filter(|(_, c)| update_df.contains(c))
@@ -741,19 +793,6 @@ impl SqlConnector {
         .kwarg("cache", false);
         builder = builder.defaults(self.settings.pipe_defaults.clone());
         let mut temp_pipe = builder.build().map_err(be)?;
-        let temp_columns_types: IndexMap<String, String> = update_dtypes
-            .iter()
-            .map(|(c, t)| {
-                // The broad pandas object/bytes equality used by the legacy mapping
-                // otherwise resolves an exact Arrow binary column to SQLite TEXT.
-                let dtype = if flavor == Flavor::Sqlite && native_binary_dtype(t) {
-                    "bytes"
-                } else {
-                    t
-                };
-                (c.clone(), history_db_type(sp, flavor, dtype))
-            })
-            .collect();
         let temp_opts = SyncOptions {
             check_existing: false,
             ..Default::default()
@@ -765,7 +804,7 @@ impl SqlConnector {
                 &temp_opts,
                 InternalSync {
                     cached_state: None,
-                    columns_types: Some(temp_columns_types.clone()),
+                    columns_types: Some(args.patch_cols_types.clone()),
                     skip_check_indices: true,
                     new_special_cols: None,
                     skip_temporary_tables_check: false,
@@ -777,35 +816,6 @@ impl SqlConnector {
             return Ok((false, temp_result.message, 0));
         }
 
-        let schema = self.get_pipe_schema(sp);
-        let internal_schema = self.internal_schema().map(str::to_string);
-        let db_version = if matches!(flavor, Flavor::Sqlite | Flavor::Geopackage) {
-            self.db_version().await
-        } else {
-            None
-        };
-        let datetime_col = dt_col.as_deref().filter(|c| update_df.contains(c));
-        let mut args = UpdateQueriesArgs::new(&sp.target, &temp_target, join_cols, flavor);
-        args.upsert = upsert;
-        args.schema = schema.as_deref();
-        args.patch_schema = internal_schema.as_deref();
-        args.target_cols_types = existing_cols;
-        args.patch_cols_types = temp_columns_types;
-        args.datetime_col = datetime_col;
-        args.identity_insert = autoincrement
-            && primary_key
-                .as_ref()
-                .is_some_and(|pk| update_df.contains(pk));
-        args.null_indices = sp.null_indices();
-        args.cast_columns = sp.enforce();
-        args.db_version = db_version.as_deref();
-        if upsert {
-            // Name the unique key's own columns / expressions; compare NULL keys in the
-            // statements where that key does not.
-            args.conflict_target = conflict_target;
-            args.null_safe_upsert = null_safe_upsert;
-            args.changed_only = sp.upsert_changed_only();
-        }
         // SQLite cannot use a plain key index for the COALESCE equality used by v4.
         // Index the small staging table's exact expressions so a scattered update does not
         // scan that table once per row in the (potentially very large) target date range.
@@ -836,7 +846,6 @@ impl SqlConnector {
             }
         }
         let update_queries = get_update_queries(&args);
-        let count_all = upsert && sp.upsert_changed_only() && flavor.supports_upsert_changed_only();
         let update_start = std::time::Instant::now();
         let results = self.exec_queries(&update_queries, true, true).await;
         let update_success =

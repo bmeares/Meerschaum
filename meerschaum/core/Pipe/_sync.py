@@ -9,6 +9,7 @@ Synchronize a pipe's data with its source via its connector.
 from __future__ import annotations
 
 import os
+from contextvars import ContextVar
 import time
 import threading
 import multiprocessing
@@ -30,6 +31,9 @@ from meerschaum.utils.warnings import warn
 
 if TYPE_CHECKING:
     pd = mrsm.attempt_import('pandas')
+
+_in_sync_hook = ContextVar('in_sync_hook', default=False)
+
 
 class InferFetch:
     MRSM_INFER_FETCH: bool = True
@@ -864,6 +868,8 @@ def sync(
     With `parents` or `children`, a `meerschaum.core.Pipeline.RunResult` (a `SuccessTuple`
     with the run's `run_id`, `plan`, `outcomes` and `events()`).
     """
+    if _in_sync_hook.get():
+        kw['_from_sync_hook'] = True
     if replace:
         kw['replace'] = True
     if parents or children:

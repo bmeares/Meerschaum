@@ -301,7 +301,7 @@ impl SqlConnector {
     ) -> SuccessTuple {
         // Boxed: the in-place sync's future is large and deeply nested (callers' layouts stay
         // within the compiler's query depth).
-        let result = Box::pin(self.sync_pipe_inplace_unlocked(
+        let mut result = Box::pin(self.sync_pipe_inplace_unlocked(
             pipe,
             params,
             begin,
@@ -315,6 +315,10 @@ impl SqlConnector {
             && let Ok(sp) = self.sql_pipe(pipe)
         {
             self.forget_catalog_table(&sp.target);
+        }
+        if result.success {
+            self.check_declared_hypertable(pipe, &mut result.message)
+                .await;
         }
         result
     }
@@ -487,6 +491,7 @@ impl SqlConnector {
                 flavor,
                 &CreateTableOptions {
                     schema: internal_schema.clone(),
+                    unlogged_staging: true,
                     ..Default::default()
                 },
             ) {
@@ -650,6 +655,7 @@ impl SqlConnector {
                 flavor,
                 &CreateTableOptions {
                     schema: internal_schema.clone(),
+                    unlogged_staging: true,
                     ..Default::default()
                 },
             ) {
@@ -814,6 +820,7 @@ impl SqlConnector {
                     flavor,
                     &CreateTableOptions {
                         schema: internal_schema.clone(),
+                        unlogged_staging: true,
                         ..Default::default()
                     },
                 ) {
@@ -881,6 +888,7 @@ impl SqlConnector {
                 flavor,
                 &CreateTableOptions {
                     schema: internal_schema.clone(),
+                    unlogged_staging: true,
                     ..Default::default()
                 },
             )

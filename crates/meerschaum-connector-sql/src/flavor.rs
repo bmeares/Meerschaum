@@ -72,6 +72,11 @@ pub enum DriverFamily {
 }
 
 impl Flavor {
+    /// PostgreSQL installations that support local, WAL-free staging relations.
+    pub(crate) fn supports_unlogged_staging(self) -> bool {
+        matches!(self, Postgresql | Postgis | Timescaledb | TimescaledbHa)
+    }
+
     /// Every flavor, in the order of `create_engine_flavors`.
     pub const ALL: [Flavor; 13] = [
         Timescaledb,

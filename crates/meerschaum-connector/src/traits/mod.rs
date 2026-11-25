@@ -1037,18 +1037,30 @@ pub trait InstanceConnector: Connector {
         crate::sync_metrics::initialize(self).await
     }
 
+    /// Claim the next hourly retention sweep on a shared instance. Backends with local
+    /// maintenance use the caller's process-level throttle.
+    async fn claim_history_retention(&self, _kind: &str) -> ConnectorResult<bool> {
+        Ok(true)
+    }
+
+    /// Expire internal history up to a cutoff. A chunked store may keep its boundary chunk.
+    async fn expire_history(&self, pipe: &Pipe, end: DateBound) -> SuccessTuple {
+        self.clear_pipe(
+            pipe,
+            &DataQuery {
+                end: Some(end),
+                ..Default::default()
+            },
+        )
+        .await
+    }
+
     /// Expire old metric outcomes. SQL deletes through its timestamp index; stores with
     /// per-document keys override this to delete a bounded batch without scanning history.
     async fn expire_engine_metrics(&self, before_micros: i64) -> ConnectorResult<()> {
         let pipe = crate::sync_metrics::metrics_pipe(self).await?;
         let result = self
-            .clear_pipe(
-                &pipe,
-                &DataQuery {
-                    end: Some(DateBound::Int(before_micros)),
-                    ..Default::default()
-                },
-            )
+            .expire_history(&pipe, DateBound::Int(before_micros))
             .await;
         if result.success {
             Ok(())
