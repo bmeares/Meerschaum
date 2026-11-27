@@ -585,6 +585,7 @@ pub fn check_route_path(path: &str) -> std::result::Result<(), String> {
     }
 }
 
+#[cfg(feature = "host")]
 impl crate::LoadedPlugin {
     /// Serve a request with the plugin's `api_route` call kind.
     pub fn api_route(&self, request: &RouteRequest) -> Result<RouteResponse> {

@@ -12,7 +12,7 @@ homepage.workspace = true
 documentation = "https://docs.rs/meerschaum-connector-api"
 keywords = ["meerschaum", "api", "http-client", "etl", "pipelines"]
 categories = ["api-bindings", "web-programming::http-client"]
-include = ["src/**/*", "/LICENSE", "/NOTICE"]
+include = ["build.rs", "src/**/*", "/LICENSE", "/NOTICE"]
 
 [features]
 default = ["client"]

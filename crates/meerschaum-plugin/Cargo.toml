@@ -14,26 +14,36 @@ keywords = ["meerschaum", "plugin", "sdk", "ffi", "etl"]
 categories = ["api-bindings", "external-ffi-bindings"]
 include = ["src/**/*", "examples/**/*", "schema/**/*", "wit/**/*", "/LICENSE", "/NOTICE"]
 
+[features]
+# Existing hosts and plugins keep the kernel Frame and dynamic loader. A standalone
+# cdylib sets default-features = false to use the Arrow guest SDK.
+default = ["host"]
+host = [
+    "dep:meerschaum-kernel", "dep:meerschaum-connector", "dep:libloading", "dep:sha2",
+    "dep:hex", "dep:toml", "dep:syn", "dep:proc-macro2", "dep:quote", "dep:tokio",
+    "dep:jsonschema",
+]
+
 [dependencies]
 meerschaum-core = { workspace = true }
-meerschaum-kernel = { workspace = true }
-meerschaum-connector = { workspace = true }
-arrow = { workspace = true, features = ["ffi"] }
+meerschaum-kernel = { workspace = true, optional = true }
+meerschaum-connector = { workspace = true, optional = true }
+arrow = { workspace = true, features = ["ffi", "json", "chrono-tz"] }
 serde = { workspace = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["preserve_order", "float_roundtrip"] }
 base64 = "0.23"
 indexmap = { workspace = true }
 chrono = { workspace = true }
-libloading = "0.9"
-sha2 = { workspace = true }
-hex = { workspace = true }
-toml = { workspace = true }
+libloading = { version = "0.9", optional = true }
+sha2 = { workspace = true, optional = true }
+hex = { workspace = true, optional = true }
+toml = { workspace = true, optional = true }
 thiserror = { workspace = true }
-syn = { version = "2", features = ["full"] }
-proc-macro2 = { version = "1", features = ["span-locations"] }
-quote = "1"
-tokio = { workspace = true }
-jsonschema = { version = "0.59", default-features = false }
+syn = { version = "2", features = ["full"], optional = true }
+proc-macro2 = { version = "1", features = ["span-locations"], optional = true }
+quote = { version = "1", optional = true }
+tokio = { workspace = true, optional = true }
+jsonschema = { version = "0.59", default-features = false, optional = true }
 
 [dev-dependencies]
 tempfile = "3"
@@ -66,6 +76,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "native_host"
 crate-type = ["cdylib"]
+
+[[test]]
+name = "integration"
+path = "tests/integration/main.rs"
+required-features = ["host"]
 
 [lints]
 workspace = true

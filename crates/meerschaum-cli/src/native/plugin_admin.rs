@@ -478,6 +478,83 @@ fn plugin_docstring(file: &Path) -> String {
         .unwrap_or_default()
 }
 
+/// Publish an archive produced by a release builder without loading plugin code on the publisher.
+pub(super) fn register_archive(
+    args: &ArgsMap,
+    rt: &mut Runtime<'_>,
+    names: &[String],
+    params: &Map,
+) -> ActionResult {
+    use meerschaum_connector_api::plugin_artifacts::{
+        MAX_ARCHIVE_BYTES, valid_source_digest, valid_target,
+    };
+    use std::io::Read;
+    let [name] = names else {
+        return Ok(SuccessTuple::fail(
+            "Choose exactly one plugin to publish from an archive.",
+        ));
+    };
+    if !super::lifecycle::is_safe_plugin_name(name) {
+        return Ok(SuccessTuple::fail("Invalid plugin name."));
+    }
+    let text = |key: &str| {
+        params
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+    };
+    let (Some(path), Some(version)) = (text("archive"), text("version")) else {
+        return Ok(SuccessTuple::fail(
+            "Archive publication requires archive and version in --params.",
+        ));
+    };
+    let target = match (text("target"), text("source_sha256")) {
+        (None, None) if !params.contains_key("target") && !params.contains_key("source_sha256") => {
+            None
+        }
+        (Some(target), Some(digest)) if valid_target(target) && valid_source_digest(digest) => {
+            Some((target, digest))
+        }
+        _ => {
+            return Ok(SuccessTuple::fail(
+                "Supply both a Rust target and the lowercase SHA-256 of the source archive.",
+            ));
+        }
+    };
+    if !Path::new(path).is_file() {
+        return Ok(SuccessTuple::fail(format!(
+            "Plugin archive '{path}' is not a regular file."
+        )));
+    }
+    let mut archive = Vec::new();
+    std::fs::File::open(path)
+        .and_then(|f| {
+            f.take(MAX_ARCHIVE_BYTES as u64 + 1)
+                .read_to_end(&mut archive)
+        })
+        .map_err(|e| ActionError::new("OSError", e.to_string()))?;
+    if archive.len() > MAX_ARCHIVE_BYTES || !archive.starts_with(&[0x1f, 0x8b]) {
+        return Ok(SuccessTuple::fail(
+            "Supply a gzip plugin archive within the repository upload limit.",
+        ));
+    }
+    let (_, connector) = repo_connector(rt, args)?;
+    let session = session(rt);
+    if let Some((target, digest)) = target {
+        return Ok(session
+            .block_on(connector.register_plugin_artifact(name, version, digest, target, archive)));
+    }
+    let mut record = PluginRecord {
+        name: name.clone(),
+        version: Some(version.into()),
+        ..Default::default()
+    };
+    record.attributes = session
+        .block_on(connector.get_plugin_attributes(&record))
+        .map_err(|e| exception(e.to_string()))?;
+    Ok(session.block_on(connector.register_plugin(&record, archive, &format!("{name}.tar.gz"))))
+}
+
 /// `register plugins`: upload each plugin's archive, asking whether to set its description.
 pub fn register_uploads(
     args: &ArgsMap,

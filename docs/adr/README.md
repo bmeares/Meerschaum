@@ -18,3 +18,4 @@ summarize is §3 of [`docs/design/v5.0.0.md`](../design/v5.0.0.md).
 | [0009](0009-team-execution-requires-enforced-sandbox.md) | Team execution runs only where the sandbox covers sockets and signals | 5.1 teams |
 | [0010](0010-flags-modify-actions.md) | A flag modifies an action; new behavior is a new action | D26 |
 | [0011](0011-instance-reservations-extend-everyone.md) | Instance reservations extend Everyone on reserved instances | 5.1 teams |
+| [0012](0012-typed-cargo-plugin-sdk.md) | Cargo plugins can exchange typed frames without compiling the host | 5.1.7 plugins |

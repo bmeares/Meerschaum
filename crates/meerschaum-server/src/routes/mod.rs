@@ -445,7 +445,11 @@ impl BodyClass {
             BodyClass::Fixed(meerschaum_connector_api::source_fetch::MAX_REQUEST_BYTES)
         } else if route.starts_with("/engine/") {
             BodyClass::Fixed(engine::ENGINE_BODY_LIMIT)
-        } else if route == "/plugins/{name}" && *method == Method::POST {
+        } else if matches!(
+            route,
+            "/plugins/{name}" | "/plugins/{name}/artifacts/{target}"
+        ) && *method == Method::POST
+        {
             BodyClass::Fixed(plugins::ARCHIVE_MAX_BYTES)
         } else {
             BodyClass::Body

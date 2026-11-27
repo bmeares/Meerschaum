@@ -22,6 +22,7 @@ pub mod engine_pipes;
 pub mod graph_batch;
 pub mod graph_plan;
 pub mod models;
+pub mod plugin_artifacts;
 pub mod routes;
 pub mod source_fetch;
 pub mod source_replace;

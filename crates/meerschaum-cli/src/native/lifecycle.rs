@@ -23,10 +23,13 @@
 //! - `install plugins` keeps v4's rule that a failed install still ends in `(True, "Success")`
 //!   (the per-plugin result is printed).
 
-use std::path::PathBuf;
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{LazyLock, Mutex},
+};
 
 use meerschaum_connector_api::APIConnector;
-use meerschaum_connector_api::client::RequestOptions;
 use meerschaum_core::SuccessTuple;
 use meerschaum_core::static_config::static_config;
 use meerschaum_worker::manifest::Manifest;
@@ -65,6 +68,7 @@ struct Context {
     origins_filename: String,
     debug: bool,
     force: bool,
+    connector_download: bool,
     separator: String,
 }
 
@@ -93,6 +97,7 @@ impl Context {
             origins_filename: static_config().plugins.origins_filename.clone(),
             debug: flag(args, "debug"),
             force: flag(args, "force"),
+            connector_download: false,
             separator: repo_separator(),
         }
     }
@@ -459,7 +464,8 @@ fn install_dependencies(
             );
             continue;
         }
-        let result = install_from_repository(rt, ctx, keys, required, force, false)?;
+        let connector = connector_for(rt, keys)?;
+        let result = install_from_repository(rt, ctx, &connector, required, force, false)?;
         if !result.success {
             warn(
                 rt,
@@ -694,6 +700,21 @@ fn download_plugin(
     connector: &APIConnector,
     name: &str,
 ) -> Result<Download, ActionError> {
+    let cache = |bytes: &[u8]| -> std::io::Result<()> {
+        std::fs::create_dir_all(&ctx.temp_dir)?;
+        std::fs::write(ctx.temp_dir.join(format!("{name}.tar.gz")), bytes)
+    };
+    // The Python connector returns transport and server errors directly. The CLI mirrors
+    // wget's messages (below). Both install the same negotiated archive.
+    if ctx.connector_download {
+        return match session(rt).block_on(connector.download_installable_plugin(name)) {
+            Ok(bytes) => {
+                cache(&bytes).map_err(|e| ActionError::new("OSError", e.to_string()))?;
+                Ok(Download::Archive(bytes))
+            }
+            Err(error) => Ok(Download::Message(SuccessTuple::fail(error.to_string()))),
+        };
+    }
     let r_url = meerschaum_connector_api::routes::plugin_r_url(name);
     let attributes = connector.attributes();
     let attr = |key: &str| {
@@ -709,7 +730,7 @@ fn download_plugin(
         .unwrap_or_default();
     let url = format!("{}://{}{port}{r_url}", attr("protocol"), attr("host"));
     let session = session(rt);
-    let response = session.block_on(connector.get(&r_url, RequestOptions::default()));
+    let response = session.block_on(connector.get(&r_url, APIConnector::plugin_install_options()));
     let response = match response {
         Ok(response) if response.status == 200 => response,
         other => {
@@ -726,9 +747,7 @@ fn download_plugin(
             return Err(exception(format!("Failed to download from '{url}'.")));
         }
     };
-    let destination = ctx.temp_dir.join(format!("{name}.tar.gz"));
-    let _ = std::fs::create_dir_all(&ctx.temp_dir);
-    let _ = std::fs::write(&destination, &response.bytes);
+    let _ = cache(&response.bytes);
     if is_binary(&response.bytes) {
         return Ok(Download::Archive(response.bytes));
     }
@@ -750,19 +769,104 @@ fn download_plugin(
     Ok(Download::Message(message))
 }
 
-/// `repo_connector.install_plugin(name, force=, skip_deps=)` for the repository `keys`.
+/// Install one plugin using the caller's repository connection, including ad hoc Python connectors.
+pub fn install_repository_plugin(
+    rt: &mut Runtime<'_>,
+    args: &ArgsMap,
+    connector: &APIConnector,
+    name: &str,
+) -> ActionResult {
+    let mut ctx = Context::new(rt, args);
+    ctx.connector_download = true;
+    install_from_repository(
+        rt,
+        &ctx,
+        connector,
+        name,
+        ctx.force,
+        flag(args, "skip_deps"),
+    )
+}
+
+/// A dependency may lead back to its caller, and two callers may share a plugin
+/// directory or a staging directory. Hold their claim through setup and rollback.
+struct PluginInstall {
+    paths: Vec<PathBuf>,
+}
+
+static INSTALLING: LazyLock<Mutex<HashMap<PathBuf, String>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+impl PluginInstall {
+    fn begin<'a>(
+        name: &str,
+        repository: &str,
+        directories: impl Iterator<Item = &'a PathBuf>,
+    ) -> Result<Self, SuccessTuple> {
+        let paths: Vec<_> = directories
+            .map(|dir| {
+                dir.canonicalize()
+                    .unwrap_or_else(|_| dir.clone())
+                    .join(name)
+            })
+            .collect();
+        let mut installing = INSTALLING.lock().unwrap_or_else(|e| e.into_inner());
+        for path in &paths {
+            if let Some(active) = installing.get(path) {
+                return Err(if active == repository {
+                    SuccessTuple::ok(format!("Already installing plugin '{name}'."))
+                } else {
+                    SuccessTuple::fail(format!(
+                        "Plugin '{name}' is being installed from '{active}'. Retry after that installation finishes."
+                    ))
+                });
+            }
+        }
+        for path in &paths {
+            installing.insert(path.clone(), repository.to_owned());
+        }
+        Ok(Self { paths })
+    }
+}
+
+impl Drop for PluginInstall {
+    fn drop(&mut self) {
+        let mut installing = INSTALLING.lock().unwrap_or_else(|e| e.into_inner());
+        for path in &self.paths {
+            installing.remove(path);
+        }
+    }
+}
+
 fn install_from_repository(
     rt: &mut Runtime<'_>,
     ctx: &Context,
-    keys: &str,
+    connector: &APIConnector,
     name: &str,
     force: bool,
     skip_deps: bool,
 ) -> Result<SuccessTuple, ActionError> {
-    let connector = connector_for(rt, keys)?;
-    match download_plugin(rt, ctx, &connector, name)? {
+    let (installed_name, _) = plugin_files::split_repo(name, &ctx.separator).map_err(exception)?;
+    let repository = connector.to_string();
+    let directories = ctx
+        .plugins_dirs
+        .iter()
+        .chain([&ctx.temp_dir, &ctx.env.venvs_dir]);
+    let _install = match PluginInstall::begin(&installed_name, &repository, directories) {
+        Ok(install) => install,
+        Err(result) => return Ok(result),
+    };
+    match download_plugin(rt, ctx, connector, &installed_name)? {
         Download::Message(message) => Ok(message),
-        Download::Archive(bytes) => install_archive(rt, ctx, keys, name, &bytes, force, skip_deps),
+        Download::Archive(bytes) => install_archive(
+            rt,
+            ctx,
+            &repository,
+            &installed_name,
+            &bytes,
+            force,
+            skip_deps,
+        ),
     }
 }
 
@@ -772,13 +876,11 @@ fn install_archive(
     rt: &mut Runtime<'_>,
     ctx: &Context,
     keys: &str,
-    plugin_name: &str,
+    name: &str,
     archive: &[u8],
     force: bool,
     skip_deps: bool,
 ) -> Result<SuccessTuple, ActionError> {
-    let (name, _) = plugin_files::split_repo(plugin_name, &ctx.separator).map_err(exception)?;
-    let name = name.as_str();
     let venvs_dir = ctx.env.venvs_dir.clone();
     let mut tracked: Vec<PathBuf> = Vec::new();
     for dir in &ctx.plugins_dirs {
@@ -828,10 +930,11 @@ fn install_archive(
             .collect();
     let setup =
         if plugin_files::native_plugin_path(std::slice::from_ref(&install_dir), name).is_some() {
-            native_setup(rt, name, &kwargs).unwrap_or_else(|e| SuccessTuple::fail(e.message))
+            native_setup(rt, name, &kwargs)
         } else {
-            python_setup(rt, name, &kwargs)?
-        };
+            python_setup(rt, name, &kwargs)
+        }
+        .unwrap_or_else(|e| SuccessTuple::fail(e.message));
     let result = if setup.success {
         SuccessTuple::ok(success_msg)
     } else {
@@ -1111,7 +1214,7 @@ pub fn install_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
         return Ok(SuccessTuple::fail("No plugins to install."));
     }
     let ctx = Context::new(rt, args);
-    let (keys, _connector) = repo_connector(rt, args)?;
+    let (keys, connector) = repo_connector(rt, args)?;
     // Compose has been built in since 4.0: installing the plugin is a no-op (§11.2).
     let (names, notice) = meerschaum_compose::plugins::filter_install_plugins(&action);
     if let Some(notice) = notice {
@@ -1129,7 +1232,7 @@ pub fn install_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
             rt,
             &format!("Installing plugin '{name}' from Meerschaum repository '{keys}'..."),
         );
-        let result = install_from_repository(rt, &ctx, &keys, &name, ctx.force, skip_deps)?;
+        let result = install_from_repository(rt, &ctx, &connector, &name, ctx.force, skip_deps)?;
         print_tuple(rt, &result, TupleArgs::default());
         if result.success
             && let Some(cache) = &ctx.updates_cache

@@ -663,3 +663,157 @@ async fn plugin_upload_tokens_use_current_owner_permissions_and_keep_ownership()
         );
     }
 }
+
+#[tokio::test]
+async fn plugin_artifacts_belong_to_the_owner_and_exact_source_release() {
+    use meerschaum_connector_api::plugin_artifacts::TARGET_HEADER;
+    use std::io::Write;
+    let f = fixture().await;
+    let owner = key_for(&f, "oscar", &["plugins:write", "plugins:read"]).await;
+    let other = key_for(&f, "admin", &["plugins:write"]).await;
+    let reader = key_for(&f, "admin", &["plugins:read"]).await;
+    const NAME: &str = "demo";
+    const TARGET: &str = "x86_64-unknown-linux-gnu";
+    const SOURCE: &[u8] = b"registered source";
+    let digest = meerschaum_server::executor::plugins::sha256(SOURCE);
+    let target_uri = format!("/plugins/{NAME}/artifacts/{TARGET}?version=1&source_sha256={digest}");
+    async fn upload(f: &Fixture, token: &str, uri: &str, bytes: &[u8]) -> Resp {
+        let mut body = b"--plugin\r\nContent-Disposition: form-data; name=\"archive\"; filename=\"demo.tar.gz\"\r\n\r\n".to_vec();
+        body.extend_from_slice(bytes);
+        body.extend_from_slice(b"\r\n--plugin--\r\n");
+        send(
+            &f.app,
+            req(
+                "POST",
+                uri,
+                Some(token),
+                Some(("multipart/form-data; boundary=plugin", body)),
+            ),
+        )
+        .await
+    }
+    async fn download(f: &Fixture, auth: &str, target: &str) -> Resp {
+        let mut request = req("GET", "/plugins/demo", Some(auth), None);
+        request
+            .headers_mut()
+            .insert(TARGET_HEADER, target.parse().unwrap());
+        send(&f.app, request).await
+    }
+    let mut tar = tar::Builder::new(Vec::new());
+    for (path, content) in [
+        ("demo/plugin.toml", b"name='demo'\nversion='1'".as_slice()),
+        ("demo/libdemo.so", b"synthetic library"),
+    ] {
+        let mut entry = tar::Header::new_gnu();
+        entry.set_size(content.len() as u64);
+        entry.set_mode(0o644);
+        entry.set_cksum();
+        tar.append_data(&mut entry, path, content).unwrap();
+    }
+    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    gzip.write_all(&tar.into_inner().unwrap()).unwrap();
+    let binary = gzip.finish().unwrap();
+    assert_eq!(
+        upload(&f, &owner, &target_uri, &binary).await.status,
+        StatusCode::CONFLICT
+    );
+    assert!(tuple_of(&upload(&f, &owner, "/plugins/demo?version=1", SOURCE).await).0);
+    assert_eq!(
+        upload(&f, &reader, &target_uri, &binary).await.status,
+        StatusCode::FORBIDDEN
+    );
+    assert!(!tuple_of(&upload(&f, &other, &target_uri, &binary).await).0);
+    assert_eq!(
+        upload(
+            &f,
+            &owner,
+            &target_uri.replace("version=1", "version=2"),
+            &binary
+        )
+        .await
+        .status,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        upload(&f, &owner, &target_uri, b"invalid archive")
+            .await
+            .status,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        upload(
+            &f,
+            &owner,
+            &target_uri.replace(TARGET, "aarch64-apple-darwin"),
+            &binary
+        )
+        .await
+        .status,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let registered = upload(&f, &owner, &target_uri, &binary).await;
+    assert!(tuple_of(&registered).0, "{}", registered.text());
+    assert_eq!(download(&f, &reader, TARGET).await.body.as_ref(), binary);
+    assert_eq!(
+        download(&f, &reader, "x86_64-unknown-linux-musl")
+            .await
+            .body
+            .as_ref(),
+        SOURCE
+    );
+    assert_eq!(
+        get(&f, &reader, "/plugins/demo").await.body.as_ref(),
+        SOURCE
+    );
+    assert_eq!(
+        download(&f, &reader, "../../demo").await.status,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+
+    f.instance.seed_user("april", "pw", None);
+    let mut team = Team::new("Sensors");
+    team.add_member("april", TeamRole::Member);
+    team.attributes = map(json!({"isolated": true,"plugins":["demo"]}));
+    assert!(f.instance.register_team(&mut team).await.success);
+    let confined = token(&f, "april").await;
+    assert_eq!(download(&f, &confined, TARGET).await.body.as_ref(), SOURCE);
+
+    // Some instances refuse a duplicate version. Whether accepted or refused, an exact retry
+    // must leave every already published target usable.
+    let repeated = upload(&f, &owner, "/plugins/demo?version=1", SOURCE).await;
+    assert_eq!(repeated.status, StatusCode::OK);
+    assert_eq!(download(&f, &reader, TARGET).await.body.as_ref(), binary);
+
+    let owner_login = token(&f, "oscar").await;
+    let deleted = send(
+        &f.app,
+        req("DELETE", "/plugins/demo", Some(&owner_login), None),
+    )
+    .await;
+    assert!(tuple_of(&deleted).0, "{}", deleted.text());
+    assert!(tuple_of(&upload(&f, &owner, "/plugins/demo?version=1", SOURCE).await).0);
+    assert_eq!(download(&f, &reader, TARGET).await.body.as_ref(), SOURCE);
+    assert!(tuple_of(&upload(&f, &owner, &target_uri, &binary).await).0);
+
+    // Old-style concurrent registries and administrators can replace the canonical bytes at
+    // the same version. No target with the previous release's digest may then be selected.
+    std::fs::write(
+        f.state.config.plugins_archives_path.join("demo.tar.gz"),
+        b"replacement",
+    )
+    .unwrap();
+    assert_eq!(
+        download(&f, &reader, TARGET).await.body.as_ref(),
+        b"replacement"
+    );
+    assert_eq!(
+        upload(&f, &owner, &target_uri, &binary).await.status,
+        StatusCode::CONFLICT
+    );
+    let upgraded = upload(&f, &owner, "/plugins/demo?version=2", SOURCE).await;
+    assert!(tuple_of(&upgraded).0, "{}", upgraded.text());
+    assert_eq!(download(&f, &reader, TARGET).await.body.as_ref(), SOURCE);
+
+    let old = upload(&f, &owner, &target_uri, &binary).await;
+    assert_eq!(old.status, StatusCode::CONFLICT);
+}

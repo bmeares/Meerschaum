@@ -637,12 +637,39 @@ pub fn operations() -> Vec<Operation> {
             Never,
         ),
         op(
+            "post",
+            "/plugins/{name}/artifacts/{target}",
+            "plugins",
+            &["Plugins"],
+            "Register a native plugin target archive",
+            &[
+                NAME,
+                ("target", "path", true, "string"),
+                ("version", "query", true, "string"),
+                ("source_sha256", "query", true, "string"),
+            ],
+            Some((&["multipart/form-data"], true)),
+            Never,
+        )
+        .described(
+            "Attach a prebuilt plugin for this Rust target to its registered source archive.",
+            &["plugins:write"],
+        ),
+        op(
             "get",
             "/plugins/{name}",
             "plugins",
             &["Plugins"],
             "Get Plugin",
-            &[NAME],
+            &[
+                NAME,
+                (
+                    meerschaum_connector_api::plugin_artifacts::TARGET_HEADER,
+                    "header",
+                    false,
+                    "string",
+                ),
+            ],
             None,
             UnlessPrivate,
         ),

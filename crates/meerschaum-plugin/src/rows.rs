@@ -37,6 +37,11 @@ pub trait FrameExt: Sized {
     /// The rows as JSON objects: integers, floats, booleans and JSON stay themselves;
     /// datetimes become ISO-8601 strings, nulls `null`, other values text.
     fn to_rows(&self) -> Vec<Value>;
+
+    /// Convert the frame to JSON rows through the shared guest and host API.
+    fn try_to_rows(&self) -> Result<Vec<Value>> {
+        Ok(self.to_rows())
+    }
 }
 
 impl FrameExt for Frame {

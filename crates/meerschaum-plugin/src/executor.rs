@@ -46,7 +46,7 @@
 //! neutral value (`stopped`, `None`, `False`) for display getters. `executor.next_logs` and
 //! `executor.close_logs` are not serialized with the plugin's other calls (like `next_batch`).
 //! Every method may make host calls (`host::plugin_config()`, `host::pipe(...)`, ...) when the
-//! host attaches its services ([`NativeExecutor::with_host_services`]; the CLI does).
+//! host attaches its services (the CLI does this through `NativeExecutor::with_host_services`).
 use crate::{
     Result, SuccessTuple, error,
     handles::{Handles, handle_of, timeout_of},
@@ -347,6 +347,7 @@ fn next_logs(context: &Value) -> Result<Reply> {
 
 /// An executor `<type>:<label>` of a loaded native plugin.
 #[derive(Clone)]
+#[cfg(feature = "host")]
 pub struct NativeExecutor {
     plugin: std::sync::Arc<crate::LoadedPlugin>,
     executor_type: String,
@@ -358,6 +359,7 @@ pub struct NativeExecutor {
     host: Option<std::sync::Arc<dyn crate::HostServices>>,
 }
 
+#[cfg(feature = "host")]
 impl std::fmt::Debug for NativeExecutor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NativeExecutor")
@@ -366,6 +368,7 @@ impl std::fmt::Debug for NativeExecutor {
     }
 }
 
+#[cfg(feature = "host")]
 impl NativeExecutor {
     pub(crate) fn new(
         plugin: std::sync::Arc<crate::LoadedPlugin>,
@@ -451,12 +454,14 @@ impl NativeExecutor {
 }
 
 /// A followed log of a [`NativeExecutor`] job. Dropping it closes the handle.
+#[cfg(feature = "host")]
 pub struct NativeLogStream {
     executor: NativeExecutor,
     handle: u64,
     closed: bool,
 }
 
+#[cfg(feature = "host")]
 impl NativeLogStream {
     /// New lines, waiting at most `timeout` inside the plugin.
     pub fn next_lines(&mut self, timeout: Duration) -> Result<LogEvent> {
@@ -492,6 +497,7 @@ impl NativeLogStream {
     }
 }
 
+#[cfg(feature = "host")]
 impl Drop for NativeLogStream {
     fn drop(&mut self) {
         let _ = self.close();

@@ -420,6 +420,14 @@ step_native_api_venv() {
   fi
 }
 step_frontcrate() {
+  log "Check the standalone Cargo plugin SDK without host dependencies"
+  local guest_dependencies
+  guest_dependencies="$(cargo tree --locked -p meerschaum-plugin --no-default-features -e normal,build --prefix none --format '{p}')"
+  if grep -E '^(meerschaum-kernel|polars(-[^ ]+)?) ' <<< "$guest_dependencies"; then
+    echo "The Cargo plugin guest SDK must build without Polars." >&2
+    return 1
+  fi
+  cargo test --locked -p meerschaum-plugin --no-default-features --lib
   log "cargo check -p meerschaum --no-default-features --all-targets"
   cargo check -p meerschaum --no-default-features --all-targets
   local feature

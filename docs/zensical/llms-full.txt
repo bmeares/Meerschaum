@@ -6659,12 +6659,12 @@ mrsm stack up -d
 Meerschaum spins up a dedicated container, isolated bridge network, and private volumes (`/meerschaum` and `/var/lib/meerschaum/factory`). Grant changes apply live; image, limit, or network changes need `mrsm stack up -d`.
 
 !!! tip "Override the executor image"
-    Stack team executors default to `bmeares/meerschaum:5.1.6-full`, matching the main API release. To pin a custom image, set `executor.image` in `stack.yaml`.
+    Stack team executors default to `bmeares/meerschaum:5.1.7-full`, matching the main API release. To pin a custom image, set `executor.image` in `stack.yaml`.
 
     ```yaml
     # mrsm edit config stack
     executor:
-      image: registry.example/meerschaum-executor:5.1.6
+      image: registry.example/meerschaum-executor:5.1.7
     ```
 
 ## Choose a deployment
@@ -11635,11 +11635,15 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-meerschaum-plugin = "5.0"
+meerschaum-plugin = { version = "5.1.7", default-features = false }
 
 [profile.release]
 panic = "unwind"
 ```
+
+With `default-features = false`, Cargo builds the plugin with Arrow and skips Polars.
+`mrsm bootstrap plugin` uses this setting for new Cargo packages. Existing manifests
+keep the kernel-backed `Frame` and can upgrade without changing their feature flags.
 
 Implement `Plugin` and export it with `export_plugin!` (name and version come from `Cargo.toml` unless overridden via `const NAME` / `const VERSION`):
 
@@ -11679,7 +11683,7 @@ impl Plugin for Demo {
 meerschaum_plugin::export_plugin!(Demo);
 ```
 
-`Frame::from_rows(rows, dtypes)` builds a typed Arrow `Frame` using Meerschaum dtypes (`datetime`, `date`, `int`, `float`, `string`, `bool`, `json`, `numeric`, `uuid`, `bytes`, `geometry[...]`); `frame.to_rows()` converts back, and `Frame::from_record_batch` accepts Arrow batches (`arrow`, `chrono`, `serde_json` are re-exported). Examples: [`native_demo.rs`](https://github.com/bmeares/Meerschaum/blob/v5/crates/meerschaum-plugin/examples/native_demo.rs), [`native_host.rs`](https://github.com/bmeares/Meerschaum/blob/v5/crates/meerschaum-plugin/examples/native_host.rs).
+`Frame::from_rows(rows, dtypes)` accepts declared booleans, signed and unsigned integers, floats, strings, dates, and UTC microsecond datetimes. Use `frame.try_to_rows()?` to read JSON rows. Use `Frame::from_record_batch` for other Arrow types or to preserve field metadata. The default SDK also offers kernel conversions for Meerschaum types such as `numeric`, `uuid`, and `geometry`.
 
 | `Request` field | Meaning |
 |---|---|
@@ -11732,6 +11736,18 @@ cp crates/meerschaum-plugin/examples/plugin.toml target/release/examples/libnati
 ```
 
 **Source auto-build:** Directories with `plugin.toml` + `Cargo.toml` (`cdylib`, `panic = "unwind"`, matching name) and no newer prebuilt library are auto-built via `cargo build --release` (`CARGO_INCREMENTAL=0`) into `<root>/cache/native_build/<name>/`. Ship `Cargo.lock` for read-only directories; delete the cache dir to retry a failed build.
+
+### Install from a plugin repository
+
+`mrsm install plugin native_demo` requests a binary for the target of the running Meerschaum build. For example, a Linux x86-64 build using glibc requests `x86_64-unknown-linux-gnu`. When the repository has that binary, installation works on machines without Cargo. Other targets and older clients receive the source archive.
+
+Publish a source archive with the plugin directory at its root. For each supported target, package the same directory name with its `plugin.toml` and compiled library. Build on the oldest OS or libc you support for that target. The target triple distinguishes glibc from musl but does not encode a minimum libc version. Register the source, then attach each binary using the SHA-256 of that source archive.
+
+```bash
+mrsm register plugins native_demo -r api:your-repo --params '{"archive":"dist/native_demo.tar.gz","version":"1.0.0"}'
+digest=$(sha256sum dist/native_demo.tar.gz | cut -d' ' -f1)
+mrsm register plugins native_demo -r api:your-repo --params "{\"archive\":\"dist/native_demo-linux.tar.gz\",\"version\":\"1.0.0\",\"target\":\"x86_64-unknown-linux-gnu\",\"source_sha256\":\"$digest\"}"
+```
 
 **Repositories & testing:** `mrsm register plugins` / `install plugins` / `uninstall plugins` / `edit plugins` support both `.rs` files and packaged crates (skipping Python venvs and rolling back on build errors; prebuilt binaries must match host OS/CPU, and live hot-reload is unsupported). Test on a scratch root:
 
@@ -13865,6 +13881,16 @@ Read the [migration guide](../reference/migrating-to-v5.md) before upgrading an 
 Source: https://meerschaum.io/changelog/v5/
 
 # Meerschaum 5
+
+## 5.1.7
+
+- **Install packaged Rust plugins without Cargo.**  
+  `mrsm install plugin` downloads a matching prebuilt library when the plugin publisher provides one. Other targets use the source archive. See [publishing a Cargo plugin](https://meerschaum.io/reference/plugins/rust-plugins/advanced/#install-from-a-plugin-repository).
+
+- **Build typed Cargo plugins without Polars.**  
+  New Cargo packages from `mrsm bootstrap plugin` use the lighter SDK. To opt in for an existing plugin, set `meerschaum-plugin = { version = "5.1.7", default-features = false }` in its manifest. The plugin can still exchange typed Arrow batches and call host services. Existing manifests retain the kernel-backed SDK.
+
+  In a clean Linux x86-64 release build of MicroMeerschaum with six Cargo jobs and dependencies already downloaded, opting in cut build time from 6m 04s to 2m 11s. The plugin library shrank from 44.8 MiB to 15.5 MiB.
 
 ## 5.1.6
 

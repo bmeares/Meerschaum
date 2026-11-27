@@ -141,8 +141,78 @@ def test_register_native_plugin_without_register_hook(tmp_path):
     assert result['sync'][0] is True, result
 
 
+def test_concurrent_plugin_install_claims_the_destination_before_downloading(tmp_path):
+    (tmp_path / 'plugins').mkdir()
+    result, _ = _run(tmp_path, 'demo', textwrap.dedent("""
+        from concurrent.futures import ThreadPoolExecutor
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        import gzip
+        import json
+        import threading
+
+        from meerschaum.connectors.api import APIConnector
+
+        entered, release = threading.Event(), threading.Event()
+        requests = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                requests.append(self.path)
+                if len(requests) == 1:
+                    entered.set()
+                    assert release.wait(15)
+                if self.path == '/plugins/empty':
+                    body = gzip.compress(bytes(1024))  # Empty tar with two zero blocks.
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/gzip')
+                else:
+                    body = b'[false, "No archive available."]'
+                    self.send_response(404)
+                    self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            repo = APIConnector('archive', host='127.0.0.1', port=server.server_port, protocol='http')
+            try:
+                with ThreadPoolExecutor(max_workers=1) as worker:
+                    first = worker.submit(repo.install_plugin, 'demo')
+                    try:
+                        assert entered.wait(15)
+                        overlap = repo.install_plugin('demo')
+                    finally:
+                        release.set()
+                    original = first.result(timeout=15)
+                retry = repo.install_plugin('demo')
+                try:
+                    repo.install_plugin('empty')
+                except IndexError as exc:
+                    assert str(exc) == 'list index out of range'
+                else:
+                    raise AssertionError('Installing an empty tar must raise IndexError.')
+            finally:
+                server.shutdown()
+                thread.join()
+        print('RESULT ' + json.dumps([overlap, original, retry, requests]))
+    """))
+    assert result == [
+        [True, "Already installing plugin 'demo'."],
+        [False, "No archive available."],
+        [False, "No archive available."],
+        ['/plugins/demo', '/plugins/demo', '/plugins/empty'],
+    ]
+
+
 @pytest.mark.skipif(not os.path.exists(CARGO), reason="the example plugin is built with cargo")
-def test_register_native_directory_plugin(tmp_path):
+def test_install_and_register_prebuilt_native_directory_plugin(tmp_path):
+    import functools
+    import tarfile
+    import threading
+    from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
     subprocess.run(
         [CARGO, 'build', '-p', 'meerschaum-plugin', '--example', 'native_demo'],
         cwd=REPO,
@@ -152,12 +222,40 @@ def test_register_native_directory_plugin(tmp_path):
     suffix = {'darwin': 'dylib', 'win32': 'dll'}.get(sys.platform, 'so')
     prefix = '' if sys.platform == 'win32' else 'lib'
     library = REPO / 'target' / 'debug' / 'examples' / f'{prefix}native_demo.{suffix}'
-    plugin_dir = tmp_path / 'plugins' / 'native_demo'
+    # The repository returns the publisher's binary archive to a matching target.
+    plugin_dir = tmp_path / 'build' / 'native_demo'
     plugin_dir.mkdir(parents=True)
     (plugin_dir / 'plugin.toml').write_text('name = "native_demo"\nversion = "1.0.0"\n')
-    shutil.copy(library, plugin_dir / library.name)
+    repo = tmp_path / 'repository'
+    (repo / 'plugins').mkdir(parents=True)
+    with tarfile.open(repo / 'plugins' / 'native_demo', 'w:gz') as tar:
+        tar.add(plugin_dir, arcname='native_demo')
+        tar.add(library, arcname=f'native_demo/libnative_demo.{suffix}')
 
-    result, output = _run(tmp_path, 'native_demo')
+    targets = []
+    class Repository(SimpleHTTPRequestHandler):
+        def do_GET(self):
+            targets.append(self.headers.get('x-mrsm-plugin-target'))
+            super().do_GET()
+
+    handler = functools.partial(Repository, directory=str(repo))
+    (tmp_path / 'plugins').mkdir()
+    with ThreadingHTTPServer(('127.0.0.1', 0), handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        install = textwrap.dedent(f"""
+            from meerschaum.connectors.api import APIConnector
+            repo = APIConnector('binary_test', host='127.0.0.1', port={server.server_port}, protocol='http')
+            ok, message = repo.install_plugin('native_demo')
+            assert ok, message
+        """)
+        try:
+            result, output = _run(tmp_path, 'native_demo', install + SCRIPT)
+        finally:
+            server.shutdown()
+            thread.join()
+    assert len(targets) == 1 and targets[0]
+    assert not (tmp_path / 'root' / 'cache' / 'native_build' / 'native_demo').exists()
     _assert_quiet(output)
     assert result['register'][0] is True, result
     assert result['is_native'] is True, result

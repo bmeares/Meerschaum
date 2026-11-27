@@ -928,17 +928,13 @@ fn rust_scaffold(scaffold: &Scaffold<'_>) -> Result<String, ActionError> {
 }
 
 /// The SDK requirement of a generated Cargo plugin: this release exactly while it is a
-/// pre-release, else its minor series.
+/// pre-release, else the SDK compatible with this scaffold.
 fn sdk_requirement() -> String {
     let version = env!("CARGO_PKG_VERSION");
     if version.contains('-') {
         format!("={version}")
     } else {
-        version
-            .rsplitn(2, '.')
-            .last()
-            .unwrap_or(version)
-            .to_string()
+        version.to_string()
     }
 }
 
@@ -956,7 +952,7 @@ fn camel_case(name: &str) -> String {
         .collect()
 }
 
-/// A Cargo plugin crate on the full SDK: `(relative path, contents)` of `plugin.toml`,
+/// A Cargo plugin crate on the guest SDK: `(relative path, contents)` of `plugin.toml`,
 /// `Cargo.toml` and `src/lib.rs` (last).
 fn rust_package(scaffold: &Scaffold<'_>) -> Result<Vec<(String, String)>, ActionError> {
     let name = scaffold.name;
@@ -964,7 +960,7 @@ fn rust_package(scaffold: &Scaffold<'_>) -> Result<Vec<(String, String)>, Action
     let plugin_struct = camel_case(name);
     let plugin_toml = format!("name = {name:?}\nversion = \"0.0.1\"\n");
     let cargo_toml = format!(
-        "[package]\nname = {name:?}\nversion = \"0.0.1\"\nedition = \"2024\"\n\n# Built on its own, even inside another Cargo workspace.\n[workspace]\n\n[lib]\ncrate-type = [\"cdylib\"]\n\n[dependencies]\nmeerschaum-plugin = \"{}\"\n\n[profile.release]\n# Required: the SDK catches panics at the plugin boundary.\npanic = \"unwind\"\n",
+        "[package]\nname = {name:?}\nversion = \"0.0.1\"\nedition = \"2024\"\n\n# Built on its own, even inside another Cargo workspace.\n[workspace]\n\n[lib]\ncrate-type = [\"cdylib\"]\n\n[dependencies]\nmeerschaum-plugin = {{ version = \"{}\", default-features = false }}\n\n[profile.release]\n# Required: the SDK catches panics at the plugin boundary.\npanic = \"unwind\"\n",
         sdk_requirement()
     );
 
@@ -1273,11 +1269,10 @@ mod tests {
         assert!(files[0].1.contains("name = \"my-demo\""));
         assert!(files[1].1.contains("crate-type = [\"cdylib\"]"));
         assert!(files[1].1.contains("panic = \"unwind\""));
-        assert!(
-            files[1]
-                .1
-                .contains(&format!("meerschaum-plugin = \"{}\"", sdk_requirement()))
-        );
+        assert!(files[1].1.contains(&format!(
+            "meerschaum-plugin = {{ version = \"{}\", default-features = false }}",
+            sdk_requirement()
+        )));
         let lib = &files[2].1;
         assert!(lib.contains("struct MyDemo;"), "{lib}");
         assert!(

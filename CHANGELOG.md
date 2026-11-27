@@ -4,6 +4,16 @@
 
 ## Meerschaum 5
 
+### 5.1.7
+
+- **Install packaged Rust plugins without Cargo.**  
+  `mrsm install plugin` downloads a matching prebuilt library when the plugin publisher provides one. Other targets use the source archive. See [publishing a Cargo plugin](https://meerschaum.io/reference/plugins/rust-plugins/advanced/#install-from-a-plugin-repository).
+
+- **Build typed Cargo plugins without Polars.**  
+  New Cargo packages from `mrsm bootstrap plugin` use the lighter SDK. To opt in for an existing plugin, set `meerschaum-plugin = { version = "5.1.7", default-features = false }` in its manifest. The plugin can still exchange typed Arrow batches and call host services. Existing manifests retain the kernel-backed SDK.
+
+  In a clean Linux x86-64 release build of MicroMeerschaum with six Cargo jobs and dependencies already downloaded, opting in cut build time from 6m 04s to 2m 11s. The plugin library shrank from 44.8 MiB to 15.5 MiB.
+
 ### 5.1.6
 
 - **Reduce WAL from PostgreSQL syncs.**  

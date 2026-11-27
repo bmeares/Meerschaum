@@ -119,6 +119,11 @@ Implemented in Rust. A native action is a CLI action implemented in `crates/meer
 a native plugin is a Rust plugin (a single `.rs` file or a crate directory) loaded through the C
 ABI of `crates/meerschaum-plugin/`.
 
+**Packaged native plugin**:
+A native plugin distributed as a directory. Its publisher can supply a source archive
+and a prebuilt library for each supported target. A target identifies the CPU, operating
+system and binary interface that the library runs on.
+
 **Façade**:
 The Python class or function that adapts arguments and calls one `meerschaum._core` binding
 (`mrsm.Pipe`, `SQLConnector`, `get_config`). It owns no behavior of its own.

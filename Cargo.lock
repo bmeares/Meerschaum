@@ -176,6 +176,7 @@ dependencies = [
  "arrow-cast",
  "arrow-data",
  "arrow-ipc",
+ "arrow-json",
  "arrow-ord",
  "arrow-row",
  "arrow-schema",
@@ -208,6 +209,7 @@ dependencies = [
  "arrow-data",
  "arrow-schema",
  "chrono",
+ "chrono-tz",
  "half",
  "hashbrown 0.17.1",
  "libc",
@@ -285,6 +287,31 @@ dependencies = [
  "arrow-schema",
  "arrow-select",
  "flatbuffers",
+]
+
+[[package]]
+name = "arrow-json"
+version = "60.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d843cca4b5361d7667564083b151a30d816d2b7e7ce2baa53948e2188f087f06"
+dependencies = [
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-cast",
+ "arrow-ord",
+ "arrow-schema",
+ "arrow-select",
+ "chrono",
+ "half",
+ "indexmap",
+ "itoa",
+ "lexical-core",
+ "memchr",
+ "num-traits",
+ "ryu",
+ "serde_core",
+ "serde_json",
+ "simdutf8",
 ]
 
 [[package]]
@@ -2865,7 +2892,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum"
-version = "5.1.6"
+version = "5.1.7"
 dependencies = [
  "meerschaum-cli",
  "meerschaum-connector",
@@ -2881,7 +2908,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-cli"
-version = "5.1.6"
+version = "5.1.7"
 dependencies = [
  "async-trait",
  "axum",
@@ -2941,7 +2968,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-compose"
-version = "5.1.6"
+version = "5.1.7"
 dependencies = [
  "glob",
  "indexmap",
@@ -2957,7 +2984,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-connector"
-version = "5.1.6"
+version = "5.1.7"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2976,7 +3003,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-connector-api"
-version = "5.1.6"
+version = "5.1.7"
 dependencies = [
  "aws-lc-sys 0.46.0",
  "base64 0.23.1",
@@ -3003,7 +3030,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-connector-sql"
-version = "5.1.6"
+version = "5.1.7"
 dependencies = [
  "arrow",
  "async-trait",
@@ -3040,7 +3067,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-connector-valkey"
-version = "5.1.6"
+version = "5.1.7"
 dependencies = [
  "chrono",
  "fred",
@@ -3058,7 +3085,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-core"
-version = "5.1.6"
+version = "5.1.7"
 dependencies = [
  "blake2",
  "chrono",
@@ -3091,7 +3118,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-engine"
-version = "5.1.6"
+version = "5.1.7"
 dependencies = [
  "chrono",
  "fs4",
@@ -3114,7 +3141,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-jobs"
-version = "5.1.6"
+version = "5.1.7"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -3137,7 +3164,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-kernel"
-version = "5.1.6"
+version = "5.1.7"
 dependencies = [
  "arrow",
  "base64 0.23.1",
@@ -3157,7 +3184,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-plugin"
-version = "5.1.6"
+version = "5.1.7"
 dependencies = [
  "arrow",
  "base64 0.23.1",
@@ -3183,7 +3210,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-py"
-version = "5.1.6"
+version = "5.1.7"
 dependencies = [
  "arrow",
  "async-trait",
@@ -3220,7 +3247,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-server"
-version = "5.1.6"
+version = "5.1.7"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
@@ -3229,6 +3256,7 @@ dependencies = [
  "base64 0.23.1",
  "bytes",
  "chrono",
+ "flate2",
  "futures-util",
  "hmac",
  "http-body-util",
@@ -3251,11 +3279,13 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
+ "tar",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite 0.30.0",
+ "toml",
  "tower",
  "tower-http 0.7.1",
  "tracing",
@@ -3265,7 +3295,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-web"
-version = "5.1.6"
+version = "5.1.7"
 dependencies = [
  "ammonia",
  "async-trait",
@@ -3298,7 +3328,7 @@ dependencies = [
 
 [[package]]
 name = "meerschaum-worker"
-version = "5.1.6"
+version = "5.1.7"
 dependencies = [
  "arrow",
  "chrono",
