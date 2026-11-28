@@ -18,6 +18,7 @@
 use crate::{Frame, Request, Result, SuccessTuple, abi::*, error, sdk};
 use arrow::ffi_stream::FFI_ArrowArrayStream;
 use indexmap::IndexMap;
+#[cfg(feature = "host")]
 use meerschaum_kernel::enforce::PipeInput;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -60,12 +61,13 @@ impl Bound {
         let Bound::Datetime(text) = self else {
             return Err(error(format!("{self} is an integer bound, not a datetime")));
         };
-        let value = meerschaum_kernel::value::parse_datetime_value(text)
-            .ok_or_else(|| error(format!("'{text}' is not an ISO-8601 timestamp")))?;
-        Ok(chrono::DateTime::from_naive_utc_and_offset(
-            value.utc,
-            chrono::Utc,
-        ))
+        #[cfg(feature = "host")]
+        let datetime =
+            meerschaum_kernel::value::parse_datetime_value(text).map(|value| value.utc.and_utc());
+        #[cfg(not(feature = "host"))]
+        let datetime =
+            arrow::compute::kernels::cast_utils::string_to_datetime(&chrono::Utc, text).ok();
+        datetime.ok_or_else(|| error(format!("'{text}' is not an ISO-8601 timestamp")))
     }
 
     /// A datetime bound for `datetime` (UTC).
@@ -250,7 +252,7 @@ impl std::fmt::Debug for MintedToken {
     }
 }
 
-/// One call a plugin makes into its host ([`HostServices::host_call`]).
+/// One call a plugin makes into its host (the host implementation receives this envelope).
 #[derive(Debug, Clone, PartialEq)]
 pub struct HostCall {
     /// The calling plugin's name, as the loader knows it (never taken from the plugin's bytes).
@@ -336,11 +338,13 @@ impl HostCall {
 
 /// What a host call answers: a JSON value and, for `get_data` and `read_sql`, a frame.
 #[derive(Debug, Clone)]
+#[cfg(feature = "host")]
 pub struct HostReply {
     pub value: Value,
     pub data: Option<Frame>,
 }
 
+#[cfg(feature = "host")]
 impl HostReply {
     pub fn json(value: Value) -> HostReply {
         HostReply { value, data: None }
@@ -359,6 +363,7 @@ impl HostReply {
 
 /// A host's implementation of the host calls. No Rust trait crosses the ABI: the loader adapts
 /// both plugin ABIs (Arrow and rows) to this trait.
+#[cfg(feature = "host")]
 pub trait HostServices: Send + Sync {
     /// The original calls (`get_sync_time`, `sync`) on the request's Pipe.
     fn call(&self, request: &Request, method: &str, data: Option<Frame>) -> Result<Value>;
@@ -486,15 +491,14 @@ fn invoke(
     // call. The host moves the input out of `stream` and may write its result in its place.
     let result = unsafe { (host.invoke)(host.context, Bytes::borrowed(&bytes), &mut stream) };
     // SAFETY: result bytes are owned by this host and released with its callback once.
-    let value =
-        unsafe { crate::host::decode_with(host.free_bytes, result) }.map_err(|e| match e {
-            crate::Error::Unsupported(_) => crate::Error::Unsupported(format!(
-                "This Meerschaum cannot run `{}` for plugins: upgrade Meerschaum to {} or later.",
-                call_name(method, on_pipe),
-                method::minimum_version(method)
-            )),
-            other => other,
-        })?;
+    let value = unsafe { sdk::decode_with(host.free_bytes, result) }.map_err(|e| match e {
+        crate::Error::Unsupported(_) => crate::Error::Unsupported(format!(
+            "This Meerschaum cannot run `{}` for plugins: upgrade Meerschaum to {} or later.",
+            call_name(method, on_pipe),
+            method::minimum_version(method)
+        )),
+        other => other,
+    })?;
     let data = sdk::frame(std::mem::replace(
         &mut stream,
         FFI_ArrowArrayStream::empty(),
@@ -1238,12 +1242,14 @@ pub(crate) mod calls {
     }
 }
 
+#[cfg(feature = "host")]
 pub(crate) struct HostContext<'a> {
     pub services: &'a dyn HostServices,
     pub request: &'a Request,
     /// The loaded plugin's name.
     pub plugin: &'a str,
 }
+#[cfg(feature = "host")]
 pub(crate) unsafe extern "C" fn invoke_host(
     context: *mut std::ffi::c_void,
     method: Bytes,
@@ -1275,5 +1281,5 @@ pub(crate) unsafe extern "C" fn invoke_host(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "host"))]
 mod tests;

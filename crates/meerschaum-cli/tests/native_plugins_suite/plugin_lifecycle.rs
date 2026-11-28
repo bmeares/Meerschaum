@@ -691,6 +691,18 @@ fn a_failed_post_install_setup_restores_the_previous_plugin() {
         "{text}"
     );
     assert_eq!(installed_version(&home, "foo"), "__version__ = '1.0.0'");
+
+    // Losing the worker before it can return a setup result also restores the previous files.
+    repo.publish(
+        "foo",
+        archive(&[(
+            "foo.py",
+            "__version__ = '3.0.0'\ndef setup(**kw):\n    import os\n    os._exit(7)\n",
+        )]),
+    );
+    let run = with_repo(&home, &repo, &["install", "plugins", "foo"]);
+    assert!(!run.text().contains("Successfully installed plugin 'foo'."));
+    assert_eq!(installed_version(&home, "foo"), "__version__ = '1.0.0'");
 }
 
 #[test]

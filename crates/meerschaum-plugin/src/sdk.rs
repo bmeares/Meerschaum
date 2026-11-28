@@ -4,6 +4,7 @@ use arrow::{
     ffi_stream::{FFI_ArrowArrayStream, RecordBatchStreamReader},
     record_batch::{RecordBatch, RecordBatchIterator, RecordBatchReader},
 };
+#[cfg(feature = "host")]
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -163,9 +164,37 @@ pub(crate) fn frame(stream: FFI_ArrowArrayStream) -> Result<Option<Frame>> {
     if batches.is_empty() {
         batches.push(RecordBatch::new_empty(schema));
     }
-    Frame::from_record_batches(&batches)
-        .map(Some)
-        .map_err(error)
+    #[cfg(feature = "host")]
+    let imported = Frame::from_record_batches(&batches);
+    #[cfg(not(feature = "host"))]
+    let imported = Frame::from_ffi_batches(&batches);
+    imported.map(Some).map_err(error)
+}
+
+pub(crate) unsafe fn decode_with(
+    free: unsafe extern "C" fn(OwnedBytes),
+    result: CallResult,
+) -> Result<Value> {
+    let bytes = if result.payload.len == 0 {
+        Vec::new()
+    } else {
+        if result.payload.ptr.is_null() {
+            return Err(error("null plugin result"));
+        }
+        // SAFETY: ABI result points to initialized bytes through free_bytes.
+        unsafe { std::slice::from_raw_parts(result.payload.ptr, result.payload.len) }.to_vec()
+    };
+    // SAFETY: return allocation to the exporting library exactly once.
+    unsafe { free(result.payload) };
+    if result.status == 3 {
+        return Err(crate::Error::Unsupported(
+            String::from_utf8_lossy(&bytes).into_owned(),
+        ));
+    }
+    if result.status != 0 {
+        return Err(error(String::from_utf8_lossy(&bytes)));
+    }
+    serde_json::from_slice(&bytes).map_err(error)
 }
 
 pub(crate) fn boundary(f: impl FnOnce() -> Result<Value>) -> CallResult {
@@ -393,10 +422,12 @@ pub trait FetchOutput {
 }
 
 /// JSON rows as documents (`list[dict]`), the way a Python plugin's `fetch()` returns them.
+#[cfg(feature = "host")]
 pub type Docs = Vec<IndexMap<String, meerschaum_kernel::Value>>;
 
 /// Convert JSON object rows into documents. A key a row does not have is absent from its
 /// document (`pd.DataFrame(docs)` fills it with `NaN`).
+#[cfg(feature = "host")]
 pub fn rows_to_docs(rows: Vec<Value>) -> Result<Docs> {
     rows.into_iter()
         .map(|row| match row {
@@ -416,6 +447,7 @@ pub fn rows_to_docs(rows: Vec<Value>) -> Result<Docs> {
 /// Documents as a frame with the dtypes a Python plugin's documents get:
 /// `pd.DataFrame(docs).convert_dtypes()` ([`meerschaum_kernel::docs::frame_from_docs`]), so
 /// integer, float, bool and string columns are typed rather than `object`.
+#[cfg(feature = "host")]
 pub fn docs_to_frame(docs: &[IndexMap<String, meerschaum_kernel::Value>]) -> Result<Frame> {
     meerschaum_kernel::docs::frame_from_docs(docs).map_err(error)
 }
@@ -425,7 +457,8 @@ impl FetchOutput for Vec<Value> {
         if self.is_empty() {
             return Ok(None);
         }
-        docs_to_frame(&rows_to_docs(self)?).map(Some)
+        use crate::FrameExt;
+        Frame::from_rows(self, &[]).map(Some)
     }
 }
 

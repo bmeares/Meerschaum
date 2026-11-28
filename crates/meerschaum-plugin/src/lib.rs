@@ -6,31 +6,46 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 // The C ABI of native plugins is `unsafe` by nature; each block says why it holds.
 #![allow(unsafe_code)]
+#[cfg(not(feature = "host"))]
+mod guest_frame;
+#[cfg(not(feature = "host"))]
+pub use guest_frame::{Frame, FrameExt};
 pub mod abi;
 pub mod api;
 pub mod callbacks;
+#[cfg(feature = "host")]
 pub mod discovery;
 pub mod executor;
 mod handles;
 pub mod host;
 pub mod manifest;
 pub mod mcp;
+#[cfg(feature = "host")]
 pub mod registry;
+#[cfg(feature = "host")]
 pub mod rows;
 pub mod rows_abi;
 pub mod sdk;
+#[cfg(feature = "host")]
 mod single_file;
+#[cfg(feature = "host")]
 pub mod source;
 pub mod subscribe;
 pub use arrow;
-pub use callbacks::{Bound, HostCall, HostReply, HostServices, Pipe, Query, Transaction};
+pub use callbacks::{Bound, HostCall, Pipe, Query, Transaction};
+#[cfg(feature = "host")]
+pub use callbacks::{HostReply, HostServices};
 pub use chrono;
+#[cfg(feature = "host")]
 pub use host::{LoadedPlugin, NativeConnector};
 pub use indexmap;
 pub use manifest::{ConnectorType, Manifest};
 pub use meerschaum_core::SuccessTuple;
+#[cfg(feature = "host")]
 pub use meerschaum_kernel::Frame;
+#[cfg(feature = "host")]
 pub use registry::NativePlugins;
+#[cfg(feature = "host")]
 pub use rows::FrameExt;
 pub use sdk::{Plugin, Reply, Request};
 pub use serde_json;

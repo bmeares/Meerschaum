@@ -81,6 +81,7 @@ impl ToolSpec {
         serde_json::to_value(self).unwrap_or(Value::Null)
     }
     /// Check `arguments` against [`ToolSpec::input_schema`].
+    #[cfg(feature = "host")]
     pub fn validate(&self, arguments: &Value) -> Result<()> {
         validate_arguments(&self.input_schema, arguments)
     }
@@ -153,6 +154,7 @@ pub fn entries_of(entry: &Value) -> Result<McpEntries> {
 }
 
 /// Validate tool arguments against a JSON Schema; the error lists every violation.
+#[cfg(feature = "host")]
 pub fn validate_arguments(schema: &Value, arguments: &Value) -> Result<()> {
     let validator = jsonschema::validator_for(schema)
         .map_err(|e| error(format!("invalid input schema: {e}")))?;
@@ -419,6 +421,7 @@ impl<T: IntoPromptReply> IntoPromptReply for Result<T> {
     }
 }
 
+#[cfg(feature = "host")]
 impl crate::LoadedPlugin {
     /// Call the tool `call.name` (the arguments must already be validated).
     pub fn mcp_tool(&self, call: &ToolCall) -> Result<Value> {
@@ -470,6 +473,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(feature = "host")]
     fn arguments_are_validated_against_the_schema() {
         let tool = ToolSpec::new("t", "d").input_schema(json!({
             "type": "object",

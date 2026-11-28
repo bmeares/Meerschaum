@@ -406,6 +406,7 @@ mod tests {
             .page_host_scopes("/dash/my/page/", ["pipes:read"])
             .required(["plugin:noaa"]);
         let manifest = complete(built.into(), "my-plugin", "1.2.3");
+        #[cfg(feature = "host")]
         crate::host::validate_manifest(&manifest).unwrap();
         let entry = &manifest["plugins"]["my-plugin"];
         assert_eq!(entry["name"], "my-plugin");
@@ -452,6 +453,7 @@ mod tests {
             "connector_types": {}, "pre_sync_hooks": [], "post_sync_hooks": []});
         assert_eq!(complete(full.clone(), "demo", "1.0.0"), full);
         let minimal = complete(Value::Null, "demo", "2.0.0");
+        #[cfg(feature = "host")]
         crate::host::validate_manifest(&minimal).unwrap();
         assert_eq!(
             minimal["plugins"]["demo"],

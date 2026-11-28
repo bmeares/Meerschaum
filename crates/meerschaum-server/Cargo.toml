@@ -46,6 +46,11 @@ rustls = { version = "0.23", default-features = false, features = ["std", "tls12
 tokio-rustls = { version = "0.26", default-features = false, features = ["aws-lc-rs", "tls12"] }
 http-body-util = "0.1"
 bytes = "1"
+# Bounded inspection and atomic publication of target-specific plugin archives.
+flate2 = "1"
+tar = { version = "0.4", default-features = false }
+toml = { workspace = true }
+tempfile = "3"
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 # Crate-private: OpenAPI (`/openapi.json`, `/docs`).
 utoipa = "6"
@@ -70,7 +75,6 @@ aws-lc-sys = { version = "0.46", features = ["prebuilt-nasm"] }
 # Certificates for the HTTPS tests (`aws_lc_rs`: RSA keys too).
 rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
 tokio = { workspace = true, features = ["test-util"] }
-tempfile = "3"
 regex = { workspace = true }
 tokio-tungstenite = "0.30"
 # Real-instance tests: a SQLite / PostgreSQL-family instance behind the router, driven by the client.

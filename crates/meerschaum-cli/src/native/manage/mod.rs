@@ -786,6 +786,13 @@ pub fn register_plugins(args: &ArgsMap, rt: &mut Runtime<'_>) -> ActionResult {
     if action.is_empty() || action == [""] {
         return Ok(SuccessTuple::fail("No plugins to register."));
     }
+    if let Some(params) = super::params(args)
+        && ["archive", "target", "source_sha256"]
+            .iter()
+            .any(|key| params.contains_key(*key))
+    {
+        return super::plugin_admin::register_archive(args, rt, &action, &params);
+    }
     let installed = crate::builtin::plugin_names(&rt.config().paths().plugins_dirs);
     let mut to_register = Vec::new();
     for p in &action {

@@ -1013,6 +1013,30 @@ impl PyApiConnector {
         success_to_py(py, &res)
     }
 
+    /// Download and install a plugin through the CLI's archive transaction.
+    #[pyo3(signature = (name, skip_deps=false, force=false, debug=false))]
+    fn install_plugin<'py>(
+        &self,
+        py: Python<'py>,
+        name: String,
+        skip_deps: bool,
+        force: bool,
+        debug: bool,
+    ) -> PyResult<Bound<'py, PyTuple>> {
+        use meerschaum_cli::native::lifecycle::install_repository_plugin;
+        use meerschaum_cli::value::{ArgsMap, PyValue};
+        let connector = self.conn();
+        let args = ArgsMap::from([
+            ("debug".into(), PyValue::Bool(debug)),
+            ("force".into(), PyValue::Bool(force)),
+            ("skip_deps".into(), PyValue::Bool(skip_deps)),
+        ]);
+        let res = crate::entry_api::run_in_session(py, move |rt| {
+            install_repository_plugin(rt, &args, &connector, &name)
+        })?;
+        success_to_py(py, &res)
+    }
+
     /// `download_plugin(name)`: the plugin archive's bytes (`ValueError` naming the failure
     /// when the server answered with a message instead).
     fn download_plugin<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyBytes>> {

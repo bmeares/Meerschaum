@@ -4,6 +4,7 @@
 use meerschaum_core::{Map, SuccessTuple, Value};
 
 use crate::pipe_ops;
+use crate::plugin_artifacts::{HOST_TARGET, TARGET_HEADER, valid_source_digest, valid_target};
 use crate::routes::{self, plugin_r_url};
 use crate::traits::{ConnectorError, ConnectorResult, PluginRecord};
 use crate::wire::QueryValue;
@@ -41,9 +42,53 @@ impl APIConnector {
                 QueryValue::One(py_json(&Value::Map(plugin.attributes.clone()))),
             ),
         ];
+        self.upload_plugin_archive(
+            &plugin.name,
+            &plugin_r_url(&plugin.name),
+            query,
+            archive,
+            archive_name,
+        )
+        .await
+    }
+
+    /// Attach a binary-only plugin archive to the named, exact source release.
+    pub async fn register_plugin_artifact(
+        &self,
+        name: &str,
+        version: &str,
+        source_sha256: &str,
+        target: &str,
+        archive: Vec<u8>,
+    ) -> SuccessTuple {
+        if !valid_target(target) || !valid_source_digest(source_sha256) || version.is_empty() {
+            return SuccessTuple::fail(
+                "A native plugin artifact needs a Rust target, version and lowercase source SHA-256.",
+            );
+        }
+        let url = format!("{}/artifacts/{target}", plugin_r_url(name));
+        let query = vec![
+            ("version".into(), QueryValue::One(version.into())),
+            (
+                "source_sha256".into(),
+                QueryValue::One(source_sha256.into()),
+            ),
+        ];
+        self.upload_plugin_archive(name, &url, query, archive, &format!("{name}.tar.gz"))
+            .await
+    }
+
+    async fn upload_plugin_archive(
+        &self,
+        name: &str,
+        url: &str,
+        query: Vec<(String, QueryValue)>,
+        archive: Vec<u8>,
+        archive_name: &str,
+    ) -> SuccessTuple {
         let r = self
             .post(
-                &plugin_r_url(&plugin.name),
+                url,
                 RequestOptions {
                     query,
                     body: Body::File {
@@ -57,16 +102,46 @@ impl APIConnector {
             .await;
         match r {
             Ok(r) => parse_tuple_or_text(r.text()),
-            Err(_) => SuccessTuple::fail(format!("Failed to register plugin '{plugin}'.")),
+            Err(_) => SuccessTuple::fail(format!("Failed to register plugin '{name}'.")),
         }
+    }
+
+    /// Legacy servers ignore the target header. Confined callers always request canonical source.
+    pub fn plugin_install_options() -> RequestOptions {
+        let mut options = RequestOptions::default();
+        if meerschaum_core::team_scope::sandbox::mode_from_env().is_none()
+            && matches!(
+                meerschaum_core::team_scope::source_namespace::launch(),
+                Ok(None)
+            )
+            && valid_target(HOST_TARGET)
+        {
+            options
+                .headers
+                .push((TARGET_HEADER.into(), HOST_TARGET.into()));
+        }
+        options
     }
 
     /// Download a plugin's archive (`GET /plugins/{name}`), the first half of
     /// `install_plugin()`. A JSON body instead of an archive is returned as `Err`.
     pub async fn download_plugin(&self, name: &str) -> ConnectorResult<Vec<u8>> {
-        let r = self
-            .get(&plugin_r_url(name), RequestOptions::default())
-            .await?;
+        self.download_plugin_with(name, RequestOptions::default())
+            .await
+    }
+
+    /// Download the archive for an installation using the same error contract as a plain download.
+    pub async fn download_installable_plugin(&self, name: &str) -> ConnectorResult<Vec<u8>> {
+        self.download_plugin_with(name, Self::plugin_install_options())
+            .await
+    }
+
+    async fn download_plugin_with(
+        &self,
+        name: &str,
+        options: RequestOptions,
+    ) -> ConnectorResult<Vec<u8>> {
+        let r = self.get(&plugin_r_url(name), options).await?;
         let is_text = r.content_type.contains("json");
         if is_text || !r.ok() {
             let fail = format!("Failed to download binary for plugin '{name}'.");

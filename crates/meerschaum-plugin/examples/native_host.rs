@@ -75,7 +75,7 @@ impl Plugin for HostProbe {
             let multiplier = config_int("multiplier", 10)?;
             let rows: Vec<Value> = parent
                 .get_data(begin.clone(), end.clone(), None)?
-                .to_rows()
+                .try_to_rows()?
                 .into_iter()
                 .map(|mut row| {
                     row["value"] = json!(row["value"].as_i64().unwrap_or(0) * multiplier);
@@ -113,7 +113,7 @@ impl Plugin for HostProbe {
                     &instance,
                     &format!("SELECT COUNT(*) AS n FROM \"{}\"", parent.target()),
                 )?;
-                let n = count.to_rows()[0]["n"].as_i64().unwrap_or(-1);
+                let n = count.try_to_rows()?[0]["n"].as_i64().unwrap_or(-1);
                 let created = host::exec_sql(
                     &instance,
                     "CREATE TABLE IF NOT EXISTS native_host_marker (id INTEGER)",

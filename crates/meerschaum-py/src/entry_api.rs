@@ -10,6 +10,7 @@
 //! session starts (the interpreter running this extension unless `MRSM_PYTHON` is set).
 
 use meerschaum_cli::actions::{ActionDef, CORE_ACTIONS};
+use meerschaum_cli::builtin::ActionResult;
 use meerschaum_cli::dispatch::{
     self, CommandOutput, CommandSpec, Host, Runtime, SuccessTuple, SystemHost,
 };
@@ -406,10 +407,10 @@ const INTERRUPT_GRACE: Duration = Duration::from_secs(10);
 ///
 /// Python delivers signals to the main thread only: a call made on another thread cannot be
 /// interrupted (it runs to the end).
-fn run_interruptible(
+fn run_interruptible<R: Send + 'static>(
     py: Python<'_>,
-    f: impl FnOnce() -> SuccessTuple + Send + 'static,
-) -> PyResult<SuccessTuple> {
+    f: impl FnOnce() -> R + Send + 'static,
+) -> PyResult<R> {
     let stop = Arc::new(AtomicBool::new(false));
     let call_stop = stop.clone();
     // Raised when this call is given up on: its spinner must not outlive the call.
@@ -459,6 +460,21 @@ fn run_interruptible(
             }
         }
     }
+}
+
+/// Run an individual façade operation on the same live runtime as `entry`.
+pub(crate) fn run_in_session(
+    py: Python<'_>,
+    operation: impl FnOnce(&mut Runtime<'_>) -> ActionResult + Send + 'static,
+) -> PyResult<SuccessTuple> {
+    let prepared = prepare(py, None)?;
+    run_interruptible(py, move || with_runtime(prepared, operation))?.map_err(|error| {
+        py.import("builtins")
+            .and_then(|builtins| builtins.getattr(&error.class))
+            .and_then(|class| class.call1((&error.message,)))
+            .map(PyErr::from_value)
+            .unwrap_or_else(|_| pyo3::exceptions::PyException::new_err(error.message))
+    })
 }
 
 /// Erase the abandoned call's spinner and keep it off. Done without the GIL: the spinner writes

@@ -178,6 +178,7 @@ fn next_batch(context: &Value) -> Result<Reply> {
 
 /// What [`NativeSubscription::next_batch`] received.
 #[derive(Debug)]
+#[cfg(feature = "host")]
 pub enum NativeBatch {
     /// Rows, the token to acknowledge them with, and whether they were redelivered.
     Data {
@@ -192,6 +193,7 @@ pub enum NativeBatch {
 }
 
 /// An open subscription of a native connector. Dropping it closes the handle.
+#[cfg(feature = "host")]
 pub struct NativeSubscription {
     plugin: std::sync::Arc<crate::LoadedPlugin>,
     request: Request,
@@ -201,6 +203,7 @@ pub struct NativeSubscription {
     host: Option<std::sync::Arc<dyn crate::HostServices>>,
 }
 
+#[cfg(feature = "host")]
 impl std::fmt::Debug for NativeSubscription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NativeSubscription")
@@ -210,6 +213,7 @@ impl std::fmt::Debug for NativeSubscription {
     }
 }
 
+#[cfg(feature = "host")]
 impl NativeSubscription {
     pub(crate) fn new(
         plugin: std::sync::Arc<crate::LoadedPlugin>,
@@ -293,6 +297,7 @@ impl NativeSubscription {
     }
 }
 
+#[cfg(feature = "host")]
 impl Drop for NativeSubscription {
     fn drop(&mut self) {
         let _ = self.close();
@@ -305,11 +310,8 @@ mod tests {
     use crate::Plugin;
 
     fn frame(id: i64) -> Frame {
-        Frame::from_object_columns(vec![(
-            "id".to_string(),
-            vec![meerschaum_kernel::Value::Int(id)],
-        )])
-        .unwrap()
+        use crate::FrameExt;
+        Frame::from_rows([json!({"id": id})], &[("id", "int")]).unwrap()
     }
 
     #[derive(Default)]

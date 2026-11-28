@@ -49,20 +49,12 @@ def install_plugin(
     debug: bool = False
 ) -> SuccessTuple:
     """Download and attempt to install a plugin from the API."""
-    import os
-    import pathlib
-    from meerschaum.core import Plugin
-    import meerschaum.config.paths as paths
+    from meerschaum.plugins import invalidate_plugins_cache
 
-    dest = pathlib.Path(os.path.join(paths.PLUGINS_TEMP_RESOURCES_PATH, name + '.tar.gz'))
-    try:
-        archive = self._rust_client().download_plugin(name)
-    except ValueError as e:
-        return False, str(e)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(archive)
-    plugin = Plugin(name, archive_path=dest, repo_connector=self)
-    return plugin.install(skip_deps=skip_deps, force=force, debug=debug)
+    result = self._rust_client().install_plugin(name, skip_deps, force, debug)
+    if result[0]:
+        invalidate_plugins_cache()
+    return result
 
 
 def get_plugins(

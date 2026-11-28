@@ -318,3 +318,130 @@ fn rust_version_and_required_drive_install_plugins_and_install_required() {
         child
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn plugin_artifact_installs_from_a_real_repository_without_cargo() {
+    use meerschaum_connector_api::plugin_artifacts::HOST_TARGET;
+    use meerschaum_server::{AppState, ServerConfig};
+    use serde_json::json;
+    use std::sync::Arc;
+
+    let builder = Home::new();
+    let source = "const VERSION: &str = \"1.0.0\";\n#[make_action]\nfn greet() -> (bool, String) { (true, \"from the prebuilt plugin\".into()) }\n";
+    let release = builder.root.join("hello-source.tar.gz");
+    let canonical = archive(&[("hello.rs", source)]);
+    std::fs::write(&release, &canonical).unwrap();
+
+    let host = Home::new();
+    let instance = Arc::new(
+        meerschaum_connector_sql::SqlConnector::from_uri(
+            "local",
+            &format!("sqlite:///{}", host.root.join("registry.db").display()),
+        )
+        .await
+        .unwrap(),
+    );
+    let mut user = meerschaum_core::users::User::new("publisher", Some("synthetic-password"));
+    user.user_type = Some("admin".into());
+    assert!(instance.register_user(&mut user).await.success);
+    let mut config = ServerConfig::for_root("sql:local", &host.root);
+    config.registration_plugins = true;
+    let state = AppState::builder(config, instance)
+        .secret(vec![42; 48])
+        .build()
+        .unwrap();
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let serving = tokio::spawn(async move {
+        axum::serve(listener, meerschaum_server::app(state))
+            .await
+            .unwrap()
+    });
+    let repository = json!({"protocol":"http", "host":"127.0.0.1", "port":port, "username":"publisher", "password":"synthetic-password"}).to_string();
+    let env = [
+        ("MRSM_API_LOOP", repository.as_str()),
+        ("CARGO", "/nonexistent/mrsm-test-cargo"),
+        NO_PYTHON,
+    ];
+    let publisher = Home::new();
+    let publish = |params: serde_json::Value| {
+        let options = params.to_string();
+        let run = publisher.run_with(
+            &[
+                "register", "plugins", "hello", "-r", "api:loop", "--params", &options,
+            ],
+            &env,
+        );
+        assert!(run.success, "{}", run.text());
+    };
+    publish(json!({"archive":release,"version":"1.0.0"}));
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap();
+    let cargo_home = std::env::var("CARGO_HOME").unwrap_or_else(|_| format!("{home}/.cargo"));
+    let rustup_home = std::env::var("RUSTUP_HOME").unwrap_or_else(|_| format!("{home}/.rustup"));
+    let from_source = builder.run_with(
+        &["install", "plugins", "hello", "-r", "api:loop"],
+        &[
+            ("MRSM_API_LOOP", &repository),
+            ("CARGO_HOME", &cargo_home),
+            ("RUSTUP_HOME", &rustup_home),
+            ("CARGO_NET_OFFLINE", "true"),
+            NO_PYTHON,
+        ],
+    );
+    assert!(from_source.success, "{}", from_source.text());
+    assert_eq!(
+        std::fs::read_to_string(builder.plugins.join("hello.rs")).unwrap(),
+        source
+    );
+
+    // The built library is the artifact a publisher would ship from this target.
+    let package = builder.plugins.join("hello");
+    std::fs::create_dir(&package).unwrap();
+    let library_name = meerschaum_plugin::discovery::library_name("hello");
+    std::fs::copy(
+        meerschaum_plugin::source::built_library(
+            &builder.root.join("cache/native_build/hello"),
+            "hello",
+        ),
+        package.join(library_name),
+    )
+    .unwrap();
+    builder.write_plugin("hello/plugin.toml", "name='hello'\nversion='1.0.0'\n");
+    std::fs::remove_file(builder.plugins.join("hello.rs")).unwrap();
+    let native = meerschaum_cli::native::plugin_admin::plugin_archive(
+        std::slice::from_ref(&builder.plugins),
+        "hello",
+        false,
+    )
+    .unwrap();
+    let artifact = builder.root.join("hello-binary.tar.gz");
+    std::fs::write(&artifact, native).unwrap();
+
+    // With only canonical source and no compiler, installation exercises ordinary source rollback.
+    let receiver = Home::new();
+    let install = || receiver.run_with(&["install", "plugins", "hello", "-r", "api:loop"], &env);
+    let before = install();
+    assert!(
+        before.text().contains("no `cargo` was found")
+            && !receiver.plugins.join("hello.rs").exists(),
+        "{}",
+        before.text()
+    );
+    publish(
+        json!({"archive":artifact,"version":"1.0.0","target":HOST_TARGET,"source_sha256":meerschaum_server::executor::plugins::sha256(&canonical)}),
+    );
+    let installed = install();
+    assert!(installed.success, "{}", installed.text());
+    assert!(receiver.plugins.join("hello/plugin.toml").is_file());
+    let ran = receiver.run_with(&["greet"], &env);
+    assert!(
+        ran.success && ran.text().contains("from the prebuilt plugin"),
+        "{}",
+        ran.text()
+    );
+    serving.abort();
+}

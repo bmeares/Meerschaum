@@ -1,5 +1,8 @@
 //! `/plugins/*` (`api/routes/_plugins.py`), including the archive upload and download.
 
+mod artifacts;
+
+use meerschaum_connector_api::plugin_artifacts::{TARGET_HEADER, valid_target};
 use std::path::PathBuf;
 
 use axum::Router;
@@ -22,7 +25,7 @@ use crate::state::AppState;
 /// The largest plugin archive accepted by `POST /plugins/{name}` (and by the console's upload form,
 /// which forwards to it). v4 (Starlette) has no limit; axum's default of 2 MiB would reject real
 /// plugin archives, so the limit is raised to a bound that still protects the server's memory.
-pub const ARCHIVE_MAX_BYTES: usize = 128 * 1024 * 1024;
+pub const ARCHIVE_MAX_BYTES: usize = meerschaum_connector_api::plugin_artifacts::MAX_ARCHIVE_BYTES;
 
 /// Register the `plugins` route group.
 pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
@@ -33,6 +36,10 @@ pub fn routes(app: Router<AppState>, _cfg: &ServerConfig) -> Router<AppState> {
             get(get_plugin)
                 .delete(delete_plugin)
                 .merge(post(register_plugin).layer(DefaultBodyLimit::max(ARCHIVE_MAX_BYTES))),
+        )
+        .route(
+            "/plugins/{name}/artifacts/{target}",
+            post(register_artifact).layer(DefaultBodyLimit::max(ARCHIVE_MAX_BYTES)),
         )
         .route("/plugins/{name}/attributes", get(get_plugin_attributes))
         .route("/plugins/{name}/version", get(get_plugin_version))
@@ -53,6 +60,27 @@ fn record(name: &str) -> PluginRecord {
 }
 
 async fn register_plugin(ctx: Ctx, Path(name): Path<String>, req: Request) -> ApiResult {
+    register_archive(ctx, name, None, req).await
+}
+
+async fn register_artifact(
+    ctx: Ctx,
+    Path((name, target)): Path<(String, String)>,
+    req: Request,
+) -> ApiResult {
+    if !valid_target(&target) {
+        return Err(ApiError::new(422, "Invalid Rust target."));
+    }
+    register_archive(ctx, name, Some(target), req).await
+}
+
+async fn register_archive(
+    ctx: Ctx,
+    name: String,
+    target: Option<String>,
+    req: Request,
+) -> ApiResult {
+    artifacts::validate_name(&name)?;
     let state = ctx.state.clone();
     let principal = if ctx
         .headers
@@ -136,6 +164,7 @@ async fn register_plugin(ctx: Ctx, Path(name): Path<String>, req: Request) -> Ap
             _ => Map::new(),
         },
     };
+    let _lock = artifacts::lock(&state.config.plugins_archives_path, &name, true).await?;
     let plugin_user_id = conn
         .get_plugin_user_id(&plugin)
         .await
@@ -152,6 +181,49 @@ async fn register_plugin(ctx: Ctx, Path(name): Path<String>, req: Request) -> Ap
             format!("User '{}' cannot edit plugin '{name}'.", user.username),
         ));
     }
+    let path = archive_path(&state, &name);
+    if let Some(target) = target {
+        let Some(owner) = plugin_user_id.as_ref() else {
+            return Err(ApiError::new(
+                409,
+                "Register the source release before publishing its target archives.",
+            ));
+        };
+        artifacts::register(&ctx, &plugin, owner, target, archive).await?;
+        return Ok(tuple(
+            true,
+            format!("Registered the target archive for plugin '{name}'."),
+        ));
+    }
+
+    let previous = if plugin_user_id.is_some() {
+        Some(PluginRecord {
+            name: name.clone(),
+            user_id: plugin_user_id,
+            version: conn
+                .get_plugin_version(&plugin)
+                .await
+                .map_err(|e| ApiError::exception("get_plugin_version", e))?,
+            attributes: conn
+                .get_plugin_attributes(&plugin)
+                .await
+                .map_err(|e| ApiError::exception("get_plugin_attributes", e))?,
+        })
+    } else {
+        None
+    };
+    let targets = artifacts::directory(&path);
+    let has_targets = tokio::fs::try_exists(&targets)
+        .await
+        .map_err(|e| ApiError::exception("Could not inspect published plugin targets", e))?;
+    let keep_targets = has_targets
+        && previous
+            .as_ref()
+            .is_some_and(|old| old.version == plugin.version)
+        && tokio::fs::read(&path)
+            .await
+            .is_ok_and(|old_bytes| old_bytes.as_slice() == archive.as_ref());
+    let staged = artifacts::stage(path.clone(), Vec::new(), archive).await?;
     plugin.user_id = curr_user_id;
     // The check above is not atomic with the write: `register_plugin_as_owner` refuses a row
     // another user registered after it (v4's `register_plugin` would move it to this user).
@@ -162,24 +234,29 @@ async fn register_plugin(ctx: Ctx, Path(name): Path<String>, req: Request) -> Ap
             format!("User '{}' cannot edit plugin '{name}'.", user.username),
         ));
     }
-    if res.success {
-        let path = archive_path(&state, &name);
-        let tmp = PathBuf::from(format!("{}.tmp", path.display()));
-        let write = async {
-            if let Some(parent) = path.parent() {
-                tokio::fs::create_dir_all(parent).await?;
-            }
-            tokio::fs::write(&tmp, &archive).await?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                tokio::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o775)).await?;
-            }
-            tokio::fs::rename(&tmp, &path).await
+    if res.success
+        && let Err(error) = artifacts::commit(staged, &path)
+    {
+        let restored = match previous {
+            Some(old) => conn.register_plugin_as_owner(&old, true).await,
+            None => conn.delete_plugin(&plugin).await,
         };
-        write
-            .await
-            .map_err(|e| ApiError::exception("Failed to save the plugin archive", e))?;
+        if !restored.success {
+            return Err(ApiError::exception(
+                "Could not restore previous plugin registration",
+                restored.message,
+            ));
+        }
+        return Err(error);
+    }
+    if res.success
+        && has_targets
+        && !keep_targets
+        && let Err(e) = tokio::fs::remove_dir_all(targets).await
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        // Old artifacts have different release keys, so they cannot be served.
+        tracing::warn!("Could not prune superseded plugin artifacts: {e}");
     }
     Ok(tuple_response(&res))
 }
@@ -189,11 +266,35 @@ async fn get_plugin(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
         return crate::executor::plugin_delivery::archive(&ctx.state, &ctx.headers, &name).await;
     }
     scoped_auth_if_private(&ctx.state, &ctx.headers, &["plugins:read"]).await?;
-    check_visible(&ctx, &name).await?;
+    artifacts::validate_name(&name)?;
+    let caller = hidden_from(&ctx).await?;
+    if let Some(caller) = &caller
+        && !meerschaum_core::access::can_use_plugin(&caller.principal, &name)
+    {
+        return Err(ApiError::not_found());
+    }
+    let target = ctx
+        .headers
+        .get(TARGET_HEADER)
+        .map(|v| {
+            v.to_str()
+                .ok()
+                .filter(|s| valid_target(s))
+                .ok_or_else(|| ApiError::new(422, "Invalid Rust target."))
+        })
+        .transpose()?;
+    let _lock = artifacts::lock(&ctx.state.config.plugins_archives_path, &name, false).await?;
     let path = archive_path(&ctx.state, &name);
     match tokio::fs::read(&path).await {
-        Ok(bytes) => {
+        Ok(mut bytes) => {
+            if let Some(target) = target.filter(|_| caller.is_none()) {
+                bytes = artifacts::select(&ctx.state, &name, target, bytes).await?;
+            }
             let mut resp = (StatusCode::OK, bytes).into_response();
+            resp.headers_mut().insert(
+                header::VARY,
+                HeaderValue::from_static("authorization, x-mrsm-plugin-target"),
+            );
             // `FileResponse(path, filename=f'{name}.tar.gz')`: the type guessed from the name.
             resp.headers_mut().insert(
                 header::CONTENT_TYPE,
@@ -278,6 +379,8 @@ async fn get_plugins(ctx: Ctx) -> ApiResult {
 
 async fn delete_plugin(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
     let principal = manager(&ctx.state, &ctx.headers).await?;
+    artifacts::validate_name(&name)?;
+    let _lock = artifacts::lock(&ctx.state.config.plugins_archives_path, &name, true).await?;
     let conn = ctx.state.instance();
     let plugin = record(&name);
     let plugin_user_id = conn
@@ -312,18 +415,20 @@ async fn delete_plugin(ctx: Ctx, Path(name): Path<String>) -> ApiResult {
         ));
     }
     let path = archive_path(&ctx.state, &name);
-    if path.exists()
-        && let Err(e) = tokio::fs::remove_file(&path).await
-    {
-        return Ok(tuple(
-            false,
-            format!("Failed to remove archive for plugin '{name}':\n{e}"),
-        ));
-    }
+    let staged = match artifacts::Removal::stage(&path) {
+        Ok(staged) => staged,
+        Err(e) => {
+            return Ok(tuple(
+                false,
+                format!("Failed to remove archive for plugin '{name}':\n{e}"),
+            ));
+        }
+    };
     let res = conn.delete_plugin(&plugin).await;
     if !res.success {
         return Ok(tuple_response(&res));
     }
+    staged.commit();
     Ok(tuple(
         true,
         format!("Successfully deleted plugin '{name}'."),

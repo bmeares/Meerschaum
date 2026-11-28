@@ -4,10 +4,25 @@
 > and stable independently of the Rust types; also re-exported by the [`meerschaum`](https://crates.io/crates/meerschaum)
 > crate behind the `plugin` feature.
 
-`meerschaum-plugin` implements the native plugin boundary from design §9. It depends on
-core, kernel and connector; it does not depend on the engine, CLI, worker or an instance
-backend. `examples/native_demo.rs` is a complete source connector and in-memory instance,
-with an action, arguments and sync hooks. No Python process is needed.
+## Build a standalone plugin
+
+A Cargo plugin can use the Arrow SDK without compiling Polars or the host loader.
+
+```toml
+[dependencies]
+meerschaum-plugin = { version = "5.1.7", default-features = false }
+```
+
+Both build profiles export the same v1 ABI and support host calls. The default `host`
+feature also provides the loader, connector adapters, kernel `Frame`, and full Meerschaum
+dtype conversions.
+
+Use `Frame::from_record_batch` and `frame.to_record_batch()` for typed Arrow data, including
+field metadata. For JSON objects, `Frame::from_rows(rows, dtypes)` accepts `bool`, signed and
+unsigned integers of 8 to 64 bits, `float32`, `float64`, `string`, `date`, and `datetime`
+(UTC microseconds). The aliases `int`, `float`, `boolean`, and `str` are supported. Arrow infers
+undeclared columns. Call `frame.try_to_rows()?` to read Arrow's JSON representation with
+explicit nulls.
 
 ## Authoring and installation
 
@@ -345,7 +360,7 @@ accepted by data handlers. The connector view exposes `label()`, `connector_type
 provides the same hook for `plugin:<filename>`. Multiple actions, connectors, and top-level
 data functions may share a file. Source connector sync overrides are honored by the engine.
 `#[make_connector(instance)]` (or `instance = true`) makes the module an instance connector
-(`is_instance`): its functions named after `host.rs`'s instance methods (`INSTANCE_METHODS` in
+(`is_instance`): its functions named after the native connector's instance methods (`INSTANCE_METHODS` in
 `single_file.rs`) answer them, with parameters bound by name (`pipe`, `connector`, `data:
 Option<Frame> | Vec<Value>`, `context`, and any field of the call's context, `query` or `options`,
 read through the runtime's `Request::field`), success methods returning a success tuple,
